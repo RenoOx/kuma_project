@@ -91,8 +91,9 @@ export async function handleIncomingMessage(
     return
   }
 
-  // Ask the LLM. If it fails, we still want to acknowledge the user with a
-  // canned message rather than going silent.
+  // Ask the LLM. generateReply now owns persistence of the assistant turn
+  // (and any intermediate tool messages) because the tool-call loop produces
+  // multiple rows that only the LLM service knows about.
   const llmResult = await llmService.generateReply({
     businessId,
     conversationId: conversation.id,
@@ -107,6 +108,9 @@ export async function handleIncomingMessage(
         conversationId: conversation.id,
         tokensInput: llmResult.data.tokensInput,
         tokensOutput: llmResult.data.tokensOutput,
+        toolsExecuted: llmResult.data.toolCallsExecuted.map((t) => t.name),
+        escalated: llmResult.data.escalated,
+        maxIterationsHit: llmResult.data.maxIterationsHit,
       },
       'llm reply generated',
     )
@@ -116,20 +120,20 @@ export async function handleIncomingMessage(
       { code: llmResult.error.code, context: llmResult.error.logContext },
       'llm generateReply failed, using fallback message',
     )
-  }
-
-  const assistantMsgResult = await messageService.append({
-    businessId,
-    conversationId: conversation.id,
-    role: 'assistant',
-    content: replyText,
-  })
-  if (!assistantMsgResult.ok) {
-    log.error(
-      { err: assistantMsgResult.error.logContext, code: assistantMsgResult.error.code },
-      'append assistant message failed',
-    )
-    return
+    // On llm error the assistant turn was NOT persisted by the service, so
+    // we persist the fallback ourselves to keep the chat history consistent.
+    const fallbackPersist = await messageService.append({
+      businessId,
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: replyText,
+    })
+    if (!fallbackPersist.ok) {
+      log.error(
+        { err: fallbackPersist.error.logContext, code: fallbackPersist.error.code },
+        'append fallback assistant message failed',
+      )
+    }
   }
 
   try {

@@ -102,6 +102,21 @@ Tablas core (cada una con `business_id` excepto `businesses`):
 
 Schema detallado: `docs/db-schema.md`.
 
+## Business settings
+
+Los horarios, servicios y configuración operativa viven en `businesses.settings` 
+(jsonb). Validación obligatoria con `BusinessSettingsSchema` 
+(`src/modules/business/business.settings.ts`). NO HAY DEFAULTS: si un business 
+no tiene settings, las tools que requieren config devuelven 
+`NotConfiguredError`, el LLM las recibe y maneja según el bloque "ATENCIÓN — 
+negocio sin configuración" del system prompt (responder con honestidad, NO 
+inventar, NO escalar por consultas informativas; escalar solo si el cliente 
+quiere agendar). Esto es feature, no bug — el bot no inventa información 
+operativa del negocio.
+
+Cada día puede tener un break opcional (`start`/`end`). Si el negocio necesita 
+múltiples breaks o descansos complejos, es feature de V1.1.
+
 ## Reglas de código no-negociables
 
 1. **TypeScript estricto.** Nada de `any`. Si necesitas escape, usa 

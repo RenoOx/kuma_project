@@ -77,6 +77,25 @@ export class ConflictError extends AppError {
   }
 }
 
+export interface NotConfiguredParams {
+  businessId: string
+  missing: string[]
+  userMessage?: string
+  cause?: unknown
+}
+
+export class NotConfiguredError extends AppError {
+  constructor(params: NotConfiguredParams) {
+    super({
+      code: 'not_configured',
+      message: `business ${params.businessId} missing settings: ${params.missing.join(', ')}`,
+      userMessage: params.userMessage ?? 'Este negocio aún no terminó su configuración.',
+      logContext: { businessId: params.businessId, missing: params.missing },
+      cause: params.cause,
+    })
+  }
+}
+
 export function toLogObject(error: AppError): Record<string, unknown> {
   return {
     name: error.name,

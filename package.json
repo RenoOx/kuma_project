@@ -23,6 +23,8 @@
     "smoke:conversation": "tsx scripts/smoke-conversation.ts",
     "smoke:modules": "tsx scripts/smoke-modules.ts",
     "smoke:llm": "tsx scripts/smoke-llm.ts",
+    "smoke:tools": "tsx scripts/smoke-tools.ts",
+    "smoke:settings": "tsx scripts/smoke-settings.ts",
     "create:business": "tsx scripts/create-test-business.ts"
   },
   "dependencies": {
