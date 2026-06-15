@@ -1,0 +1,103 @@
+import { logger as rootLogger } from '@/config/logger.js'
+import makeWASocket, {
+  Browsers,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  useMultiFileAuthState,
+  type WAMessage,
+  type WASocket,
+} from '@whiskeysockets/baileys'
+import type { Boom } from '@hapi/boom'
+import { mkdir } from 'node:fs/promises'
+import pino from 'pino'
+import qrcode from 'qrcode-terminal'
+
+export type MessageHandler = (raw: WAMessage) => Promise<void> | void
+export type DisconnectHandler = (reason: 'logout' | 'transient') => void
+
+export interface WhatsappClientOptions {
+  businessId: string
+  sessionDir: string
+}
+
+export interface WhatsappClient {
+  sock: WASocket
+  sendMessage(jid: string, text: string): Promise<void>
+  onMessage(handler: MessageHandler): void
+  onDisconnect(handler: DisconnectHandler): void
+}
+
+export async function makeWhatsappClient(
+  opts: WhatsappClientOptions,
+): Promise<WhatsappClient> {
+  const log = rootLogger.child({ component: 'baileys', businessId: opts.businessId })
+
+  await mkdir(opts.sessionDir, { recursive: true })
+  const { state, saveCreds } = await useMultiFileAuthState(opts.sessionDir)
+
+  // Baileys is chatty; keep its internal logs at warn so we still see issues
+  // without flooding ours.
+  const baileysLogger = pino({ level: 'warn' })
+
+  // WhatsApp's server rejects the handshake with a generic 500 if the client
+  // doesn't announce a WA-Web version it accepts and a recognizable browser
+  // identifier. fetchLatestBaileysVersion pulls the currently-supported one.
+  const { version } = await fetchLatestBaileysVersion()
+  log.debug({ version }, 'using whatsapp web version')
+
+  const sock = makeWASocket({
+    auth: state,
+    logger: baileysLogger,
+    version,
+    browser: Browsers.macOS('Desktop'),
+  })
+
+  const messageHandlers: MessageHandler[] = []
+  const disconnectHandlers: DisconnectHandler[] = []
+
+  sock.ev.on('creds.update', saveCreds)
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update
+    if (qr) {
+      log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
+      qrcode.generate(qr, { small: true })
+    }
+    if (connection === 'open') {
+      log.info('whatsapp connected')
+    }
+    if (connection === 'close') {
+      const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut
+      log.warn({ statusCode, isLoggedOut }, 'whatsapp connection closed')
+      const reason: 'logout' | 'transient' = isLoggedOut ? 'logout' : 'transient'
+      for (const handler of disconnectHandlers) handler(reason)
+    }
+  })
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return
+    for (const m of messages) {
+      for (const handler of messageHandlers) {
+        try {
+          await handler(m)
+        } catch (err) {
+          log.error({ err }, 'message handler threw')
+        }
+      }
+    }
+  })
+
+  return {
+    sock,
+    async sendMessage(jid, text) {
+      await sock.sendMessage(jid, { text })
+    },
+    onMessage(handler) {
+      messageHandlers.push(handler)
+    },
+    onDisconnect(handler) {
+      disconnectHandlers.push(handler)
+    },
+  }
+}

@@ -1,3 +1,7 @@
+export * from './appointments.js'
 export * from './businesses.js'
+export * from './conversations.js'
 export * from './customers.js'
+export * from './events.js'
 export * from './knowledgeBase.js'
+export * from './messages.js'

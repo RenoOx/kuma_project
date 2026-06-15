@@ -5,7 +5,9 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "outDir": "dist",
-    "rootDir": "src",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
@@ -27,6 +29,6 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*", "drizzle.config.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
 }

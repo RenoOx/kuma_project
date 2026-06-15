@@ -23,7 +23,7 @@ y citas. Un solo deploy atiende N negocios.
 - API: Hono
 - DB: PostgreSQL 16 + Drizzle ORM (no Prisma)
 - WhatsApp: Baileys (sesión persistida en DB)
-- LLM: `@anthropic-ai/sdk`, Claude Haiku 4.5 default
+- LLM: `openai`, OpenAI gpt-4o-mini default, gpt-4o solo para casos complejos
 - Jobs: BullMQ + Redis
 - Validación: Zod
 - Logs: Pino estructurado JSON
@@ -123,6 +123,10 @@ Schema detallado: `docs/db-schema.md`.
 9. **Secrets:** solo vía `env`. Nunca hardcoded. Nunca logueados.
 10. **Comentarios en código: inglés.** Commit messages: inglés, imperativo 
     presente (`add appointment slot validator`, no `added` ni `adding`).
+11. **Transacciones:** los services abren `db.transaction` y pasan `tx` al 
+    repo. Los repos reciben `(exec: Executor = db)` como último parámetro 
+    opcional. Los services nunca ejecutan queries directamente sobre `db` 
+    o `tx`.
 
 ## Autonomía esperada
 

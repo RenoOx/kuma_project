@@ -1,7 +1,11 @@
 import { serve } from '@hono/node-server'
+import { join } from 'node:path'
 import { app } from './app.js'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
+import * as businessService from './modules/business/business.service.js'
+import { makeWhatsappClient } from './modules/whatsapp/baileys.client.js'
+import { handleIncomingMessage } from './modules/whatsapp/handler.js'
 
 const server = serve(
   {
@@ -12,6 +16,57 @@ const server = serve(
     logger.info({ port: info.port, env: env.NODE_ENV }, 'kuma server listening')
   },
 )
+
+const RECONNECT_DELAY_MS = 5_000
+
+async function startWhatsappFor(businessId: string): Promise<void> {
+  const sessionDir = join('sessions', businessId)
+  const client = await makeWhatsappClient({ businessId, sessionDir })
+
+  client.onMessage((raw) => handleIncomingMessage(raw, businessId, client.sendMessage))
+
+  client.onDisconnect((reason) => {
+    if (reason === 'logout') {
+      logger.error(
+        { businessId },
+        'whatsapp logged out — delete the session folder and restart to reconnect',
+      )
+      return
+    }
+    logger.warn({ businessId, delayMs: RECONNECT_DELAY_MS }, 'whatsapp dropped, scheduling reconnect')
+    setTimeout(() => {
+      startWhatsappFor(businessId).catch((err) => {
+        logger.error({ err, businessId }, 'whatsapp reconnect failed')
+      })
+    }, RECONNECT_DELAY_MS).unref()
+  })
+}
+
+async function bootWhatsapp(): Promise<void> {
+  const businessId = env.BUSINESS_ID
+  if (!businessId) {
+    logger.info('BUSINESS_ID not set — skipping whatsapp boot (health endpoint only)')
+    return
+  }
+
+  const businessResult = await businessService.getById(businessId)
+  if (!businessResult.ok) {
+    logger.error(
+      { businessId, code: businessResult.error.code },
+      'BUSINESS_ID is set but the business does not exist; skipping whatsapp boot',
+    )
+    return
+  }
+  logger.info(
+    { businessId, name: businessResult.data.name, whatsappNumber: businessResult.data.whatsappNumber },
+    'booting whatsapp client for business',
+  )
+  await startWhatsappFor(businessId)
+}
+
+bootWhatsapp().catch((err) => {
+  logger.fatal({ err }, 'failed to bootstrap whatsapp')
+})
 
 const shutdown = (signal: string): void => {
   logger.info({ signal }, 'received shutdown signal')

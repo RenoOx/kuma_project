@@ -1,27 +1,37 @@
-import { config as loadDotenv } from 'dotenv'
-import { z } from 'zod'
+import { config as loadDotenv } from "dotenv";
+import { z } from "zod";
 
-loadDotenv()
+loadDotenv();
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
-  DATABASE_URL: z.string().url('DATABASE_URL must be a valid URL'),
-  REDIS_URL: z.string().url('REDIS_URL must be a valid URL'),
-  ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
-})
+  DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
+  TEST_DATABASE_URL: z.string().url("TEST_DATABASE_URL must be a valid URL"),
+  REDIS_URL: z.string().url("REDIS_URL must be a valid URL"),
+  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
+  // Optional: when set, the dev server boots a Baileys client for this business.
+  // Preprocess turns an empty .env value (`BUSINESS_ID=`) into undefined so
+  // `.optional()` actually treats "unset" the same as "absent".
+  BUSINESS_ID: z.preprocess(
+    (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
+});
 
-export type Env = z.infer<typeof envSchema>
+export type Env = z.infer<typeof envSchema>;
 
-const parsed = envSchema.safeParse(process.env)
+const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
   const issues = parsed.error.issues
-    .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
-    .join('\n')
+    .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
+    .join("\n");
   // biome-ignore lint/suspicious/noConsoleLog: bootstrap failure before logger is available
-  console.error(`Invalid environment configuration:\n${issues}`)
-  process.exit(1)
+  console.error(`Invalid environment configuration:\n${issues}`);
+  process.exit(1);
 }
 
-export const env: Env = parsed.data
+export const env: Env = parsed.data;
