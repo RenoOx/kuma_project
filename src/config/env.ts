@@ -10,7 +10,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
   TEST_DATABASE_URL: z.string().url("TEST_DATABASE_URL must be a valid URL"),
-  REDIS_URL: z.string().url("REDIS_URL must be a valid URL"),
+  REDIS_URL: z.string().url().optional(),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
   // Optional: when set, the dev server boots a Baileys client for this business.
   // Preprocess turns an empty .env value (`BUSINESS_ID=`) into undefined so
@@ -30,8 +30,10 @@ const envSchema = z.object({
     (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
     z.string().min(1).optional(),
   ),
-  GOOGLE_REDIRECT_URI: z.url().default("http://localhost:3000/auth/google/callback"),
-    SESSIONS_DIR: z.string().default('./sessions'),
+  GOOGLE_REDIRECT_URI: z
+    .url()
+    .default("http://localhost:3000/auth/google/callback"),
+  SESSIONS_DIR: z.string().default("./sessions"),
 });
 
 export type Env = z.infer<typeof envSchema>;
