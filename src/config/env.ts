@@ -31,6 +31,7 @@ const envSchema = z.object({
     z.string().min(1).optional(),
   ),
   GOOGLE_REDIRECT_URI: z.url().default("http://localhost:3000/auth/google/callback"),
+    SESSIONS_DIR: z.string().default('./sessions'),
 });
 
 export type Env = z.infer<typeof envSchema>;
