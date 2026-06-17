@@ -119,6 +119,22 @@ export async function executeTool(
             error: 'not_configured',
           }
         }
+        // Slot-too-soon is a ValidationError SUBcode; match by code BEFORE
+        // the generic ValidationError branch so the model gets the specific
+        // instruction (with the configured lead-time minutes inlined).
+        if (r.error instanceof ValidationError && r.error.code === 'slot_too_soon') {
+          const minNoticeMinutes =
+            (r.error.logContext as { minNoticeMinutes?: number }).minNoticeMinutes ?? 30
+          return {
+            result: JSON.stringify({
+              error: 'slot_too_soon',
+              instruction: `Ese horario ya pasó o está muy próximo. Decile al cliente que necesitamos al menos ${minNoticeMinutes} minutos de anticipación y ofrecele horarios futuros. Si necesita ver opciones, llamá check_availability.`,
+              userMessage: r.error.userMessage,
+              details: r.error.logContext,
+            }),
+            error: 'slot_too_soon',
+          }
+        }
         if (r.error instanceof ValidationError) {
           return {
             result: JSON.stringify({

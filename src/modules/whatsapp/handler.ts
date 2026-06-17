@@ -1,11 +1,20 @@
 import { logger } from '@/config/logger.js'
+import * as businessService from '@/modules/business/business.service.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
+import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import * as messageService from '@/modules/message/message.service.js'
+import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import type { WAMessage } from '@whiskeysockets/baileys'
 
-const LLM_FALLBACK_REPLY = 'Disculpa, estoy con un problema técnico. Intentá de nuevo en un ratito.'
+const LLM_FALLBACK_REPLY =
+  'Disculpa, estoy con un problema técnico. Intentá de nuevo en un ratito.'
+
+const PAUSED_REPLY =
+  'En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.'
+
+const OWNER_FALLBACK_REPLY = 'Algo se rompió de mi lado, probá de nuevo.'
 
 export type SendFn = (jid: string, text: string) => Promise<void>
 
@@ -19,16 +28,30 @@ function extractText(msg: WAMessage): string | null {
   return null
 }
 
-// Returns the peer's E.164 phone (without leading '+') from a Baileys JID
-// like '51999111222@s.whatsapp.net'. Null for unsupported JID shapes.
-function extractPhone(jid: string | null | undefined): string | null {
+// Returns the peer's E.164 phone (with leading '+') from a Baileys JID or null
+// for unsupported shapes. Handles both classic '@s.whatsapp.net' JIDs and
+// '@lid' (linked identifier) JIDs by reading senderPn when available.
+function extractPhone(msg: WAMessage): string | null {
+  const jid = msg.key.remoteJid
   if (!jid) return null
-  const at = jid.indexOf('@')
-  if (at < 0) return null
-  const left = jid.slice(0, at)
-  // Baileys phone JIDs are digits-only; group/status JIDs use other formats.
-  if (!/^\d+$/.test(left)) return null
-  return `+${left}`
+
+  if (jid.endsWith('@s.whatsapp.net')) {
+    const at = jid.indexOf('@')
+    const left = jid.slice(0, at)
+    if (!/^\d+$/.test(left)) return null
+    return `+${left}`
+  }
+
+  if (jid.endsWith('@lid')) {
+    const senderPn = (msg.key as { senderPn?: string }).senderPn
+    if (!senderPn || !senderPn.endsWith('@s.whatsapp.net')) return null
+    const at = senderPn.indexOf('@')
+    const left = senderPn.slice(0, at)
+    if (!/^\d+$/.test(left)) return null
+    return `+${left}`
+  }
+
+  return null
 }
 
 export async function handleIncomingMessage(
@@ -38,31 +61,98 @@ export async function handleIncomingMessage(
 ): Promise<void> {
   const log = logger.child({ component: 'whatsapp.handler', businessId })
 
-  // Skip our own echoes, group chats, status broadcasts, and empty payloads.
   if (raw.key.fromMe) return
   const jid = raw.key.remoteJid
   if (!jid) return
   if (jid.endsWith('@g.us') || jid === 'status@broadcast') return
 
-  const phone = extractPhone(jid)
+  const phone = extractPhone(raw)
   if (!phone) {
     log.debug({ jid }, 'skipping message with non-phone JID')
     return
   }
-
   const text = extractText(raw)
   if (!text) {
     log.debug({ jid }, 'skipping message with no text payload')
     return
   }
 
+  // Load business once to figure out who is talking to us (owner or customer)
+  // and to feed downstream services without re-fetching.
+  const businessResult = await businessService.getById(businessId)
+  if (!businessResult.ok) {
+    log.error(
+      { code: businessResult.error.code },
+      'business not found for incoming message',
+    )
+    return
+  }
+  const business = businessResult.data
+
+  // OWNER FLOW — bypass customer lookup, talk to the personal assistant.
+  if (business.ownerWhatsappNumber && business.ownerWhatsappNumber === phone) {
+    const ownerThread = await conversationService.findOrCreateOwnerThread(businessId)
+    if (!ownerThread.ok) {
+      log.error({ code: ownerThread.error.code }, 'findOrCreateOwnerThread failed')
+      return
+    }
+
+    const result = await ownerAssistantService.handle(businessId, ownerThread.data.id, text)
+    let replyText: string
+    if (result.ok) {
+      replyText = result.data.content
+      log.info(
+        {
+          conversationId: ownerThread.data.id,
+          tokensInput: result.data.tokensInput,
+          tokensOutput: result.data.tokensOutput,
+          toolsExecuted: result.data.toolsExecuted,
+          maxIterationsHit: result.data.maxIterationsHit,
+        },
+        'owner reply generated',
+      )
+    } else {
+      replyText = OWNER_FALLBACK_REPLY
+      log.error(
+        { code: result.error.code, context: result.error.logContext },
+        'owner assistant failed, using fallback',
+      )
+      // The owner service persists its own assistant turn on success; on
+      // failure it doesn't, so we persist the fallback so the rolling memory
+      // stays consistent.
+      const fallbackPersist = await messageService.append({
+        businessId,
+        conversationId: ownerThread.data.id,
+        role: 'assistant',
+        content: replyText,
+      })
+      if (!fallbackPersist.ok) {
+        log.error(
+          { code: fallbackPersist.error.code },
+          'append owner fallback message failed',
+        )
+      }
+    }
+
+    try {
+      await send(jid, replyText)
+    } catch (err) {
+      log.error({ err, jid }, 'failed to send owner reply over whatsapp')
+    }
+    return
+  }
+
+  // CUSTOMER FLOW — the historical path.
   const customerResult = await customerService.getOrCreate(
     businessId,
     phone,
     raw.pushName ?? undefined,
   )
   if (!customerResult.ok) {
-    log.error({ err: customerResult.error.logContext, code: customerResult.error.code }, 'getOrCreate customer failed')
+    log.error(
+      { err: customerResult.error.logContext, code: customerResult.error.code },
+      'getOrCreate customer failed',
+    )
     return
   }
   const customer = customerResult.data
@@ -70,7 +160,10 @@ export async function handleIncomingMessage(
   const conversationResult = await conversationService.getOrCreateOpen(businessId, customer.id)
   if (!conversationResult.ok) {
     log.error(
-      { err: conversationResult.error.logContext, code: conversationResult.error.code },
+      {
+        err: conversationResult.error.logContext,
+        code: conversationResult.error.code,
+      },
       'getOrCreateOpen conversation failed',
     )
     return
@@ -91,9 +184,56 @@ export async function handleIncomingMessage(
     return
   }
 
-  // Ask the LLM. generateReply now owns persistence of the assistant turn
-  // (and any intermediate tool messages) because the tool-call loop produces
-  // multiple rows that only the LLM service knows about.
+  // BOT PAUSED — keep the customer record + the message, but skip LLM and
+  // escalate so a human notices.
+  const paused = await businessService.isBotPaused(businessId)
+  if (paused) {
+    const cannedPersist = await messageService.append({
+      businessId,
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: PAUSED_REPLY,
+    })
+    if (!cannedPersist.ok) {
+      log.error(
+        { code: cannedPersist.error.code },
+        'append paused canned reply failed',
+      )
+    }
+
+    const escalateResult = await conversationService.escalate(businessId, conversation.id)
+    if (!escalateResult.ok) {
+      log.error(
+        { code: escalateResult.error.code },
+        'escalating paused conversation failed',
+      )
+    }
+
+    try {
+      await eventsRepo.create({
+        businessId,
+        conversationId: conversation.id,
+        type: 'paused_blocked_message',
+        payload: { phone, text_preview: text.slice(0, 50) },
+      })
+    } catch (err) {
+      log.error({ err }, 'failed to record paused_blocked_message event')
+    }
+
+    log.warn(
+      { conversationId: conversation.id, phone },
+      'bot is paused; customer message escalated, canned reply sent',
+    )
+
+    try {
+      await send(jid, PAUSED_REPLY)
+    } catch (err) {
+      log.error({ err, jid }, 'failed to send paused canned reply')
+    }
+    return
+  }
+
+  // Normal LLM flow.
   const llmResult = await llmService.generateReply({
     businessId,
     conversationId: conversation.id,
@@ -120,8 +260,6 @@ export async function handleIncomingMessage(
       { code: llmResult.error.code, context: llmResult.error.logContext },
       'llm generateReply failed, using fallback message',
     )
-    // On llm error the assistant turn was NOT persisted by the service, so
-    // we persist the fallback ourselves to keep the chat history consistent.
     const fallbackPersist = await messageService.append({
       businessId,
       conversationId: conversation.id,
@@ -130,7 +268,10 @@ export async function handleIncomingMessage(
     })
     if (!fallbackPersist.ok) {
       log.error(
-        { err: fallbackPersist.error.logContext, code: fallbackPersist.error.code },
+        {
+          err: fallbackPersist.error.logContext,
+          code: fallbackPersist.error.code,
+        },
         'append fallback assistant message failed',
       )
     }

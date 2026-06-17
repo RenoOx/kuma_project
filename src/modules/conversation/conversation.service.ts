@@ -25,6 +25,33 @@ export async function getOrCreateOpen(
   }
 }
 
+// One owner_thread per business. customerId stays null because the owner
+// isn't a customer record; the rolling 48h memory lives in this conversation.
+export async function findOrCreateOwnerThread(
+  businessId: string,
+): Promise<Result<Conversation>> {
+  try {
+    const existing = await conversationRepo.findOwnerThread(businessId)
+    if (existing) return ok(existing)
+    const created = await conversationRepo.create({
+      businessId,
+      customerId: null,
+      type: 'owner_thread',
+    })
+    return ok(created)
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'owner_thread_get_or_create_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos abrir tu hilo de asistente.',
+        logContext: { businessId },
+        cause,
+      }),
+    )
+  }
+}
+
 export async function close(
   businessId: string,
   conversationId: string,

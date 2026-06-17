@@ -44,12 +44,15 @@ export interface ValidationParams {
   userMessage?: string
   logContext?: Record<string, unknown>
   cause?: unknown
+  // Optional override so domain-specific validations (eg. `slot_too_soon`)
+  // can surface a distinct code while still being a ValidationError.
+  code?: string
 }
 
 export class ValidationError extends AppError {
   constructor(params: ValidationParams) {
     super({
-      code: 'validation_error',
+      code: params.code ?? 'validation_error',
       message: params.message,
       userMessage: params.userMessage ?? 'Los datos enviados no son válidos.',
       logContext: params.logContext,
@@ -91,6 +94,25 @@ export class NotConfiguredError extends AppError {
       message: `business ${params.businessId} missing settings: ${params.missing.join(', ')}`,
       userMessage: params.userMessage ?? 'Este negocio aún no terminó su configuración.',
       logContext: { businessId: params.businessId, missing: params.missing },
+      cause: params.cause,
+    })
+  }
+}
+
+export interface NotConnectedParams {
+  businessId: string
+  service: string
+  userMessage?: string
+  cause?: unknown
+}
+
+export class NotConnectedError extends AppError {
+  constructor(params: NotConnectedParams) {
+    super({
+      code: 'not_connected',
+      message: `business ${params.businessId} not connected to ${params.service}`,
+      userMessage: params.userMessage ?? 'Este negocio aún no vinculó su cuenta externa.',
+      logContext: { businessId: params.businessId, service: params.service },
       cause: params.cause,
     })
   }

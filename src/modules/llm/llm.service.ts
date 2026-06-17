@@ -6,7 +6,7 @@ import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { AppError, NotConfiguredError, NotFoundError } from '@/shared/errors.js'
+import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type {
   ChatCompletionMessageParam,
@@ -96,6 +96,21 @@ export async function generateReply(
         logContext: {
           businessId: params.businessId,
           conversationId: params.conversationId,
+        },
+      }),
+    )
+  }
+  // Defensive: this service is only meant for customer conversations. An
+  // owner_thread reaching here is a wiring bug in the handler.
+  if (conversation.type !== 'customer' || !conversation.customerId) {
+    return err(
+      new ValidationError({
+        message: `llm.generateReply called on a non-customer conversation (type=${conversation.type})`,
+        userMessage: 'Esta conversación no admite respuesta automática del bot.',
+        logContext: {
+          businessId: params.businessId,
+          conversationId: params.conversationId,
+          conversationType: conversation.type,
         },
       }),
     )

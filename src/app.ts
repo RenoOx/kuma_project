@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { logger } from './config/logger.js'
+import { googleAuthRoutes } from './modules/google/auth.routes.js'
 
 const VERSION = '0.1.0'
 
@@ -12,6 +13,8 @@ app.get('/health', (c) => {
     version: VERSION,
   })
 })
+
+app.route('/', googleAuthRoutes)
 
 app.onError((err, c) => {
   logger.error({ err, path: c.req.path }, 'unhandled error')

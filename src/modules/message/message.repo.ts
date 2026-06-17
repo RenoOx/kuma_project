@@ -1,6 +1,6 @@
 import { db, type Executor } from '@/db/client.js'
 import { messages, type Message, type NewMessage } from '@/db/schema/index.js'
-import { and, asc, count, desc, eq } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, lt } from 'drizzle-orm'
 
 const DEFAULT_LIMIT = 50
 
@@ -57,6 +57,28 @@ export async function countByConversation(
     .from(messages)
     .where(
       and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)),
+    )
+  return row?.value ?? 0
+}
+
+// Counts user-role messages in [since, until) for a business. Used by the
+// owner's daily-summary tool.
+export async function countUserMessagesInRange(
+  businessId: string,
+  since: Date,
+  until: Date,
+  exec: Executor = db,
+): Promise<number> {
+  const [row] = await exec
+    .select({ value: count() })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.businessId, businessId),
+        eq(messages.role, 'user'),
+        gte(messages.createdAt, since),
+        lt(messages.createdAt, until),
+      ),
     )
   return row?.value ?? 0
 }

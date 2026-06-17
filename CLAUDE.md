@@ -117,6 +117,59 @@ operativa del negocio.
 Cada día puede tener un break opcional (`start`/`end`). Si el negocio necesita 
 múltiples breaks o descansos complejos, es feature de V1.1.
 
+`minBookingNoticeMinutes` (entero 0-1440, opcional, default 30) es el tiempo 
+mínimo entre "ahora" y un slot agendable. `checkAvailability` excluye los 
+slots que caen antes de ese umbral; `bookAppointment` los rechaza con 
+`ValidationError.code='slot_too_soon'`. Se configura por business editando 
+`business.settings` en Drizzle Studio.
+
+## Google Calendar
+
+Cada business puede conectar SU cuenta de Google Calendar vía 
+`GET /auth/google/connect?businessId=X` (redirige al consent de Google, 
+vuelve al callback, guarda tokens). Las credenciales (access_token + 
+refresh_token + expiry) viven en tabla `google_credentials`, una por business 
+(UNIQUE constraint en `business_id`).
+
+`bookAppointment` es **best-effort con Google**: si falla la creación del 
+evento, el appointment local SÍ se persiste (`google_event_id` queda null). 
+Esto permite que el bot siga funcionando incluso si el dueño no conectó 
+Google o si Google está caído. Tres branches:
+- `createEvent` ok → patch del appointment con `googleEventId`
+- `NotConnectedError` → warn log, business sin Google conectado todavía
+- Cualquier otro error → error log con contexto, sigue adelante
+
+Refresh de tokens: `googleCredentialsService.getValidAccessToken` checa si 
+expira en menos de 2 minutos y usa el `refresh_token` para renovar. Si Google 
+revocó el `refresh_token` (cambio de password, etc), el siguiente intento 
+falla y queda como error normal.
+
+## Roles y routing
+
+Kuma tiene dos roles según el remitente del mensaje:
+
+- Si `phone === business.ownerWhatsappNumber` → flujo `owner_assistant`
+  * System prompt casual, tutea, telegráfico
+  * Tools: `get_daily_summary`, `get_appointments`, `pause_bot`, `resume_bot`
+  * Memoria corto plazo: 48h, cleanup cada hora (`setInterval` en server.ts, 
+    migrará a BullMQ en Día 11)
+  * `conversation.type='owner_thread'`, una por business, `customerId=null`
+
+- Si `phone !== ownerWhatsappNumber` → flujo `customer` (vendedor)
+  * System prompt vendedor cálido
+  * Tools: `check_availability`, `book_appointment`, `escalate_to_human`
+  * `conversation.type='customer'`
+
+Cuando `business.settings.botPaused.paused === true`:
+- Clientes reciben mensaje canned + conversation escalada + evento 
+  `paused_blocked_message` en `events`
+- El dueño NUNCA se ve afectado por la pausa
+- Si `until_iso` ya pasó, auto-resume (helper `isBotPausedNow` lo maneja)
+
+Para expandir el asistente del dueño en V1.5: agregar tools al array 
+`ownerTools` y al toolExecutor del owner. Ver placeholders comentados 
+en `ownerAssistant.tools.ts`.
+
 ## Reglas de código no-negociables
 
 1. **TypeScript estricto.** Nada de `any`. Si necesitas escape, usa 

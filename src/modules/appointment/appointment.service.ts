@@ -3,14 +3,17 @@ import type { Appointment } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
 import {
   dayKeyForJsDow,
+  getMinBookingNoticeMinutes,
   type BusinessSettings,
   type DayBreak,
   type DayHours,
   type Service,
 } from '@/modules/business/business.settings.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
+import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
-import { AppError, ConflictError, ValidationError } from '@/shared/errors.js'
+import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
+import { AppError, ConflictError, NotConnectedError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as appointmentRepo from './appointment.repo.js'
 
@@ -198,7 +201,15 @@ export async function checkAvailability(
     // actually occupied. See "deuda técnica" notes in the Día 7 report.
     const takenInstants = new Set(taken.map((a) => a.scheduledAt.getTime()))
 
-    const availableSlots = candidates.filter((iso) => !takenInstants.has(new Date(iso).getTime()))
+    // Drop slots whose start is in the past OR closer to now than the
+    // business's required lead time. Reads `Date.now()` so vitest's fake
+    // timer can override it deterministically in tests.
+    const minNoticeMinutes = getMinBookingNoticeMinutes(settings)
+    const earliestAcceptable = Date.now() + minNoticeMinutes * 60_000
+
+    const availableSlots = candidates
+      .filter((iso) => !takenInstants.has(new Date(iso).getTime()))
+      .filter((iso) => new Date(iso).getTime() >= earliestAcceptable)
     return ok({ availableSlots })
   } catch (cause) {
     return err(
@@ -301,6 +312,28 @@ export async function bookAppointment(
       )
     }
 
+    // Lead-time check: refuse slots in the past or under the required notice.
+    // Comes after structural validations (day open + break) so the model gets
+    // the most informative error in each case, but before idempotency so we
+    // never persist a too-soon booking.
+    const minNoticeMinutes = getMinBookingNoticeMinutes(settings)
+    const earliestAcceptable = Date.now() + minNoticeMinutes * 60_000
+    if (datetime.getTime() < earliestAcceptable) {
+      return err(
+        new ValidationError({
+          code: 'slot_too_soon',
+          message: 'requested slot is in the past or under the minimum lead time',
+          userMessage: `Ese horario ya pasó o está muy próximo. Necesito al menos ${minNoticeMinutes} minutos de anticipación.`,
+          logContext: {
+            businessId: params.businessId,
+            datetimeISO: params.datetimeISO,
+            minNoticeMinutes,
+            nowISO: new Date().toISOString(),
+          },
+        }),
+      )
+    }
+
     // Idempotency: same (customer, slot, service) booked in last 30s wins.
     const recent = await appointmentRepo.findRecentByCustomerSlot(
       params.businessId,
@@ -340,6 +373,59 @@ export async function bookAppointment(
       durationMinutes: knownService.durationMinutes,
       status: 'scheduled',
     })
+
+    // Best-effort Google Calendar sync. By contract this NEVER fails the book:
+    // the local appointment is authoritative; the calendar event is a nice-to-have
+    // mirror. Three branches:
+    //   - createEvent ok → patch appointment with googleEventId
+    //   - NotConnectedError → expected when the business hasn't linked Google yet
+    //   - any other failure → log error, keep googleEventId null
+    const customer = await customerRepo.findById(params.businessId, params.customerId)
+    const customerLabel = customer?.name?.trim() || customer?.phone || params.customerId
+    const summary = `Cita: ${params.service} - ${customerLabel}`
+    const description = `Cliente: ${customer?.phone ?? '(sin teléfono)'}\nAgendado vía Kuma (WhatsApp)`
+
+    const googleResult = await googleCalendarService.createEvent({
+      businessId: params.businessId,
+      summary,
+      description,
+      startDateTime: datetime,
+      durationMinutes: knownService.durationMinutes,
+      timezone: business.timezone,
+    })
+
+    if (googleResult.ok) {
+      const updated = await appointmentRepo.update(params.businessId, created.id, {
+        googleEventId: googleResult.data.googleEventId,
+      })
+      logger.info(
+        {
+          businessId: params.businessId,
+          appointmentId: updated.id,
+          googleEventId: googleResult.data.googleEventId,
+          htmlLink: googleResult.data.htmlLink,
+        },
+        'appointment mirrored to google calendar',
+      )
+      return ok(updated)
+    }
+
+    if (googleResult.error instanceof NotConnectedError) {
+      logger.warn(
+        { businessId: params.businessId, appointmentId: created.id },
+        'business has no google calendar connected, appointment saved locally only',
+      )
+    } else {
+      logger.error(
+        {
+          businessId: params.businessId,
+          appointmentId: created.id,
+          code: googleResult.error.code,
+          context: googleResult.error.logContext,
+        },
+        'google calendar sync failed, appointment saved locally only',
+      )
+    }
     return ok(created)
   } catch (cause) {
     return err(

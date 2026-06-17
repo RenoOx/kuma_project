@@ -46,17 +46,59 @@ const serviceSchema = z.object({
   durationMinutes: z.number().int().positive(),
 })
 
+// Pause state for the customer-facing bot. The owner toggles this via the
+// ownerAssistant `pause_bot` / `resume_bot` tools.
+//   - paused=true + no until    → indefinite pause
+//   - paused=true + until set   → auto-resume once `until` is in the past
+//   - paused=false / null / absent → bot is live
+const botPausedSchema = z.object({
+  paused: z.boolean(),
+  pausedAt: z.string().datetime(),
+  until: z.string().datetime().optional(),
+  reason: z.string().optional(),
+})
+
 export const businessSettingsSchema = z.object({
   operatingHours: operatingHoursSchema,
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
+  // Optional + nullable so the owner can both leave it unset and explicitly
+  // clear it back to null via `resume_bot`.
+  botPaused: botPausedSchema.nullable().optional(),
+  // Minimum lead time (in minutes) between "now" and a bookable slot.
+  // Excludes past slots and slots too close in the immediate future.
+  // Optional — falls back to DEFAULT_MIN_BOOKING_NOTICE_MINUTES (30) when unset.
+  minBookingNoticeMinutes: z.number().int().min(0).max(1440).optional(),
 })
 
 export type BusinessSettings = z.infer<typeof businessSettingsSchema>
 export type DayHours = z.infer<typeof dayHoursSchema>
 export type DayBreak = z.infer<typeof breakSchema>
 export type Service = z.infer<typeof serviceSchema>
+export type BotPausedState = z.infer<typeof botPausedSchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
+
+// Default lead time when the business hasn't set its own value.
+export const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 30
+
+// Pure read: minutes of lead time required by the business for a booking
+// to be acceptable. Used by checkAvailability and bookAppointment.
+export function getMinBookingNoticeMinutes(settings: BusinessSettings): number {
+  return settings.minBookingNoticeMinutes ?? DEFAULT_MIN_BOOKING_NOTICE_MINUTES
+}
+
+// Pure check: given a settings object (or null when business is unconfigured),
+// is the customer-facing bot currently paused? Used by handler.ts and the
+// owner tool executor.
+export function isBotPausedNow(
+  settings: BusinessSettings | null,
+  now: Date = new Date(),
+): boolean {
+  const state = settings?.botPaused
+  if (!state || !state.paused) return false
+  if (state.until && Date.parse(state.until) <= now.getTime()) return false
+  return true
+}
 
 // JS Date.getDay() index → day key. Keep in sync with operatingHoursSchema.
 const dayKeysByJsDow: readonly DayKey[] = [

@@ -6,6 +6,7 @@ import { logger } from './config/logger.js'
 import * as businessService from './modules/business/business.service.js'
 import { makeWhatsappClient } from './modules/whatsapp/baileys.client.js'
 import { handleIncomingMessage } from './modules/whatsapp/handler.js'
+import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
 
 const server = serve(
   {
@@ -67,6 +68,21 @@ async function bootWhatsapp(): Promise<void> {
 bootWhatsapp().catch((err) => {
   logger.fatal({ err }, 'failed to bootstrap whatsapp')
 })
+
+// Owner-thread message cleanup. Runs every hour, deleting messages older
+// than 48h in any owner_thread conversation. .unref() so the timer doesn't
+// keep the process alive on its own during shutdown.
+// TODO Día 11: migrar a BullMQ scheduled job cuando deployemos a Railway.
+const OWNER_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
+setInterval(() => {
+  cleanupOwnerThreadMessages().catch((err) => {
+    logger.error({ err }, 'owner_thread cleanup failed')
+  })
+}, OWNER_CLEANUP_INTERVAL_MS).unref()
+logger.info(
+  { intervalMs: OWNER_CLEANUP_INTERVAL_MS },
+  'owner_thread cleanup scheduled (setInterval)',
+)
 
 const shutdown = (signal: string): void => {
   logger.info({ signal }, 'received shutdown signal')

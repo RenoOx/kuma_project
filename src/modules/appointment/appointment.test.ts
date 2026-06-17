@@ -11,9 +11,10 @@ import * as appointmentService from '@/modules/appointment/appointment.service.j
 import * as businessService from '@/modules/business/business.service.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
-import { ConflictError, NotConfiguredError, ValidationError } from '@/shared/errors.js'
+import { AppError, ConflictError, NotConfiguredError, NotConnectedError, ValidationError } from '@/shared/errors.js'
+import { err, ok } from '@/shared/result.js'
 import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   DEFAULT_TEST_SETTINGS,
@@ -22,11 +23,24 @@ import {
   type TwoBusinessesSeed,
 } from '../../../tests/helpers/db.js'
 
-// Calendar references for the fixtures below:
-//   2026-06-15 Monday  → open per DEFAULT_TEST_SETTINGS
-//   2026-06-21 Sunday  → null per DEFAULT_TEST_SETTINGS (closed)
-const MONDAY_ISO = '2026-06-15'
-const SUNDAY_ISO = '2026-06-21'
+// We mock the calendar service rather than the underlying googleapis client.
+// That lets us cover the three integration branches without touching network
+// or stubbing the SDK's tree.
+const { mockCreateEvent } = vi.hoisted(() => ({ mockCreateEvent: vi.fn() }))
+
+vi.mock('@/modules/google/googleCalendar.service.js', () => ({
+  createEvent: mockCreateEvent,
+  // Keep cancelEvent stubbed — appointment.service doesn't use it today.
+  cancelEvent: vi.fn(),
+}))
+
+// Calendar references for the fixtures below. Picked in the future relative
+// to the current date so the lead-time filter (Día 9.5) doesn't drop slots
+// just for being on a past Monday during development.
+//   2026-07-06 Monday  → open per DEFAULT_TEST_SETTINGS
+//   2026-07-05 Sunday  → null per DEFAULT_TEST_SETTINGS (closed)
+const MONDAY_ISO = '2026-07-06'
+const SUNDAY_ISO = '2026-07-05'
 
 describe('appointment module', () => {
   let seed: TwoBusinessesSeed
@@ -45,6 +59,13 @@ describe('appointment module', () => {
       businessId: seed.businessA.id,
       customerId: customerA.id,
     })
+    // Default: every test starts with a business that hasn't connected Google.
+    // That matches the pre-Day 8 behavior, so existing tests pass unchanged.
+    // Tests that exercise the Google-connected branches override this.
+    mockCreateEvent.mockReset()
+    mockCreateEvent.mockResolvedValue(
+      err(new NotConnectedError({ businessId: seed.businessA.id, service: 'google_calendar' })),
+    )
   })
 
   afterAll(async () => {
@@ -326,6 +347,135 @@ describe('appointment module', () => {
     expect(eventRows).toHaveLength(1)
     expect(eventRows[0]?.type).toBe('escalation')
     expect(eventRows[0]?.payload).toEqual({ reason: 'cliente molesto' })
+  })
+
+  it('bookAppointment patches the appointment with googleEventId when Google sync succeeds', async () => {
+    mockCreateEvent.mockReset()
+    mockCreateEvent.mockResolvedValueOnce(
+      ok({ googleEventId: 'evt-google-123', htmlLink: 'https://calendar.google.com/event?eid=evt-google-123' }),
+    )
+
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T15:00:00-05:00`,
+    })
+    assert(result.ok)
+    expect(result.data.googleEventId).toBe('evt-google-123')
+
+    expect(mockCreateEvent).toHaveBeenCalledTimes(1)
+    const createArgs = mockCreateEvent.mock.calls[0]?.[0]
+    expect(createArgs).toMatchObject({
+      businessId: seed.businessA.id,
+      durationMinutes: 30,
+      timezone: 'America/Lima',
+    })
+    // Summary should include the customer's name; description should include phone.
+    expect(createArgs.summary).toContain('Cliente Test')
+    expect(createArgs.description).toContain('+51900007000')
+
+    const [row] = await db
+      .select()
+      .from(appointments)
+      .where(eq(appointments.id, result.data.id))
+    expect(row?.googleEventId).toBe('evt-google-123')
+  })
+
+  it('bookAppointment keeps googleEventId null when the business has no Google connected', async () => {
+    // Default mock (set in beforeEach) returns NotConnectedError.
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T16:00:00-05:00`,
+    })
+    assert(result.ok)
+    expect(result.data.googleEventId).toBeNull()
+
+    const [row] = await db
+      .select()
+      .from(appointments)
+      .where(eq(appointments.id, result.data.id))
+    expect(row?.googleEventId).toBeNull()
+  })
+
+  it('bookAppointment still persists the local appointment when Google returns a random error', async () => {
+    mockCreateEvent.mockReset()
+    mockCreateEvent.mockResolvedValueOnce(
+      err(
+        new AppError({
+          code: 'google_create_event_failed',
+          message: 'simulated google 500',
+          userMessage: 'No pude crear el evento en Google Calendar.',
+          logContext: { businessId: seed.businessA.id },
+        }),
+      ),
+    )
+
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T17:00:00-05:00`,
+    })
+    assert(result.ok)
+    expect(result.data.googleEventId).toBeNull()
+
+    const rows = await db.select().from(appointments)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe(result.data.id)
+  })
+
+  it('checkAvailability excludes slots whose start time already passed or are under the lead-time threshold', async () => {
+    // Spy on Date.now() instead of vi.useFakeTimers — the latter freezes
+    // setTimeout/setInterval, which postgres-js needs for its internal
+    // bookkeeping and would hang every DB query in this test.
+    const fakeNow = new Date(`${MONDAY_ISO}T13:30:00-05:00`).getTime()
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(fakeNow)
+    try {
+      const result = await appointmentService.checkAvailability(
+        seed.businessA.id,
+        MONDAY_ISO,
+        'corte',
+      )
+      assert(result.ok)
+      // Default lead time 30 min → earliest acceptable 14:00. With the
+      // configured break 13:00–14:00, slots 14:00–18:00 remain (five).
+      expect(result.data.availableSlots).toEqual([
+        `${MONDAY_ISO}T14:00:00-05:00`,
+        `${MONDAY_ISO}T15:00:00-05:00`,
+        `${MONDAY_ISO}T16:00:00-05:00`,
+        `${MONDAY_ISO}T17:00:00-05:00`,
+        `${MONDAY_ISO}T18:00:00-05:00`,
+      ])
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('bookAppointment returns ValidationError slot_too_soon when the slot is under minBookingNoticeMinutes', async () => {
+    // Now = 11:00 Lima. Requested slot is 11:15 — 15 min away, under the
+    // 30-min default lead time. Day is open and slot is not in the break.
+    const fakeNow = new Date(`${MONDAY_ISO}T11:00:00-05:00`).getTime()
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(fakeNow)
+    try {
+      const result = await appointmentService.bookAppointment({
+        businessId: seed.businessA.id,
+        customerId: customerA.id,
+        service: 'corte',
+        datetimeISO: `${MONDAY_ISO}T11:15:00-05:00`,
+      })
+      assert(!result.ok)
+      expect(result.error).toBeInstanceOf(ValidationError)
+      expect(result.error.code).toBe('slot_too_soon')
+      expect(result.error.logContext).toMatchObject({ minNoticeMinutes: 30 })
+
+      const rows = await db.select().from(appointments)
+      expect(rows).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('isolation: appointments of businessA are not seen from businessB', async () => {

@@ -41,6 +41,17 @@ function todayInTimezone(timezone: string): string {
   }
 }
 
+function dayOfWeekInTimezone(timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: timezone,
+      weekday: 'long',
+    }).format(new Date())
+  } catch {
+    return ''
+  }
+}
+
 const DAY_LABELS: ReadonlyArray<readonly [DayKey, string]> = [
   ['monday', 'Lunes'],
   ['tuesday', 'Martes'],
@@ -100,13 +111,21 @@ export function buildSystemPrompt(
   settings: BusinessSettings | null,
 ): string {
   const today = todayInTimezone(business.timezone)
+  const dayOfWeek = dayOfWeekInTimezone(business.timezone)
   const sections: string[] = [
     '# Identidad',
     `Eres el asistente virtual de ${business.name}, un negocio de servicios. Respondes por WhatsApp.`,
     '',
     '# Contexto actual',
-    `Fecha de hoy: ${today}`,
-    `Zona horaria del negocio: ${business.timezone}`,
+    `Fecha de hoy: ${dayOfWeek} ${today} (${business.timezone}).`,
+    '',
+    '# Razonamiento de fechas',
+    `- Hoy es ${dayOfWeek} ${today} (${business.timezone}).`,
+    '- Antes de llamar check_availability o book_appointment, declará internamente qué fecha exacta estás calculando.',
+    '  Ejemplo de razonamiento: "Hoy es martes 16 de junio. El cliente pidió sábado. El próximo sábado es el 20 de junio."',
+    '- SIEMPRE confirmá fecha + hora + servicio al cliente ANTES de llamar book_appointment. Ejemplo de respuesta esperada:',
+    '  "Confirmo: combo el sábado 20 de junio a las 4:00pm, ¿está bien?"',
+    "- Solo después de que el cliente confirme (escribe 'sí', 'dale', 'correcto', etc.), llamá book_appointment.",
     '',
     '# Tono',
     'Habla en español peruano neutro, tutea, sé breve (1-3 frases por respuesta), cálido pero profesional, sin emojis excesivos.',

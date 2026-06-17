@@ -4,6 +4,7 @@ import { err, ok, type Result } from '@/shared/result.js'
 import * as businessRepo from './business.repo.js'
 import {
   businessSettingsSchema,
+  isBotPausedNow,
   parseBusinessSettings,
   type BusinessSettings,
 } from './business.settings.js'
@@ -120,6 +121,17 @@ export async function getSettings(businessId: string): Promise<Result<BusinessSe
       }),
     )
   }
+}
+
+// Cheap read: true when the customer-facing bot is paused. Unconfigured
+// businesses are treated as "not paused" (the bot can still answer with the
+// honest fallback prompt). Any DB error is logged via the underlying service
+// and returns false to fail open — we prefer occasional duplicate replies
+// over locking the bot out on a transient failure.
+export async function isBotPaused(businessId: string): Promise<boolean> {
+  const settingsResult = await getSettings(businessId)
+  if (!settingsResult.ok) return false
+  return isBotPausedNow(settingsResult.data)
 }
 
 export async function updateSettings(

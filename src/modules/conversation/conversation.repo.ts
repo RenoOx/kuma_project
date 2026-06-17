@@ -5,7 +5,7 @@ import {
   type ConversationStatus,
   type NewConversation,
 } from '@/db/schema/index.js'
-import { and, eq } from 'drizzle-orm'
+import { and, count, eq, gte } from 'drizzle-orm'
 
 export async function findOpenByCustomer(
   businessId: string,
@@ -39,6 +39,20 @@ export async function findById(
   return row ?? null
 }
 
+export async function findOwnerThread(
+  businessId: string,
+  exec: Executor = db,
+): Promise<Conversation | null> {
+  const [row] = await exec
+    .select()
+    .from(conversations)
+    .where(
+      and(eq(conversations.businessId, businessId), eq(conversations.type, 'owner_thread')),
+    )
+    .limit(1)
+  return row ?? null
+}
+
 export async function create(
   data: NewConversation,
   exec: Executor = db,
@@ -46,6 +60,27 @@ export async function create(
   const [row] = await exec.insert(conversations).values(data).returning()
   if (!row) throw new Error('insert conversations returned no row')
   return row
+}
+
+// Count escalated customer conversations updated since `since`. Used by the
+// owner daily summary to surface pending escalations.
+export async function countRecentEscalatedCustomerConversations(
+  businessId: string,
+  since: Date,
+  exec: Executor = db,
+): Promise<number> {
+  const [row] = await exec
+    .select({ value: count() })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.businessId, businessId),
+        eq(conversations.type, 'customer'),
+        eq(conversations.status, 'escalated'),
+        gte(conversations.updatedAt, since),
+      ),
+    )
+  return row?.value ?? 0
 }
 
 export async function updateStatus(

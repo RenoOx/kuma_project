@@ -15,6 +15,20 @@
       "when": 1781038782359,
       "tag": "0001_overjoyed_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781569476714,
+      "tag": "0002_aspiring_praxagora",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1781667089056,
+      "tag": "0003_useful_omega_flight",
+      "breakpoints": true
     }
   ]
 }
