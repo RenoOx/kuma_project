@@ -1,11 +1,12 @@
 import { db, type Executor } from '@/db/client.js'
 import {
   conversations,
+  customers,
   type Conversation,
   type ConversationStatus,
   type NewConversation,
 } from '@/db/schema/index.js'
-import { and, count, eq, gte } from 'drizzle-orm'
+import { and, count, desc, eq, gte } from 'drizzle-orm'
 
 export async function findOpenByCustomer(
   businessId: string,
@@ -81,6 +82,43 @@ export async function countRecentEscalatedCustomerConversations(
       ),
     )
   return row?.value ?? 0
+}
+
+export interface EscalatedConversationSummary {
+  conversationId: string
+  customerName: string | null
+  customerPhone: string
+  updatedAt: Date
+}
+
+// Lists escalated customer conversations updated since `since`, joined to
+// their customer row. Used to render the "pending escalations" block of the
+// daily report.
+export async function listRecentEscalatedCustomerConversations(
+  businessId: string,
+  since: Date,
+  limit: number,
+  exec: Executor = db,
+): Promise<EscalatedConversationSummary[]> {
+  return await exec
+    .select({
+      conversationId: conversations.id,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+      updatedAt: conversations.updatedAt,
+    })
+    .from(conversations)
+    .innerJoin(customers, eq(customers.id, conversations.customerId))
+    .where(
+      and(
+        eq(conversations.businessId, businessId),
+        eq(conversations.type, 'customer'),
+        eq(conversations.status, 'escalated'),
+        gte(conversations.updatedAt, since),
+      ),
+    )
+    .orderBy(desc(conversations.updatedAt))
+    .limit(limit)
 }
 
 export async function updateStatus(

@@ -5,6 +5,7 @@ import { env } from './config/env.js'
 import { logger } from './config/logger.js'
 import * as businessService from './modules/business/business.service.js'
 import { makeWhatsappClient } from './modules/whatsapp/baileys.client.js'
+import { registerClient } from './modules/whatsapp/clientRegistry.js'
 import { handleIncomingMessage } from './modules/whatsapp/handler.js'
 import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
 
@@ -23,6 +24,12 @@ const RECONNECT_DELAY_MS = 5_000
 async function startWhatsappFor(businessId: string): Promise<void> {
   const sessionDir = join('sessions', businessId)
   const client = await makeWhatsappClient({ businessId, sessionDir })
+
+  // Register the live client for proactive notifications. We register on
+  // EVERY boot (including reconnects below), because the underlying socket
+  // reference is fresh after a reconnect and the old one would silently
+  // fail to send.
+  registerClient(businessId, client)
 
   client.onMessage((raw) => handleIncomingMessage(raw, businessId, client.sendMessage))
 

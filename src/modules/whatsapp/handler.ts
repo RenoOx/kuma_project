@@ -1,57 +1,59 @@
-import { logger } from '@/config/logger.js'
-import * as businessService from '@/modules/business/business.service.js'
-import * as conversationService from '@/modules/conversation/conversation.service.js'
-import * as customerService from '@/modules/customer/customer.service.js'
-import * as eventsRepo from '@/modules/events/events.repo.js'
-import * as llmService from '@/modules/llm/llm.service.js'
-import * as messageService from '@/modules/message/message.service.js'
-import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
-import type { WAMessage } from '@whiskeysockets/baileys'
+import { logger } from "@/config/logger.js";
+import * as businessService from "@/modules/business/business.service.js";
+import * as conversationService from "@/modules/conversation/conversation.service.js";
+import * as customerService from "@/modules/customer/customer.service.js";
+import * as eventsRepo from "@/modules/events/events.repo.js";
+import * as llmService from "@/modules/llm/llm.service.js";
+import * as messageService from "@/modules/message/message.service.js";
+import * as ownerAssistantService from "@/modules/ownerAssistant/ownerAssistant.service.js";
+import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
+import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
-  'Disculpa, estoy con un problema técnico. Intentá de nuevo en un ratito.'
+  "Disculpa, estoy con un problema técnico. Intentá de nuevo en un ratito.";
 
 const PAUSED_REPLY =
-  'En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.'
+  "En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.";
 
-const OWNER_FALLBACK_REPLY = 'Algo se rompió de mi lado, probá de nuevo.'
+const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, probá de nuevo.";
 
-export type SendFn = (jid: string, text: string) => Promise<void>
+export type SendFn = (jid: string, text: string) => Promise<void>;
 
 // Returns the user-visible text of a Baileys message, or null if the message
 // has no plain text payload we can answer to (media, reactions, status, etc.).
 function extractText(msg: WAMessage): string | null {
-  const message = msg.message
-  if (!message) return null
-  if (message.conversation) return message.conversation
-  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text
-  return null
+  const message = msg.message;
+  if (!message) return null;
+  if (message.conversation) return message.conversation;
+  if (message.extendedTextMessage?.text)
+    return message.extendedTextMessage.text;
+  return null;
 }
 
 // Returns the peer's E.164 phone (with leading '+') from a Baileys JID or null
 // for unsupported shapes. Handles both classic '@s.whatsapp.net' JIDs and
 // '@lid' (linked identifier) JIDs by reading senderPn when available.
 function extractPhone(msg: WAMessage): string | null {
-  const jid = msg.key.remoteJid
-  if (!jid) return null
+  const jid = msg.key.remoteJid;
+  if (!jid) return null;
 
-  if (jid.endsWith('@s.whatsapp.net')) {
-    const at = jid.indexOf('@')
-    const left = jid.slice(0, at)
-    if (!/^\d+$/.test(left)) return null
-    return `+${left}`
+  if (jid.endsWith("@s.whatsapp.net")) {
+    const at = jid.indexOf("@");
+    const left = jid.slice(0, at);
+    if (!/^\d+$/.test(left)) return null;
+    return `+${left}`;
   }
 
-  if (jid.endsWith('@lid')) {
-    const senderPn = (msg.key as { senderPn?: string }).senderPn
-    if (!senderPn || !senderPn.endsWith('@s.whatsapp.net')) return null
-    const at = senderPn.indexOf('@')
-    const left = senderPn.slice(0, at)
-    if (!/^\d+$/.test(left)) return null
-    return `+${left}`
+  if (jid.endsWith("@lid")) {
+    const senderPn = (msg.key as { senderPn?: string }).senderPn;
+    if (!senderPn || !senderPn.endsWith("@s.whatsapp.net")) return null;
+    const at = senderPn.indexOf("@");
+    const left = senderPn.slice(0, at);
+    if (!/^\d+$/.test(left)) return null;
+    return `+${left}`;
   }
 
-  return null
+  return null;
 }
 
 export async function handleIncomingMessage(
@@ -59,48 +61,56 @@ export async function handleIncomingMessage(
   businessId: string,
   send: SendFn,
 ): Promise<void> {
-  const log = logger.child({ component: 'whatsapp.handler', businessId })
+  const log = logger.child({ component: "whatsapp.handler", businessId });
 
-  if (raw.key.fromMe) return
-  const jid = raw.key.remoteJid
-  if (!jid) return
-  if (jid.endsWith('@g.us') || jid === 'status@broadcast') return
+  if (raw.key.fromMe) return;
+  const jid = raw.key.remoteJid;
+  if (!jid) return;
+  if (jid.endsWith("@g.us") || jid === "status@broadcast") return;
 
-  const phone = extractPhone(raw)
+  const phone = extractPhone(raw);
   if (!phone) {
-    log.debug({ jid }, 'skipping message with non-phone JID')
-    return
+    log.debug({ jid }, "skipping message with non-phone JID");
+    return;
   }
-  const text = extractText(raw)
+  const text = extractText(raw);
   if (!text) {
-    log.debug({ jid }, 'skipping message with no text payload')
-    return
+    log.debug({ jid }, "skipping message with no text payload");
+    return;
   }
 
   // Load business once to figure out who is talking to us (owner or customer)
   // and to feed downstream services without re-fetching.
-  const businessResult = await businessService.getById(businessId)
+  const businessResult = await businessService.getById(businessId);
   if (!businessResult.ok) {
     log.error(
       { code: businessResult.error.code },
-      'business not found for incoming message',
-    )
-    return
+      "business not found for incoming message",
+    );
+    return;
   }
-  const business = businessResult.data
+  const business = businessResult.data;
 
   // OWNER FLOW — bypass customer lookup, talk to the personal assistant.
   if (business.ownerWhatsappNumber && business.ownerWhatsappNumber === phone) {
-    const ownerThread = await conversationService.findOrCreateOwnerThread(businessId)
+    const ownerThread =
+      await conversationService.findOrCreateOwnerThread(businessId);
     if (!ownerThread.ok) {
-      log.error({ code: ownerThread.error.code }, 'findOrCreateOwnerThread failed')
-      return
+      log.error(
+        { code: ownerThread.error.code },
+        "findOrCreateOwnerThread failed",
+      );
+      return;
     }
 
-    const result = await ownerAssistantService.handle(businessId, ownerThread.data.id, text)
-    let replyText: string
+    const result = await ownerAssistantService.handle(
+      businessId,
+      ownerThread.data.id,
+      text,
+    );
+    let replyText: string;
     if (result.ok) {
-      replyText = result.data.content
+      replyText = result.data.content;
       log.info(
         {
           conversationId: ownerThread.data.id,
@@ -109,37 +119,37 @@ export async function handleIncomingMessage(
           toolsExecuted: result.data.toolsExecuted,
           maxIterationsHit: result.data.maxIterationsHit,
         },
-        'owner reply generated',
-      )
+        "owner reply generated",
+      );
     } else {
-      replyText = OWNER_FALLBACK_REPLY
+      replyText = OWNER_FALLBACK_REPLY;
       log.error(
         { code: result.error.code, context: result.error.logContext },
-        'owner assistant failed, using fallback',
-      )
+        "owner assistant failed, using fallback",
+      );
       // The owner service persists its own assistant turn on success; on
       // failure it doesn't, so we persist the fallback so the rolling memory
       // stays consistent.
       const fallbackPersist = await messageService.append({
         businessId,
         conversationId: ownerThread.data.id,
-        role: 'assistant',
+        role: "assistant",
         content: replyText,
-      })
+      });
       if (!fallbackPersist.ok) {
         log.error(
           { code: fallbackPersist.error.code },
-          'append owner fallback message failed',
-        )
+          "append owner fallback message failed",
+        );
       }
     }
 
     try {
-      await send(jid, replyText)
+      await send(jid, replyText);
     } catch (err) {
-      log.error({ err, jid }, 'failed to send owner reply over whatsapp')
+      log.error({ err, jid }, "failed to send owner reply over whatsapp");
     }
-    return
+    return;
   }
 
   // CUSTOMER FLOW — the historical path.
@@ -147,90 +157,109 @@ export async function handleIncomingMessage(
     businessId,
     phone,
     raw.pushName ?? undefined,
-  )
+  );
   if (!customerResult.ok) {
     log.error(
       { err: customerResult.error.logContext, code: customerResult.error.code },
-      'getOrCreate customer failed',
-    )
-    return
+      "getOrCreate customer failed",
+    );
+    return;
   }
-  const customer = customerResult.data
+  const customer = customerResult.data;
 
-  const conversationResult = await conversationService.getOrCreateOpen(businessId, customer.id)
+  const conversationResult = await conversationService.getOrCreateOpen(
+    businessId,
+    customer.id,
+  );
   if (!conversationResult.ok) {
     log.error(
       {
         err: conversationResult.error.logContext,
         code: conversationResult.error.code,
       },
-      'getOrCreateOpen conversation failed',
-    )
-    return
+      "getOrCreateOpen conversation failed",
+    );
+    return;
   }
-  const conversation = conversationResult.data
+  const conversation = conversationResult.data;
 
   const userMsgResult = await messageService.append({
     businessId,
     conversationId: conversation.id,
-    role: 'user',
+    role: "user",
     content: text,
-  })
+  });
   if (!userMsgResult.ok) {
     log.error(
       { err: userMsgResult.error.logContext, code: userMsgResult.error.code },
-      'append user message failed',
-    )
-    return
+      "append user message failed",
+    );
+    return;
   }
 
   // BOT PAUSED — keep the customer record + the message, but skip LLM and
   // escalate so a human notices.
-  const paused = await businessService.isBotPaused(businessId)
+  const paused = await businessService.isBotPaused(businessId);
   if (paused) {
     const cannedPersist = await messageService.append({
       businessId,
       conversationId: conversation.id,
-      role: 'assistant',
+      role: "assistant",
       content: PAUSED_REPLY,
-    })
+    });
     if (!cannedPersist.ok) {
       log.error(
         { code: cannedPersist.error.code },
-        'append paused canned reply failed',
-      )
+        "append paused canned reply failed",
+      );
     }
 
-    const escalateResult = await conversationService.escalate(businessId, conversation.id)
+    const escalateResult = await conversationService.escalate(
+      businessId,
+      conversation.id,
+    );
     if (!escalateResult.ok) {
       log.error(
         { code: escalateResult.error.code },
-        'escalating paused conversation failed',
-      )
+        "escalating paused conversation failed",
+      );
     }
 
     try {
       await eventsRepo.create({
         businessId,
         conversationId: conversation.id,
-        type: 'paused_blocked_message',
+        type: "paused_blocked_message",
         payload: { phone, text_preview: text.slice(0, 50) },
-      })
+      });
     } catch (err) {
-      log.error({ err }, 'failed to record paused_blocked_message event')
+      log.error({ err }, "failed to record paused_blocked_message event");
     }
 
     log.warn(
       { conversationId: conversation.id, phone },
-      'bot is paused; customer message escalated, canned reply sent',
-    )
+      "bot is paused; customer message escalated, canned reply sent",
+    );
+
+    // Fire-and-forget owner notification so the dueño knows someone wrote
+    // during the pause window. Failures are warn-logged inside notifyOwner.
+    const who = customer.name?.trim() || "";
+    const phoneWho = phone;
+    const pausedText = [
+      "⏸️ *Mensaje durante pausa*",
+      `Cliente ${who} - (${phoneWho}) escribió mientras el bot está pausado.`,
+      "Conversación marcada como escalada.",
+    ].join("\n");
+    ownerNotifier.notifyOwner(businessId, pausedText).catch((err) => {
+      log.warn({ err }, "notifyOwner during paused flow rejected unexpectedly");
+    });
 
     try {
-      await send(jid, PAUSED_REPLY)
+      await send(jid, PAUSED_REPLY);
     } catch (err) {
-      log.error({ err, jid }, 'failed to send paused canned reply')
+      log.error({ err, jid }, "failed to send paused canned reply");
     }
-    return
+    return;
   }
 
   // Normal LLM flow.
@@ -238,11 +267,11 @@ export async function handleIncomingMessage(
     businessId,
     conversationId: conversation.id,
     userMessage: text,
-  })
+  });
 
-  let replyText: string
+  let replyText: string;
   if (llmResult.ok) {
-    replyText = llmResult.data.content
+    replyText = llmResult.data.content;
     log.info(
       {
         conversationId: conversation.id,
@@ -252,34 +281,34 @@ export async function handleIncomingMessage(
         escalated: llmResult.data.escalated,
         maxIterationsHit: llmResult.data.maxIterationsHit,
       },
-      'llm reply generated',
-    )
+      "llm reply generated",
+    );
   } else {
-    replyText = LLM_FALLBACK_REPLY
+    replyText = LLM_FALLBACK_REPLY;
     log.error(
       { code: llmResult.error.code, context: llmResult.error.logContext },
-      'llm generateReply failed, using fallback message',
-    )
+      "llm generateReply failed, using fallback message",
+    );
     const fallbackPersist = await messageService.append({
       businessId,
       conversationId: conversation.id,
-      role: 'assistant',
+      role: "assistant",
       content: replyText,
-    })
+    });
     if (!fallbackPersist.ok) {
       log.error(
         {
           err: fallbackPersist.error.logContext,
           code: fallbackPersist.error.code,
         },
-        'append fallback assistant message failed',
-      )
+        "append fallback assistant message failed",
+      );
     }
   }
 
   try {
-    await send(jid, replyText)
+    await send(jid, replyText);
   } catch (err) {
-    log.error({ err, jid }, 'failed to send reply over whatsapp')
+    log.error({ err, jid }, "failed to send reply over whatsapp");
   }
 }

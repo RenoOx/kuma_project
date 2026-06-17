@@ -27,6 +27,7 @@
     "smoke:settings": "tsx scripts/smoke-settings.ts",
     "smoke:google": "tsx scripts/smoke-google.ts",
     "smoke:owner": "tsx scripts/smoke-owner.ts",
+    "smoke:notifications": "tsx scripts/smoke-notifications.ts",
     "create:business": "tsx scripts/create-test-business.ts"
   },
   "dependencies": {

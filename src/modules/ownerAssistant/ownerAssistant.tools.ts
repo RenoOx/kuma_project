@@ -81,6 +81,20 @@ export const ownerTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'send_daily_report_now',
+      description:
+        'Genera y envía al dueño un reporte estructurado del día actual ahora mismo. Usar cuando el dueño pida cosas como "mandame el reporte", "reporte del día completo", "qué pasó hoy detallado", "forzá el reporte ya". Se DIFERENCIA de get_daily_summary: este envía un mensaje push estructurado al dueño, get_daily_summary solo devuelve métricas para que las incluyas en una respuesta conversacional.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 // V1.5 (NO IMPLEMENTAR HOY): tools planeadas para expandir el asistente

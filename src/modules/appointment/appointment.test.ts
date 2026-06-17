@@ -26,12 +26,19 @@ import {
 // We mock the calendar service rather than the underlying googleapis client.
 // That lets us cover the three integration branches without touching network
 // or stubbing the SDK's tree.
-const { mockCreateEvent } = vi.hoisted(() => ({ mockCreateEvent: vi.fn() }))
+const { mockCreateEvent, mockNotifyOwner } = vi.hoisted(() => ({
+  mockCreateEvent: vi.fn(),
+  mockNotifyOwner: vi.fn(),
+}))
 
 vi.mock('@/modules/google/googleCalendar.service.js', () => ({
   createEvent: mockCreateEvent,
   // Keep cancelEvent stubbed — appointment.service doesn't use it today.
   cancelEvent: vi.fn(),
+}))
+
+vi.mock('@/modules/whatsapp/ownerNotifier.js', () => ({
+  notifyOwner: mockNotifyOwner,
 }))
 
 // Calendar references for the fixtures below. Picked in the future relative
@@ -66,6 +73,9 @@ describe('appointment module', () => {
     mockCreateEvent.mockResolvedValue(
       err(new NotConnectedError({ businessId: seed.businessA.id, service: 'google_calendar' })),
     )
+    // Default notifyOwner: resolves to ok. Tests that need a failure override.
+    mockNotifyOwner.mockReset()
+    mockNotifyOwner.mockResolvedValue(ok(undefined))
   })
 
   afterAll(async () => {
@@ -347,6 +357,63 @@ describe('appointment module', () => {
     expect(eventRows).toHaveLength(1)
     expect(eventRows[0]?.type).toBe('escalation')
     expect(eventRows[0]?.payload).toEqual({ reason: 'cliente molesto' })
+  })
+
+  it('escalate dispatches notifyOwner with the customer name and the reason', async () => {
+    const result = await appointmentService.escalate({
+      businessId: seed.businessA.id,
+      conversationId: conversationA.id,
+      reason: 'cliente pidió humano',
+    })
+    assert(result.ok)
+
+    // The notify is fire-and-forget and itself does multiple awaited DB
+    // lookups, so a single microtask flush isn't enough. waitFor polls.
+    await vi.waitFor(
+      () => {
+        expect(mockNotifyOwner).toHaveBeenCalledTimes(1)
+      },
+      { timeout: 2000 },
+    )
+
+    const [businessIdArg, textArg] = mockNotifyOwner.mock.calls[0] ?? []
+    expect(businessIdArg).toBe(seed.businessA.id)
+    expect(textArg).toContain('Cliente Test')
+    expect(textArg).toContain('cliente pidió humano')
+    expect(textArg).toContain('Escalación pendiente')
+  })
+
+  it('escalate does NOT fail when notifyOwner rejects', async () => {
+    mockNotifyOwner.mockReset()
+    mockNotifyOwner.mockResolvedValueOnce(
+      err(
+        new AppError({
+          code: 'notify_owner_failed',
+          message: 'simulated send failure',
+          userMessage: 'No pude notificar.',
+          logContext: { businessId: seed.businessA.id },
+        }),
+      ),
+    )
+
+    const result = await appointmentService.escalate({
+      businessId: seed.businessA.id,
+      conversationId: conversationA.id,
+      reason: 'cliente molesto',
+    })
+    assert(result.ok)
+    await vi.waitFor(
+      () => {
+        expect(mockNotifyOwner).toHaveBeenCalledTimes(1)
+      },
+      { timeout: 2000 },
+    )
+
+    const [conv] = await db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationA.id))
+    expect(conv?.status).toBe('escalated')
   })
 
   it('bookAppointment patches the appointment with googleEventId when Google sync succeeds', async () => {

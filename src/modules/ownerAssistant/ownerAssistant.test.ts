@@ -7,6 +7,7 @@ import {
 } from '@/db/schema/index.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
+import { AppError } from '@/shared/errors.js'
 import { eq } from 'drizzle-orm'
 import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -16,7 +17,10 @@ import {
   type TwoBusinessesSeed,
 } from '../../../tests/helpers/db.js'
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }))
+const { mockCreate, mockNotifyOwner } = vi.hoisted(() => ({
+  mockCreate: vi.fn(),
+  mockNotifyOwner: vi.fn(),
+}))
 
 vi.mock('@/modules/llm/openai.client.js', () => ({
   openai: {
@@ -26,6 +30,10 @@ vi.mock('@/modules/llm/openai.client.js', () => ({
       },
     },
   },
+}))
+
+vi.mock('@/modules/whatsapp/ownerNotifier.js', () => ({
+  notifyOwner: mockNotifyOwner,
 }))
 
 async function setOwner(businessId: string, phone: string, name: string): Promise<void> {
@@ -49,6 +57,8 @@ describe('ownerAssistant.service.handle', () => {
     ownerConvA = convResult.data
 
     mockCreate.mockReset()
+    mockNotifyOwner.mockReset()
+    mockNotifyOwner.mockResolvedValue({ ok: true, data: undefined })
   })
 
   afterAll(async () => {
@@ -68,7 +78,7 @@ describe('ownerAssistant.service.handle', () => {
 
     const callArgs = mockCreate.mock.calls[0]?.[0]
     assert(callArgs)
-    expect(callArgs.tools.length).toBe(4)
+    expect(callArgs.tools.length).toBe(5)
     expect(callArgs.tool_choice).toBe('auto')
     // The system prompt should reference the owner by name.
     expect(callArgs.messages[0].content).toContain('TestOwner')
@@ -239,6 +249,100 @@ describe('ownerAssistant.service.handle', () => {
     )
     assert(result.ok)
     expect(result.data.toolsExecuted).toContain('get_appointments')
+  })
+
+  it('send_daily_report_now invokes notifyOwner with a formatted report and confirms success', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_rep_1',
+                type: 'function',
+                function: { name: 'send_daily_report_now', arguments: '{}' },
+              },
+            ],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 90, completion_tokens: 6 },
+    })
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { content: 'Reporte enviado, jefe.', tool_calls: undefined } }],
+      usage: { prompt_tokens: 150, completion_tokens: 8 },
+    })
+
+    const result = await ownerAssistantService.handle(
+      seed.businessA.id,
+      ownerConvA.id,
+      'mandame el reporte de hoy',
+    )
+    assert(result.ok)
+    expect(result.data.toolsExecuted).toContain('send_daily_report_now')
+    expect(mockNotifyOwner).toHaveBeenCalledTimes(1)
+    const [businessIdArg, textArg] = mockNotifyOwner.mock.calls[0] ?? []
+    expect(businessIdArg).toBe(seed.businessA.id)
+    expect(textArg).toContain('Reporte de hoy')
+    expect(textArg).toContain('Mensajes recibidos')
+  })
+
+  it('send_daily_report_now surfaces an error result when notifyOwner fails', async () => {
+    mockNotifyOwner.mockReset()
+    mockNotifyOwner.mockResolvedValueOnce({
+      ok: false,
+      error: new AppError({
+        code: 'notify_owner_failed',
+        message: 'simulated',
+        userMessage: 'No pude notificar.',
+        logContext: {},
+      }),
+    })
+
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_rep_err',
+                type: 'function',
+                function: { name: 'send_daily_report_now', arguments: '{}' },
+              },
+            ],
+          },
+        },
+      ],
+      usage: { prompt_tokens: 90, completion_tokens: 6 },
+    })
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: 'No pude enviarlo, probá de nuevo en un toque.',
+            tool_calls: undefined,
+          },
+        },
+      ],
+      usage: { prompt_tokens: 150, completion_tokens: 12 },
+    })
+
+    const result = await ownerAssistantService.handle(
+      seed.businessA.id,
+      ownerConvA.id,
+      'mandame el reporte ya',
+    )
+    assert(result.ok)
+    expect(mockNotifyOwner).toHaveBeenCalledTimes(1)
+    // The tool message persisted to history should include the error instruction.
+    const stored = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.conversationId, ownerConvA.id))
+    const toolMsg = stored.find((m) => m.role === 'tool')
+    expect(toolMsg?.content).toContain('No pude enviar el reporte')
   })
 
   it('isolation: owner_thread of businessA is not visible from businessB', async () => {

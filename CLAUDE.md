@@ -170,6 +170,24 @@ Para expandir el asistente del dueño en V1.5: agregar tools al array
 `ownerTools` y al toolExecutor del owner. Ver placeholders comentados 
 en `ownerAssistant.tools.ts`.
 
+## Notificaciones proactivas
+
+Kuma envía mensajes al dueño sin que él los pida (proactivos):
+
+- **Cuando un cliente escala** (pide humano o bot pausado + cliente 
+  escribe). Trigger automático en `appointment.service.escalate` y en el 
+  handler de pausa. Disparado en **fire-and-forget**: la respuesta al 
+  cliente no se bloquea por el push.
+- **Cuando el dueño pide el reporte** ("mandame el reporte ahora") con 
+  la tool `send_daily_report_now`. NO hay cron automático en V1 — el 
+  dueño pide cuando quiere.
+
+Helper: `notifyOwner(businessId, text)` en `whatsapp/ownerNotifier`. 
+Registry: `clientRegistry` mantiene `Map<businessId, WhatsappClient>` en 
+memoria. Se popula en `server.ts` en cada boot (incluido reconnect, 
+porque el socket cambia tras reconectar). Para multi-instance en 
+producción habrá que reemplazar el Map por algo centralizado (Día 11+).
+
 ## Reglas de código no-negociables
 
 1. **TypeScript estricto.** Nada de `any`. Si necesitas escape, usa 

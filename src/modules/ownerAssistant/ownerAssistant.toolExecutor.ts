@@ -5,7 +5,10 @@ import type { BotPausedState } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
 import { z } from 'zod'
+import { generateDailyReportText } from './dailyReport.js'
+import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import type { OwnerContext, OwnerToolExecutionResult } from './ownerAssistant.types.js'
+import { dayRangeInTimezone } from './timezone.js'
 
 const dailySummaryArgs = z.object({
   date_iso: z.string().optional(),
@@ -34,36 +37,6 @@ function malformedArgs(toolName: string, parseError: z.ZodError): OwnerToolExecu
       details: summary,
     }),
     error: `invalid_args:${toolName}`,
-  }
-}
-
-// Resolves a YYYY-MM-DD calendar date to the UTC [start, end) range that
-// represents that day in `timezone`. Used for queries on createdAt/scheduledAt.
-function dayRangeInTimezone(dateISO: string, timezone: string): { start: Date; end: Date } | null {
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      timeZoneName: 'longOffset',
-    })
-    const sample = new Date(`${dateISO}T12:00:00Z`)
-    const tzName = formatter
-      .formatToParts(sample)
-      .find((p) => p.type === 'timeZoneName')?.value
-    if (!tzName) return null
-    const offset =
-      tzName === 'GMT'
-        ? '+00:00'
-        : (() => {
-            const m = tzName.replace(/^GMT/, '').match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/)
-            if (!m) return null
-            return `${m[1]}${(m[2] ?? '00').padStart(2, '0')}:${m[3] ?? '00'}`
-          })()
-    if (!offset) return null
-    const start = new Date(`${dateISO}T00:00:00${offset}`)
-    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000)
-    return { start, end }
-  } catch {
-    return null
   }
 }
 
@@ -180,6 +153,28 @@ async function resumeBot(ctx: OwnerContext): Promise<OwnerToolExecutionResult> {
   return { result: JSON.stringify({ status: 'resumed' }) }
 }
 
+async function sendDailyReportNow(ctx: OwnerContext): Promise<OwnerToolExecutionResult> {
+  const reportText = await generateDailyReportText(ctx.businessId)
+  const sent = await ownerNotifier.notifyOwner(ctx.businessId, reportText)
+  if (!sent.ok) {
+    return {
+      result: JSON.stringify({
+        status: 'error',
+        instruction: 'No pude enviar el reporte ahora. Intentá de nuevo en un momento.',
+        error: sent.error.code,
+      }),
+      error: sent.error.code,
+    }
+  }
+  return {
+    result: JSON.stringify({
+      status: 'sent',
+      instruction:
+        'Reporte enviado al dueño exitosamente. Confirmale al dueño que el push ya salió.',
+    }),
+  }
+}
+
 export async function executeOwnerTool(
   name: string,
   args: unknown,
@@ -201,9 +196,14 @@ export async function executeOwnerTool(
       if (!parsed.success) return malformedArgs(name, parsed.error)
       return await pauseBot(ctx, parsed.data)
     }
-    if (name === 'resume_bot') {
+    if (name === 'send_daily_report_now') {
       const parsed = resumeBotArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
+      return await sendDailyReportNow(ctx)
+    }
+    if (name === 'resume_bot') {
+      const parsedResume = resumeBotArgs.safeParse(args)
+      if (!parsedResume.success) return malformedArgs(name, parsedResume.error)
       return await resumeBot(ctx)
     }
     return {
