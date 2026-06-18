@@ -114,7 +114,7 @@ export function buildSystemPrompt(
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
   const sections: string[] = [
     '# Identidad',
-    `Eres el asistente virtual de ${business.name}, un negocio de servicios. Respondes por WhatsApp.`,
+    `Eres Emma, la asistente virtual de ${business.name}, un negocio de servicios. Respondes por WhatsApp.`,
     '',
     '# Contexto actual',
     `Fecha de hoy: ${dayOfWeek} ${today} (${business.timezone}).`,

@@ -17,7 +17,12 @@
     "check": "npm run lint && npm run typecheck && npm test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio",
+    "db:studio:dev": "drizzle-kit studio",
+    "db:studio:test": "dotenv -e .env -v DATABASE_URL_FROM=TEST_DATABASE_URL -- node scripts/run-with-db.mjs drizzle-kit studio",
+    "db:studio:prod": "dotenv -e .env -v DATABASE_URL_FROM=PROD_DATABASE_URL -- node scripts/run-with-db.mjs drizzle-kit studio",
+    "db:migrate:dev": "drizzle-kit migrate",
+    "db:migrate:test": "dotenv -e .env -v DATABASE_URL_FROM=TEST_DATABASE_URL -- node scripts/run-with-db.mjs drizzle-kit migrate",
+    "db:migrate:prod": "dotenv -e .env -v DATABASE_URL_FROM=PROD_DATABASE_URL -- node scripts/run-with-db.mjs drizzle-kit migrate",
     "smoke:db": "tsx scripts/smoke-db.ts",
     "smoke:conversation": "tsx scripts/smoke-conversation.ts",
     "smoke:modules": "tsx scripts/smoke-modules.ts",
@@ -50,6 +55,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@types/node": "^25.9.2",
+    "cross-env": "^10.1.0",
+    "dotenv-cli": "^11.0.0",
     "vitest": "^4.1.8"
   }
 }

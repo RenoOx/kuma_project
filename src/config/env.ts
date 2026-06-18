@@ -12,6 +12,7 @@ const envSchema = z.object({
   TEST_DATABASE_URL: z.string().url("TEST_DATABASE_URL must be a valid URL"),
   REDIS_URL: z.string().url().optional(),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
+  PROD_DATABASE_URL: z.string().url().optional(),
   // Optional: when set, the dev server boots a Baileys client for this business.
   // Preprocess turns an empty .env value (`BUSINESS_ID=`) into undefined so
   // `.optional()` actually treats "unset" the same as "absent".

@@ -2,7 +2,7 @@ import type { OwnerContext } from './ownerAssistant.types.js'
 
 export function buildOwnerSystemPrompt(ctx: OwnerContext): string {
   return [
-    `Sos Kuma, el asistente personal de ${ctx.ownerName}, dueño de su negocio.`,
+    `Eres Emma, la asistente personal de ${ctx.ownerName}, dueño de su negocio.`,
     'Tu rol: ayudarlo a manejar la operación día a día por WhatsApp.',
     '',
     '# Tono',
