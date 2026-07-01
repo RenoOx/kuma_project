@@ -1,6 +1,10 @@
 import { db, type Executor } from '@/db/client.js'
 import { businesses, type Business, type NewBusiness } from '@/db/schema/index.js'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
+
+export async function findAll(exec: Executor = db): Promise<Business[]> {
+  return exec.select().from(businesses).orderBy(asc(businesses.createdAt))
+}
 
 export async function findById(id: string, exec: Executor = db): Promise<Business | null> {
   const [row] = await exec.select().from(businesses).where(eq(businesses.id, id)).limit(1)

@@ -14,6 +14,8 @@ import qrcode from 'qrcode-terminal'
 
 export type MessageHandler = (raw: WAMessage) => Promise<void> | void
 export type DisconnectHandler = (reason: 'logout' | 'transient') => void
+export type QRHandler = (qr: string) => void
+export type ConnectHandler = () => void
 
 export interface WhatsappClientOptions {
   businessId: string
@@ -25,6 +27,8 @@ export interface WhatsappClient {
   sendMessage(jid: string, text: string): Promise<void>
   onMessage(handler: MessageHandler): void
   onDisconnect(handler: DisconnectHandler): void
+  onQR(handler: QRHandler): void
+  onConnect(handler: ConnectHandler): void
 }
 
 export async function makeWhatsappClient(
@@ -54,6 +58,8 @@ export async function makeWhatsappClient(
 
   const messageHandlers: MessageHandler[] = []
   const disconnectHandlers: DisconnectHandler[] = []
+  const qrHandlers: QRHandler[] = []
+  const connectHandlers: ConnectHandler[] = []
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -62,9 +68,11 @@ export async function makeWhatsappClient(
     if (qr) {
       log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
       qrcode.generate(qr, { small: true })
+      for (const handler of qrHandlers) handler(qr)
     }
     if (connection === 'open') {
       log.info('whatsapp connected')
+      for (const handler of connectHandlers) handler()
     }
     if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
@@ -98,6 +106,12 @@ export async function makeWhatsappClient(
     },
     onDisconnect(handler) {
       disconnectHandlers.push(handler)
+    },
+    onQR(handler) {
+      qrHandlers.push(handler)
+    },
+    onConnect(handler) {
+      connectHandlers.push(handler)
     },
   }
 }

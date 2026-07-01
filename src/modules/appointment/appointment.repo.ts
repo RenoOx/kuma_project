@@ -5,7 +5,7 @@ import {
   type Appointment,
   type NewAppointment,
 } from '@/db/schema/index.js'
-import { and, asc, count, eq, gte, lt } from 'drizzle-orm'
+import { and, asc, count, eq, gte, isNull, lt } from 'drizzle-orm'
 
 export async function findByBusinessAndDateRange(
   businessId: string,
@@ -146,6 +146,54 @@ export async function countCreatedInRange(
       ),
     )
   return row?.value ?? 0
+}
+
+export type ReminderKind = '24h' | '2h'
+
+// Lists scheduled appointments whose `scheduled_at` falls inside the given
+// window AND whose corresponding reminder column is still NULL. NOT filtered
+// by businessId: the worker runs cross-tenant and the per-business send is
+// gated by the registry instead.
+export async function findDueForReminder(
+  kind: ReminderKind,
+  windowStart: Date,
+  windowEnd: Date,
+  exec: Executor = db,
+): Promise<Appointment[]> {
+  const column =
+    kind === '24h' ? appointments.reminder24hSentAt : appointments.reminder2hSentAt
+  return await exec
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.status, 'scheduled'),
+        isNull(column),
+        gte(appointments.scheduledAt, windowStart),
+        lt(appointments.scheduledAt, windowEnd),
+      ),
+    )
+    .orderBy(asc(appointments.scheduledAt))
+}
+
+// Records that we dispatched the `kind` reminder for an appointment. Idempotent
+// at the worker level because the next query iteration won't pick the row up
+// (the column is no longer NULL).
+export async function markReminderSent(
+  businessId: string,
+  id: string,
+  kind: ReminderKind,
+  at: Date = new Date(),
+  exec: Executor = db,
+): Promise<void> {
+  const set =
+    kind === '24h'
+      ? { reminder24hSentAt: at, updatedAt: at }
+      : { reminder2hSentAt: at, updatedAt: at }
+  await exec
+    .update(appointments)
+    .set(set)
+    .where(and(eq(appointments.businessId, businessId), eq(appointments.id, id)))
 }
 
 export async function update(

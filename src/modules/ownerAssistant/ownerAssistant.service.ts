@@ -20,6 +20,7 @@ const TEMPERATURE = 0.3
 const MAX_TOKENS = 400
 const HISTORY_LIMIT = 10
 const MAX_TOOL_ITERATIONS = 5
+const OPENAI_TIMEOUT_MS = 30_000
 const FALLBACK_TEXT = 'Disculpá, no pude procesar esa consulta. Probá de nuevo.'
 
 function todayInTimezone(timezone: string): string {
@@ -127,21 +128,27 @@ export async function handle(
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion
     try {
-      completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: chatMessages,
-        tools: ownerTools,
-        tool_choice: 'auto',
-        temperature: TEMPERATURE,
-        max_tokens: MAX_TOKENS,
-      })
+      completion = await openai.chat.completions.create(
+        {
+          model: MODEL,
+          messages: chatMessages,
+          tools: ownerTools,
+          tool_choice: 'auto',
+          temperature: TEMPERATURE,
+          max_tokens: MAX_TOKENS,
+        },
+        { signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS) },
+      )
     } catch (cause) {
+      const isTimeout =
+        cause instanceof Error &&
+        (cause.name === 'TimeoutError' || cause.name === 'AbortError')
       return err(
         new AppError({
-          code: 'owner_assistant_failed',
+          code: isTimeout ? 'owner_assistant_timeout' : 'owner_assistant_failed',
           message: cause instanceof Error ? cause.message : 'unknown error',
           userMessage: 'Tuve un problema con el modelo, probá de nuevo.',
-          logContext: { businessId, conversationId, iteration, model: MODEL },
+          logContext: { businessId, conversationId, iteration, model: MODEL, timedOut: isTimeout },
           cause,
         }),
       )

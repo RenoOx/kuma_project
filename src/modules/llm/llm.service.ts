@@ -23,6 +23,7 @@ const TEMPERATURE = 0.4
 const MAX_TOKENS = 300
 const HISTORY_LIMIT = 10
 const MAX_TOOL_ITERATIONS = 5
+const OPENAI_TIMEOUT_MS = 30_000
 const MAX_ITERATIONS_FALLBACK_TEXT =
   'Disculpa, no pude resolver tu consulta. Un humano te va a contactar.'
 
@@ -149,18 +150,24 @@ export async function generateReply(
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion
     try {
-      completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: chatMessages,
-        tools: kumaTools,
-        tool_choice: 'auto',
-        temperature: TEMPERATURE,
-        max_tokens: MAX_TOKENS,
-      })
+      completion = await openai.chat.completions.create(
+        {
+          model: MODEL,
+          messages: chatMessages,
+          tools: kumaTools,
+          tool_choice: 'auto',
+          temperature: TEMPERATURE,
+          max_tokens: MAX_TOKENS,
+        },
+        { signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS) },
+      )
     } catch (cause) {
+      const isTimeout =
+        cause instanceof Error &&
+        (cause.name === 'TimeoutError' || cause.name === 'AbortError')
       return err(
         new AppError({
-          code: 'llm_generate_failed',
+          code: isTimeout ? 'llm_timeout' : 'llm_generate_failed',
           message: cause instanceof Error ? cause.message : 'unknown error',
           userMessage: 'Disculpa, estoy con un problema técnico.',
           logContext: {
@@ -168,6 +175,7 @@ export async function generateReply(
             conversationId: params.conversationId,
             iteration,
             model: MODEL,
+            timedOut: isTimeout,
           },
           cause,
         }),

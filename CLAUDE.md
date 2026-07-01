@@ -188,6 +188,36 @@ memoria. Se popula en `server.ts` en cada boot (incluido reconnect,
 porque el socket cambia tras reconectar). Para multi-instance en 
 producción habrá que reemplazar el Map por algo centralizado (Día 11+).
 
+## Recordatorios
+
+Cada cita `scheduled` recibe 2 recordatorios automáticos al cliente:
+
+- **24h antes** de `scheduled_at`: recordatorio cálido con día y hora 
+  completos (`👋 ¡Hola {nombre}!\n\nTe recuerdo tu cita 📅 *{día de 
+  semana} {día} de {mes} a las {hora}* en {business}.`)
+- **2h antes** de `scheduled_at`: recordatorio último con `hoy a las X 
+  (en 2 horas)` (`⏰ ¡Hola {nombre}!\n\nTu cita en {business} es *hoy 
+  a las {hora}* (en 2 horas).`)
+
+El worker `sendDueReminders` corre cada 15 min vía `setInterval` en 
+`server.ts`. Idempotencia: cada appointment tiene `reminder_24h_sent_at` 
+y `reminder_2h_sent_at` que se setean al enviar (evita duplicados).
+
+Ventanas de elegibilidad:
+- 24h reminder → `scheduled_at ∈ [now+23h, now+25h)`
+- 2h reminder → `scheduled_at ∈ [now+1.5h, now+2.5h)`
+
+Formato del texto: día de semana y mes en minúscula (`sábado 20 de junio`), 
+hora 12h sin espacio (`11:00am`, `2:30pm`). Helpers de formato en 
+`workers/reminderTexts.ts`.
+
+Si el cliente responde al recordatorio queriendo reprogramar/cancelar, 
+Emma escala automáticamente al dueño (vía system prompt sección "Manejo 
+de cancelaciones y reprogramaciones" + tool `escalate_to_human`). NO 
+maneja la reprogramación sola.
+
+Migración a BullMQ con Redis queda para V1.5.
+
 ## Reglas de código no-negociables
 
 1. **TypeScript estricto.** Nada de `any`. Si necesitas escape, usa 

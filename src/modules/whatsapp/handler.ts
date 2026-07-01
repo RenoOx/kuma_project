@@ -10,14 +10,29 @@ import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
-  "Disculpa, estoy con un problema técnico. Intentá de nuevo en un ratito.";
+  "Disculpa, estoy con un problema técnico. Intenta de nuevo en un memento.";
 
 const PAUSED_REPLY =
   "En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.";
 
-const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, probá de nuevo.";
+const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, prueba de nuevo.";
 
 export type SendFn = (jid: string, text: string) => Promise<void>;
+
+// Serialises message processing per (businessId, sender-phone) so that two
+// rapid messages from the same number never run their LLM calls concurrently,
+// which would interleave messages in the conversation history.
+const senderLocks = new Map<string, Promise<void>>();
+
+function withSenderLock(key: string, work: () => Promise<void>): Promise<void> {
+  const prev = senderLocks.get(key) ?? Promise.resolve();
+  const next = prev.then(work, work);
+  senderLocks.set(key, next);
+  void next.finally(() => {
+    if (senderLocks.get(key) === next) senderLocks.delete(key);
+  });
+  return next;
+}
 
 // Returns the user-visible text of a Baileys message, or null if the message
 // has no plain text payload we can answer to (media, reactions, status, etc.).
@@ -56,28 +71,15 @@ function extractPhone(msg: WAMessage): string | null {
   return null;
 }
 
-export async function handleIncomingMessage(
+async function processMessage(
   raw: WAMessage,
   businessId: string,
   send: SendFn,
+  jid: string,
+  phone: string,
+  text: string,
 ): Promise<void> {
   const log = logger.child({ component: "whatsapp.handler", businessId });
-
-  if (raw.key.fromMe) return;
-  const jid = raw.key.remoteJid;
-  if (!jid) return;
-  if (jid.endsWith("@g.us") || jid === "status@broadcast") return;
-
-  const phone = extractPhone(raw);
-  if (!phone) {
-    log.debug({ jid }, "skipping message with non-phone JID");
-    return;
-  }
-  const text = extractText(raw);
-  if (!text) {
-    log.debug({ jid }, "skipping message with no text payload");
-    return;
-  }
 
   // Load business once to figure out who is talking to us (owner or customer)
   // and to feed downstream services without re-fetching.
@@ -311,4 +313,32 @@ export async function handleIncomingMessage(
   } catch (err) {
     log.error({ err, jid }, "failed to send reply over whatsapp");
   }
+}
+
+export function handleIncomingMessage(
+  raw: WAMessage,
+  businessId: string,
+  send: SendFn,
+): Promise<void> {
+  const log = logger.child({ component: "whatsapp.handler", businessId });
+
+  if (raw.key.fromMe) return Promise.resolve();
+  const jid = raw.key.remoteJid;
+  if (!jid) return Promise.resolve();
+  if (jid.endsWith("@g.us") || jid === "status@broadcast") return Promise.resolve();
+
+  const phone = extractPhone(raw);
+  if (!phone) {
+    log.debug({ jid }, "skipping message with non-phone JID");
+    return Promise.resolve();
+  }
+  const text = extractText(raw);
+  if (!text) {
+    log.debug({ jid }, "skipping message with no text payload");
+    return Promise.resolve();
+  }
+
+  return withSenderLock(`${businessId}:${phone}`, () =>
+    processMessage(raw, businessId, send, jid, phone, text),
+  );
 }

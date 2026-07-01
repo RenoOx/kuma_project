@@ -2,11 +2,16 @@ import { serve } from "@hono/node-server";
 import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
-import * as businessService from "./modules/business/business.service.js";
+import * as businessRepo from "./modules/business/business.repo.js";
 import { makeWhatsappClient } from "./modules/whatsapp/baileys.client.js";
-import { registerClient } from "./modules/whatsapp/clientRegistry.js";
+import {
+  registerClient,
+  setConnectionStatus,
+  storeQR,
+} from "./modules/whatsapp/clientRegistry.js";
 import { handleIncomingMessage } from "./modules/whatsapp/handler.js";
 import { cleanupOwnerThreadMessages } from "./workers/cleanupOwnerThread.js";
+import { sendDueReminders } from "./workers/sendReminders.js";
 
 const server = serve(
   {
@@ -34,12 +39,22 @@ async function startWhatsappFor(businessId: string): Promise<void> {
   // fail to send.
   registerClient(businessId, client);
 
+  client.onQR((qr) => {
+    storeQR(businessId, qr);
+    logger.info({ businessId }, "whatsapp QR stored — visit /admin/whatsapp/qr to scan");
+  });
+
+  client.onConnect(() => {
+    setConnectionStatus(businessId, "connected");
+  });
+
   client.onMessage((raw) =>
     handleIncomingMessage(raw, businessId, client.sendMessage),
   );
 
   client.onDisconnect((reason) => {
     if (reason === "logout") {
+      setConnectionStatus(businessId, "logged_out");
       logger.error(
         { businessId },
         "whatsapp logged out — delete the session folder and restart to reconnect",
@@ -59,31 +74,26 @@ async function startWhatsappFor(businessId: string): Promise<void> {
 }
 
 async function bootWhatsapp(): Promise<void> {
-  const businessId = env.BUSINESS_ID;
-  if (!businessId) {
+  const allBusinesses = await businessRepo.findAll();
+
+  if (allBusinesses.length === 0) {
     logger.info(
-      "BUSINESS_ID not set — skipping whatsapp boot (health endpoint only)",
+      "no businesses in DB — skipping whatsapp boot (create one via admin API)",
     );
     return;
   }
 
-  const businessResult = await businessService.getById(businessId);
-  if (!businessResult.ok) {
-    logger.error(
-      { businessId, code: businessResult.error.code },
-      "BUSINESS_ID is set but the business does not exist; skipping whatsapp boot",
+  logger.info({ count: allBusinesses.length }, "booting whatsapp clients");
+
+  for (const business of allBusinesses) {
+    logger.info(
+      { businessId: business.id, name: business.name, whatsappNumber: business.whatsappNumber },
+      "booting whatsapp client for business",
     );
-    return;
+    startWhatsappFor(business.id).catch((err) => {
+      logger.error({ err, businessId: business.id }, "whatsapp boot failed for business");
+    });
   }
-  logger.info(
-    {
-      businessId,
-      name: businessResult.data.name,
-      whatsappNumber: businessResult.data.whatsappNumber,
-    },
-    "booting whatsapp client for business",
-  );
-  await startWhatsappFor(businessId);
 }
 
 bootWhatsapp().catch((err) => {
@@ -103,6 +113,21 @@ setInterval(() => {
 logger.info(
   { intervalMs: OWNER_CLEANUP_INTERVAL_MS },
   "owner_thread cleanup scheduled (setInterval)",
+);
+
+// Reminder worker. Polls every 15 min looking for appointments whose
+// `scheduled_at` falls in the 24h or 2h reminder window AND whose matching
+// `reminder_*_sent_at` column is still NULL.
+// TODO V1.5: migrar a BullMQ scheduled jobs cuando incorporemos Redis.
+const REMINDER_INTERVAL_MS = 15 * 60 * 1000;
+setInterval(() => {
+  sendDueReminders().catch((err) => {
+    logger.error({ err }, "sendDueReminders job failed");
+  });
+}, REMINDER_INTERVAL_MS).unref();
+logger.info(
+  { intervalMs: REMINDER_INTERVAL_MS },
+  "reminders worker scheduled (setInterval)",
 );
 
 const shutdown = (signal: string): void => {

@@ -24,6 +24,10 @@ export const appointments = pgTable(
     status: text('status').notNull().default('scheduled').$type<AppointmentStatus>(),
     googleEventId: text('google_event_id'),
     notes: text('notes'),
+    // Idempotency anchors for the reminders worker. NULL means "not yet sent";
+    // a timestamp means "we already pushed that reminder, don't repeat".
+    reminder24hSentAt: timestamp('reminder_24h_sent_at', { withTimezone: true }),
+    reminder2hSentAt: timestamp('reminder_2h_sent_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

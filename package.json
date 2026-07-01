@@ -32,7 +32,9 @@
     "smoke:google": "tsx scripts/smoke-google.ts",
     "smoke:owner": "tsx scripts/smoke-owner.ts",
     "smoke:notifications": "tsx scripts/smoke-notifications.ts",
-    "create:business": "tsx scripts/create-test-business.ts"
+    "create:business": "tsx scripts/create-test-business.ts",
+    "smoke:reminders": "tsx scripts/smoke-reminders.ts",
+    "admin": "tsx scripts/admin.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.4",
@@ -55,8 +57,10 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@types/node": "^25.9.2",
+    "@types/qrcode": "^1.5.6",
     "cross-env": "^10.1.0",
     "dotenv-cli": "^11.0.0",
+    "qrcode": "^1.5.4",
     "vitest": "^4.1.8"
   }
 }

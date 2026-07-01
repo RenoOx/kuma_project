@@ -31,6 +31,12 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     onDisconnect() {
       // noop
     },
+    onQR() {
+      // noop
+    },
+    onConnect() {
+      // noop
+    },
   }
   return { client, sent }
 }

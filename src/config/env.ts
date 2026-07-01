@@ -9,17 +9,10 @@ const envSchema = z.object({
     .default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
-  TEST_DATABASE_URL: z.string().url("TEST_DATABASE_URL must be a valid URL"),
+  TEST_DATABASE_URL: z.string().url("TEST_DATABASE_URL must be a valid URL").optional(),
   REDIS_URL: z.string().url().optional(),
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
   PROD_DATABASE_URL: z.string().url().optional(),
-  // Optional: when set, the dev server boots a Baileys client for this business.
-  // Preprocess turns an empty .env value (`BUSINESS_ID=`) into undefined so
-  // `.optional()` actually treats "unset" the same as "absent".
-  BUSINESS_ID: z.preprocess(
-    (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
-    z.string().min(1).optional(),
-  ),
   // Google Calendar OAuth. Optional at boot — runtime checks in
   // google.client raise a clear error if a flow needs them and they're
   // missing. Lets the rest of the app run before Google is configured.
@@ -35,6 +28,11 @@ const envSchema = z.object({
     .url()
     .default("http://localhost:3000/auth/google/callback"),
   SESSIONS_DIR: z.string().default("./sessions"),
+  // Admin endpoints (QR page, etc.). If unset the endpoints return 501.
+  ADMIN_SECRET: z.preprocess(
+    (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
+    z.string().min(8).optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;
