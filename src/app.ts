@@ -20,7 +20,6 @@ app.get('/health', (c) => {
 })
 
 app.route('/', googleAuthRoutes)
-app.route('/', adminRoutes)
 
 const STATUS_LABEL: Record<string, string> = {
   connecting: '⏳ Conectando',
@@ -120,6 +119,8 @@ function renderPage(title: string, body: string, refreshSecs?: number): string {
 <style>body{font-family:sans-serif;max-width:480px;margin:3rem auto;text-align:center}</style>
 </head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`
 }
+
+app.route('/', adminRoutes)
 
 app.onError((err, c) => {
   logger.error({ err, path: c.req.path }, 'unhandled error')
