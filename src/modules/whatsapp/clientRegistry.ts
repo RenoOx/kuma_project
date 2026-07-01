@@ -11,22 +11,34 @@ export type ConnectionStatus = 'connecting' | 'qr_pending' | 'connected' | 'logg
 interface ConnectionState {
   status: ConnectionStatus
   qr: string | null
+  pairingCode: string | null
 }
 
 const connectionStates = new Map<string, ConnectionState>()
 
 export function registerClient(businessId: string, client: WhatsappClient): void {
   clients.set(businessId, client)
-  connectionStates.set(businessId, { status: 'connecting', qr: null })
+  connectionStates.set(businessId, { status: 'connecting', qr: null, pairingCode: null })
 }
 
 export function setConnectionStatus(businessId: string, status: ConnectionStatus): void {
-  const prev = connectionStates.get(businessId) ?? { status, qr: null }
-  connectionStates.set(businessId, { ...prev, status, qr: status === 'connected' ? null : prev.qr })
+  const prev = connectionStates.get(businessId) ?? { status, qr: null, pairingCode: null }
+  connectionStates.set(businessId, {
+    ...prev,
+    status,
+    qr: status === 'connected' ? null : prev.qr,
+    pairingCode: status === 'connected' ? null : prev.pairingCode,
+  })
 }
 
 export function storeQR(businessId: string, qr: string): void {
-  connectionStates.set(businessId, { status: 'qr_pending', qr })
+  const prev = connectionStates.get(businessId) ?? { status: 'qr_pending', qr, pairingCode: null }
+  connectionStates.set(businessId, { ...prev, status: 'qr_pending', qr })
+}
+
+export function storePairingCode(businessId: string, code: string): void {
+  const prev = connectionStates.get(businessId) ?? { status: 'connecting', qr: null, pairingCode: code }
+  connectionStates.set(businessId, { ...prev, pairingCode: code })
 }
 
 export function getConnectionState(businessId: string): ConnectionState | null {

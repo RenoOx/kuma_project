@@ -24,13 +24,22 @@ async function requireAdmin(c: Context, next: Next): Promise<Response | void> {
 
 // ── Request body schemas ──────────────────────────────────────────────────────
 
-const createBusinessBody = z.object({
-  name: z.string().min(1),
-  whatsappNumber: z.string().min(1),
-  ownerWhatsappNumber: z.string().min(1).nullable().optional(),
-  ownerName: z.string().min(1).nullable().optional(),
-  timezone: z.string().optional(),
-})
+const createBusinessBody = z
+  .object({
+    name: z.string().min(1),
+    whatsappNumber: z.string().min(1),
+    ownerWhatsappNumber: z.string().min(1).nullable().optional(),
+    ownerName: z.string().min(1).nullable().optional(),
+    timezone: z.string().optional(),
+  })
+  .refine(
+    (v) => !v.ownerWhatsappNumber || v.ownerWhatsappNumber !== v.whatsappNumber,
+    {
+      message:
+        'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant. Use a separate personal number for the owner.',
+      path: ['ownerWhatsappNumber'],
+    },
+  )
 
 const patchBusinessBody = z
   .object({
@@ -41,6 +50,14 @@ const patchBusinessBody = z
     timezone: z.string().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
+  .refine(
+    (v) => !v.ownerWhatsappNumber || !v.whatsappNumber || v.ownerWhatsappNumber !== v.whatsappNumber,
+    {
+      message:
+        'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant.',
+      path: ['ownerWhatsappNumber'],
+    },
+  )
 
 const createKbBody = z.object({
   category: z.string().min(1),

@@ -29,6 +29,7 @@ export interface WhatsappClient {
   onDisconnect(handler: DisconnectHandler): void
   onQR(handler: QRHandler): void
   onConnect(handler: ConnectHandler): void
+  requestPairingCode(phoneNumber: string): Promise<string>
 }
 
 export async function makeWhatsappClient(
@@ -112,6 +113,10 @@ export async function makeWhatsappClient(
     },
     onConnect(handler) {
       connectHandlers.push(handler)
+    },
+    async requestPairingCode(phoneNumber: string): Promise<string> {
+      const digits = phoneNumber.replace(/\D/g, '')
+      return sock.requestPairingCode(digits)
     },
   }
 }
