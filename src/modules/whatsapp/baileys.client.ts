@@ -1,5 +1,6 @@
 import { logger as rootLogger } from '@/config/logger.js'
-import makeWASocket, {
+import {
+  makeWASocket,
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
@@ -45,21 +46,24 @@ export async function makeWhatsappClient(
   await mkdir(opts.sessionDir, { recursive: true })
   const { state, saveCreds } = await useMultiFileAuthState(opts.sessionDir)
 
-  // Baileys is chatty; keep its internal logs at warn so we still see issues
-  // without flooding ours.
-  const baileysLogger = pino({ level: 'warn' })
+  // Elevated to `info` while we stabilize prod pairing — surfaces protocol
+  // events (stream errors, disconnect reasons) in Railway logs without full spam.
+  const baileysLogger = pino({ level: 'info' })
 
   // WhatsApp's server rejects the handshake with a generic 500 if the client
   // doesn't announce a WA-Web version it accepts and a recognizable browser
   // identifier. fetchLatestBaileysVersion pulls the currently-supported one.
   const { version } = await fetchLatestBaileysVersion()
-  log.debug({ version }, 'using whatsapp web version')
+  log.info({ version }, 'using whatsapp web version')
 
+  // Ubuntu/Chrome is the most reliable browser identifier for pairing codes in
+  // recent Baileys releases — macOS + Safari has been rejected sporadically by
+  // WA multi-device when passkey is enrolled.
   const sock = makeWASocket({
     auth: state,
     logger: baileysLogger,
     version,
-    browser: Browsers.macOS('Desktop'),
+    browser: Browsers.ubuntu('Chrome'),
   })
 
   const messageHandlers: MessageHandler[] = []
@@ -75,6 +79,7 @@ export async function makeWhatsappClient(
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
+    log.info({ connection, hasQr: !!qr, pairingCodeRequested }, 'connection.update')
 
     // Request pairing code the first time WA is ready to authenticate (same
     // moment the QR would be emitted). This avoids calling too early when the
@@ -82,11 +87,14 @@ export async function makeWhatsappClient(
     if (qr && opts.pairingPhoneNumber && !state.creds.registered && !pairingCodeRequested) {
       pairingCodeRequested = true
       const digits = opts.pairingPhoneNumber.replace(/\D/g, '')
+      log.info({ phone: `***${digits.slice(-4)}` }, 'requesting pairing code')
       sock.requestPairingCode(digits).then((code) => {
-        log.info('pairing code generated')
+        log.info({ codeLen: code.length }, 'pairing code generated')
         for (const h of pairingCodeHandlers) h(code)
       }).catch((err: unknown) => {
-        log.warn({ err }, 'requestPairingCode failed — will fall back to QR')
+        log.error({ err }, 'requestPairingCode failed — will fall back to QR')
+        // Reset so a manual retry from /admin/whatsapp/pair can try again.
+        pairingCodeRequested = false
       })
     }
 
@@ -100,9 +108,14 @@ export async function makeWhatsappClient(
       for (const handler of connectHandlers) handler()
     }
     if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
+      const err = lastDisconnect?.error as Boom | undefined
+      const statusCode = err?.output?.statusCode
+      const errMessage = err?.message
       const isLoggedOut = statusCode === DisconnectReason.loggedOut
-      log.warn({ statusCode, isLoggedOut }, 'whatsapp connection closed')
+      log.warn(
+        { statusCode, errMessage, isLoggedOut, disconnectReasonName: statusCode ? DisconnectReason[statusCode] : undefined },
+        'whatsapp connection closed',
+      )
       const reason: 'logout' | 'transient' = isLoggedOut ? 'logout' : 'transient'
       for (const handler of disconnectHandlers) handler(reason)
     }
