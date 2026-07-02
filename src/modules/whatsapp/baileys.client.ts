@@ -61,12 +61,17 @@ export async function makeWhatsappClient(
     // Skip the full history sync on connect — we only need incoming messages
     // from now on, not the entire chat history.
     syncFullHistory: false,
+    // Skip the initial sync/profile queries entirely. On fresh WA accounts
+    // some of these queries hang forever and, when they finally hit the
+    // internal timeout, Baileys tears down the whole stream. We don't need
+    // the data those queries fetch (business profile, prefs, ...), we only
+    // need incoming/outgoing messages.
+    fireInitQueries: false,
     // Don't announce online presence to contacts. A bot doesn't need to leak
     // "last seen".
     markOnlineOnConnect: false,
-    // Give init queries a long leash. On fresh WA accounts the server takes
-    // its time responding, and the default 60s times out — killing the whole
-    // socket right after `connection: open`. 3 min is plenty.
+    // Give any remaining IQ (not init) a long leash — 3 min instead of the
+    // 60s default so a slow WA response doesn't kill the socket.
     defaultQueryTimeoutMs: 180_000,
     // Emit own outgoing messages back through the event stream. Not needed
     // for the bot; keeping it off reduces noise on the handler.
