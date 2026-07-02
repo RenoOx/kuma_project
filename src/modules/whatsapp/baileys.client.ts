@@ -68,23 +68,28 @@ export async function makeWhatsappClient(
   const connectHandlers: ConnectHandler[] = []
   const pairingCodeHandlers: PairingCodeHandler[] = []
 
-  // Fire requestPairingCode immediately if a phone number was provided and this
-  // is a fresh session (not yet registered). Must happen before the WA handshake
-  // advances to avoid the code being tied to the wrong session state.
-  if (opts.pairingPhoneNumber && !state.creds.registered) {
-    const digits = opts.pairingPhoneNumber.replace(/\D/g, '')
-    sock.requestPairingCode(digits).then((code) => {
-      log.info('pairing code generated')
-      for (const h of pairingCodeHandlers) h(code)
-    }).catch((err: unknown) => {
-      log.warn({ err }, 'requestPairingCode at startup failed')
-    })
-  }
+  // Track whether we already requested a pairing code for this session.
+  let pairingCodeRequested = false
 
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
+
+    // Request pairing code the first time WA is ready to authenticate (same
+    // moment the QR would be emitted). This avoids calling too early when the
+    // WebSocket isn't established yet.
+    if (qr && opts.pairingPhoneNumber && !state.creds.registered && !pairingCodeRequested) {
+      pairingCodeRequested = true
+      const digits = opts.pairingPhoneNumber.replace(/\D/g, '')
+      sock.requestPairingCode(digits).then((code) => {
+        log.info('pairing code generated')
+        for (const h of pairingCodeHandlers) h(code)
+      }).catch((err: unknown) => {
+        log.warn({ err }, 'requestPairingCode failed — will fall back to QR')
+      })
+    }
+
     if (qr) {
       log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
       qrcode.generate(qr, { small: true })
