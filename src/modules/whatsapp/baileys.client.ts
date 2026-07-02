@@ -140,7 +140,9 @@ export async function makeWhatsappClient(
   return {
     sock,
     async sendMessage(jid, text) {
-      await sock.sendMessage(jid, { text })
+      log.info({ jid, textLen: text.length }, 'sock.sendMessage: calling')
+      const result = await sock.sendMessage(jid, { text })
+      log.info({ jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status }, 'sock.sendMessage: returned')
     },
     onMessage(handler) {
       messageHandlers.push(handler)

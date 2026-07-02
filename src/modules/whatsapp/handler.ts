@@ -325,8 +325,13 @@ async function processMessage(
     }
   }
 
+  log.info(
+    { jid, replyLen: replyText.length, replyPreview: replyText.slice(0, 60) },
+    "about to send reply over whatsapp",
+  );
   try {
     await send(jid, replyText);
+    log.info({ jid }, "reply sent successfully");
   } catch (err) {
     log.error({ err, jid }, "failed to send reply over whatsapp");
   }
