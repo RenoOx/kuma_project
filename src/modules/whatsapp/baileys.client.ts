@@ -109,8 +109,19 @@ export async function makeWhatsappClient(
   })
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    log.info({ type, count: messages.length }, 'messages.upsert received')
     if (type !== 'notify') return
     for (const m of messages) {
+      log.info(
+        {
+          fromMe: m.key.fromMe,
+          remoteJid: m.key.remoteJid,
+          hasConversation: !!m.message?.conversation,
+          hasExtendedText: !!m.message?.extendedTextMessage,
+          msgKeys: m.message ? Object.keys(m.message) : [],
+        },
+        'dispatching message to handlers',
+      )
       for (const handler of messageHandlers) {
         try {
           await handler(m)

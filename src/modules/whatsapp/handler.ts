@@ -322,22 +322,37 @@ export function handleIncomingMessage(
 ): Promise<void> {
   const log = logger.child({ component: "whatsapp.handler", businessId });
 
-  if (raw.key.fromMe) return Promise.resolve();
+  if (raw.key.fromMe) {
+    log.info({ jid: raw.key.remoteJid }, "handler skip: fromMe");
+    return Promise.resolve();
+  }
   const jid = raw.key.remoteJid;
-  if (!jid) return Promise.resolve();
-  if (jid.endsWith("@g.us") || jid === "status@broadcast") return Promise.resolve();
+  if (!jid) {
+    log.info("handler skip: no remoteJid");
+    return Promise.resolve();
+  }
+  if (jid.endsWith("@g.us") || jid === "status@broadcast") {
+    log.info({ jid }, "handler skip: group or status");
+    return Promise.resolve();
+  }
 
   const phone = extractPhone(raw);
   if (!phone) {
-    log.debug({ jid }, "skipping message with non-phone JID");
+    // Log the raw key so we can see if it's an @lid without senderPn (common
+    // pain point after LID migration).
+    log.warn(
+      { jid, keyShape: Object.keys(raw.key), senderPn: (raw.key as { senderPn?: string }).senderPn },
+      "handler skip: no phone extractable from JID",
+    );
     return Promise.resolve();
   }
   const text = extractText(raw);
   if (!text) {
-    log.debug({ jid }, "skipping message with no text payload");
+    log.info({ jid, msgKeys: raw.message ? Object.keys(raw.message) : [] }, "handler skip: no text payload");
     return Promise.resolve();
   }
 
+  log.info({ phone, textPreview: text.slice(0, 60) }, "handler accepted incoming message");
   return withSenderLock(`${businessId}:${phone}`, () =>
     processMessage(raw, businessId, send, jid, phone, text),
   );
