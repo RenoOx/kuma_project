@@ -69,12 +69,20 @@ function extractPhone(msg: WAMessage): string | null {
       remoteJidAlt?: string;
       participant?: string;
     };
-    return (
+    // Prefer a real phone if any related field exposes one.
+    const real =
       jidToPhone(key.senderPn) ??
       jidToPhone(key.remoteJidAlt) ??
-      jidToPhone(key.participant) ??
-      null
-    );
+      jidToPhone(key.participant);
+    if (real) return real;
+
+    // LID-only fallback: post-LID-migration, WA hides the real phone and only
+    // exposes a stable LID (e.g. "153497903333610@lid"). We treat the digits
+    // as a synthetic phone so downstream code (customer keying, DB uniqueness)
+    // keeps working. It's not a real E.164 number, but it IS a stable per-user
+    // identifier — same contact = same LID across all future messages.
+    const left = jid.slice(0, jid.indexOf("@"));
+    if (/^\d+$/.test(left)) return `+${left}`;
   }
 
   return null;
