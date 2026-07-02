@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { rm } from "node:fs/promises";
 import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
@@ -62,9 +63,22 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
     if (reason === "logout") {
       setConnectionStatus(businessId, "logged_out");
       logger.error(
-        { businessId },
-        "whatsapp logged out — delete the session folder and restart to reconnect",
+        { businessId, sessionDir },
+        "whatsapp logged out — auto-clearing stale session and restarting for fresh pairing",
       );
+      // Auto-recovery: WA revoked these creds (401 loggedOut). The only path
+      // forward is a fresh session + new QR/pairing code. Delete files and
+      // restart the client so the operator can just re-scan without SSH access.
+      setTimeout(() => {
+        rm(sessionDir, { recursive: true, force: true })
+          .then(() => {
+            logger.info({ businessId, sessionDir }, "stale session cleared, booting fresh client");
+            return startWhatsappFor(businessId, whatsappNumber);
+          })
+          .catch((err) => {
+            logger.error({ err, businessId }, "auto-recovery after logout failed");
+          });
+      }, RECONNECT_DELAY_MS).unref();
       return;
     }
     logger.warn(
