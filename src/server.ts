@@ -61,26 +61,20 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
 
   client.onDisconnect((reason) => {
     if (reason === "logout") {
+      // HALT. WA revoked these creds. Retrying automatically is dangerous —
+      // repeated pairing failures escalate WA rate-limits and can ban the
+      // number outright. A human operator must decide when it's safe to retry
+      // (usually 24h+ after activity stops) and trigger it explicitly via
+      // POST /admin/businesses/:id/session/resume.
       setConnectionStatus(businessId, "logged_out");
       logger.error(
         { businessId, sessionDir },
-        "whatsapp logged out — auto-clearing stale session and restarting for fresh pairing",
+        "whatsapp logged out — HALTED. Do NOT redeploy or restart Railway (each attempt extends the WA rate-limit). Wait 24h+ then POST /admin/businesses/:id/session/resume",
       );
-      // Auto-recovery: WA revoked these creds (401 loggedOut). The only path
-      // forward is a fresh session + new QR/pairing code. Delete files and
-      // restart the client so the operator can just re-scan without SSH access.
-      setTimeout(() => {
-        rm(sessionDir, { recursive: true, force: true })
-          .then(() => {
-            logger.info({ businessId, sessionDir }, "stale session cleared, booting fresh client");
-            return startWhatsappFor(businessId, whatsappNumber);
-          })
-          .catch((err) => {
-            logger.error({ err, businessId }, "auto-recovery after logout failed");
-          });
-      }, RECONNECT_DELAY_MS).unref();
       return;
     }
+    // Transient drop (network hiccup, WA server blip) — safe to reconnect,
+    // credentials are still valid.
     logger.warn(
       { businessId, delayMs: RECONNECT_DELAY_MS },
       "whatsapp dropped, scheduling reconnect",
@@ -91,6 +85,15 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
       });
     }, RECONNECT_DELAY_MS).unref();
   });
+}
+
+// Exposed so the admin resume endpoint can restart a halted business on
+// explicit operator action. Clears the stale session before booting.
+export async function restartWhatsappFor(businessId: string, whatsappNumber: string): Promise<void> {
+  const sessionDir = `${env.SESSIONS_DIR}/${businessId}`;
+  await rm(sessionDir, { recursive: true, force: true });
+  logger.info({ businessId, sessionDir }, "manual resume: session cleared, booting fresh client");
+  return startWhatsappFor(businessId, whatsappNumber);
 }
 
 async function bootWhatsapp(): Promise<void> {

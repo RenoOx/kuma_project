@@ -236,3 +236,24 @@ adminRoutes.delete('/admin/businesses/:id/session', async (c) => {
     return c.json({ error: 'delete_failed', message: (err as Error).message }, 500)
   }
 })
+
+// Manual resume for a business whose Baileys client halted after a loggedOut.
+// This is the ONLY sanctioned path to retry a pairing — the operator must
+// decide it's safe (WA rate-limits generally expire after 24h of no activity).
+// Boots a fresh Baileys client without needing a Railway restart.
+adminRoutes.post('/admin/businesses/:id/session/resume', async (c) => {
+  const business = await businessRepo.findById(c.req.param('id'))
+  if (!business) return c.json({ error: 'not_found' }, 404)
+
+  try {
+    // Deferred import to avoid a cycle between admin.routes and server.
+    const { restartWhatsappFor } = await import('@/server.js')
+    await restartWhatsappFor(business.id, business.whatsappNumber)
+    return c.json({
+      resumed: business.id,
+      next: 'Visit /admin/whatsapp/qr to scan the fresh QR.',
+    })
+  } catch (err) {
+    return c.json({ error: 'resume_failed', message: (err as Error).message }, 500)
+  }
+})
