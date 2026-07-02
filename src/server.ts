@@ -33,7 +33,7 @@ const RECONNECT_DELAY_MS = 5_000;
 async function startWhatsappFor(businessId: string, whatsappNumber: string): Promise<void> {
   const sessionDir = `${env.SESSIONS_DIR}/${businessId}`;
 
-  const client = await makeWhatsappClient({ businessId, sessionDir, pairingPhoneNumber: whatsappNumber });
+  const client = await makeWhatsappClient({ businessId, sessionDir });
 
   // Register the live client for proactive notifications. We register on
   // EVERY boot (including reconnects below), because the underlying socket

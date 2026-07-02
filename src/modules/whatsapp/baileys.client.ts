@@ -22,9 +22,6 @@ export type PairingCodeHandler = (code: string) => void
 export interface WhatsappClientOptions {
   businessId: string
   sessionDir: string
-  // If set and creds are not yet registered, requestPairingCode fires immediately
-  // after socket creation (before the QR handshake advances on WA servers).
-  pairingPhoneNumber?: string
 }
 
 export interface WhatsappClient {
@@ -56,14 +53,11 @@ export async function makeWhatsappClient(
   const { version } = await fetchLatestBaileysVersion()
   log.info({ version }, 'using whatsapp web version')
 
-  // Ubuntu/Chrome is the most reliable browser identifier for pairing codes in
-  // recent Baileys releases — macOS + Safari has been rejected sporadically by
-  // WA multi-device when passkey is enrolled.
   const sock = makeWASocket({
     auth: state,
     logger: baileysLogger,
     version,
-    browser: Browsers.ubuntu('Chrome'),
+    browser: Browsers.macOS('Desktop'),
   })
 
   const messageHandlers: MessageHandler[] = []
@@ -72,31 +66,11 @@ export async function makeWhatsappClient(
   const connectHandlers: ConnectHandler[] = []
   const pairingCodeHandlers: PairingCodeHandler[] = []
 
-  // Track whether we already requested a pairing code for this session.
-  let pairingCodeRequested = false
-
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
-    log.info({ connection, hasQr: !!qr, pairingCodeRequested }, 'connection.update')
-
-    // Request pairing code the first time WA is ready to authenticate (same
-    // moment the QR would be emitted). This avoids calling too early when the
-    // WebSocket isn't established yet.
-    if (qr && opts.pairingPhoneNumber && !state.creds.registered && !pairingCodeRequested) {
-      pairingCodeRequested = true
-      const digits = opts.pairingPhoneNumber.replace(/\D/g, '')
-      log.info({ phone: `***${digits.slice(-4)}` }, 'requesting pairing code')
-      sock.requestPairingCode(digits).then((code) => {
-        log.info({ codeLen: code.length }, 'pairing code generated')
-        for (const h of pairingCodeHandlers) h(code)
-      }).catch((err: unknown) => {
-        log.error({ err }, 'requestPairingCode failed — will fall back to QR')
-        // Reset so a manual retry from /admin/whatsapp/pair can try again.
-        pairingCodeRequested = false
-      })
-    }
+    log.info({ connection, hasQr: !!qr }, 'connection.update')
 
     if (qr) {
       log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
