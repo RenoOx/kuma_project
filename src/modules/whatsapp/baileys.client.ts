@@ -58,6 +58,19 @@ export async function makeWhatsappClient(
     logger: baileysLogger,
     version,
     browser: Browsers.macOS('Desktop'),
+    // Skip the full history sync on connect — we only need incoming messages
+    // from now on, not the entire chat history.
+    syncFullHistory: false,
+    // Don't announce online presence to contacts. A bot doesn't need to leak
+    // "last seen".
+    markOnlineOnConnect: false,
+    // Give init queries a long leash. On fresh WA accounts the server takes
+    // its time responding, and the default 60s times out — killing the whole
+    // socket right after `connection: open`. 3 min is plenty.
+    defaultQueryTimeoutMs: 180_000,
+    // Emit own outgoing messages back through the event stream. Not needed
+    // for the bot; keeping it off reduces noise on the handler.
+    emitOwnEvents: false,
   })
 
   const messageHandlers: MessageHandler[] = []
