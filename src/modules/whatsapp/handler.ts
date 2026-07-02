@@ -46,26 +46,35 @@ function extractText(msg: WAMessage): string | null {
 }
 
 // Returns the peer's E.164 phone (with leading '+') from a Baileys JID or null
-// for unsupported shapes. Handles both classic '@s.whatsapp.net' JIDs and
-// '@lid' (linked identifier) JIDs by reading senderPn when available.
+// for unsupported shapes. Handles classic '@s.whatsapp.net' JIDs and, since
+// the LID migration, '@lid' JIDs where the real phone can live in any of:
+// senderPn (older Baileys), remoteJidAlt (newer), or participant (fallback).
+function jidToPhone(jid: string | undefined): string | null {
+  if (!jid || !jid.endsWith("@s.whatsapp.net")) return null;
+  const left = jid.slice(0, jid.indexOf("@"));
+  if (!/^\d+$/.test(left)) return null;
+  return `+${left}`;
+}
+
 function extractPhone(msg: WAMessage): string | null {
   const jid = msg.key.remoteJid;
   if (!jid) return null;
 
-  if (jid.endsWith("@s.whatsapp.net")) {
-    const at = jid.indexOf("@");
-    const left = jid.slice(0, at);
-    if (!/^\d+$/.test(left)) return null;
-    return `+${left}`;
-  }
+  const direct = jidToPhone(jid);
+  if (direct) return direct;
 
   if (jid.endsWith("@lid")) {
-    const senderPn = (msg.key as { senderPn?: string }).senderPn;
-    if (!senderPn || !senderPn.endsWith("@s.whatsapp.net")) return null;
-    const at = senderPn.indexOf("@");
-    const left = senderPn.slice(0, at);
-    if (!/^\d+$/.test(left)) return null;
-    return `+${left}`;
+    const key = msg.key as {
+      senderPn?: string;
+      remoteJidAlt?: string;
+      participant?: string;
+    };
+    return (
+      jidToPhone(key.senderPn) ??
+      jidToPhone(key.remoteJidAlt) ??
+      jidToPhone(key.participant) ??
+      null
+    );
   }
 
   return null;
@@ -338,10 +347,21 @@ export function handleIncomingMessage(
 
   const phone = extractPhone(raw);
   if (!phone) {
-    // Log the raw key so we can see if it's an @lid without senderPn (common
-    // pain point after LID migration).
+    // Log everything we've got so we can see which field WA populated for
+    // this LID message shape (senderPn / remoteJidAlt / participant).
+    const key = raw.key as {
+      senderPn?: string;
+      remoteJidAlt?: string;
+      participant?: string;
+    };
     log.warn(
-      { jid, keyShape: Object.keys(raw.key), senderPn: (raw.key as { senderPn?: string }).senderPn },
+      {
+        jid,
+        keyShape: Object.keys(raw.key),
+        senderPn: key.senderPn,
+        remoteJidAlt: key.remoteJidAlt,
+        participant: key.participant,
+      },
       "handler skip: no phone extractable from JID",
     );
     return Promise.resolve();
