@@ -141,11 +141,19 @@ export async function makeWhatsappClient(
     sock,
     async sendMessage(jid, text) {
       log.info({ jid, textLen: text.length }, 'sock.sendMessage: calling')
-      // For @lid recipients, force-establish an E2E session first. WA rejects
-      // sends with error 463 in the ACK when the sender has no session for the
-      // LID target (very common on the first message to a new LID contact).
-      // assertSessions is a no-op when a session already exists.
+      // LID recipients require the sender to have E2E key material fetched
+      // and a signal session established. assertSessions alone often isn't
+      // enough because WA delays returning key material until presence is
+      // subscribed. Pattern that works: presenceSubscribe → delay →
+      // assertSessions → send.
       if (jid.endsWith('@lid')) {
+        try {
+          await sock.presenceSubscribe(jid)
+          log.info({ jid }, 'presenceSubscribe ok for lid')
+        } catch (err) {
+          log.warn({ err, jid }, 'presenceSubscribe failed')
+        }
+        await new Promise((r) => setTimeout(r, 800))
         try {
           await sock.assertSessions([jid], true)
           log.info({ jid }, 'assertSessions ok for lid')
