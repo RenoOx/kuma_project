@@ -7,6 +7,7 @@ import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import { asc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { nanoid } from 'nanoid'
+import { rm } from 'node:fs/promises'
 import { z } from 'zod'
 import type { Context, Next } from 'hono'
 
@@ -216,4 +217,22 @@ adminRoutes.delete('/admin/kb/:id', async (c) => {
     .returning({ id: knowledgeBase.id })
   if (rows.length === 0) return c.json({ error: 'not_found' }, 404)
   return c.json({ deleted: rows[0]?.id })
+})
+
+// ── WhatsApp session ──────────────────────────────────────────────────────────
+
+adminRoutes.delete('/admin/businesses/:id/session', async (c) => {
+  const business = await businessRepo.findById(c.req.param('id'))
+  if (!business) return c.json({ error: 'not_found' }, 404)
+
+  const sessionDir = `${env.SESSIONS_DIR}/${business.id}`
+  try {
+    await rm(sessionDir, { recursive: true, force: true })
+    return c.json({
+      deleted: sessionDir,
+      next: 'Restart the service so Baileys boots a fresh session and generates a new QR / pairing code.',
+    })
+  } catch (err) {
+    return c.json({ error: 'delete_failed', message: (err as Error).message }, 500)
+  }
 })
