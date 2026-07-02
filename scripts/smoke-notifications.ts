@@ -37,6 +37,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     onConnect() {
       // noop
     },
+    onPairingCode() {
+      // noop
+    },
     async requestPairingCode() {
       return ''
     },

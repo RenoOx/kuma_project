@@ -7,6 +7,7 @@ import { makeWhatsappClient } from "./modules/whatsapp/baileys.client.js";
 import {
   registerClient,
   setConnectionStatus,
+  storePairingCode,
   storeQR,
 } from "./modules/whatsapp/clientRegistry.js";
 import { handleIncomingMessage } from "./modules/whatsapp/handler.js";
@@ -28,10 +29,10 @@ const server = serve(
 
 const RECONNECT_DELAY_MS = 5_000;
 
-async function startWhatsappFor(businessId: string): Promise<void> {
+async function startWhatsappFor(businessId: string, whatsappNumber: string): Promise<void> {
   const sessionDir = `${env.SESSIONS_DIR}/${businessId}`;
 
-  const client = await makeWhatsappClient({ businessId, sessionDir });
+  const client = await makeWhatsappClient({ businessId, sessionDir, pairingPhoneNumber: whatsappNumber });
 
   // Register the live client for proactive notifications. We register on
   // EVERY boot (including reconnects below), because the underlying socket
@@ -42,6 +43,11 @@ async function startWhatsappFor(businessId: string): Promise<void> {
   client.onQR((qr) => {
     storeQR(businessId, qr);
     logger.info({ businessId }, "whatsapp QR stored — visit /admin/whatsapp/qr to scan");
+  });
+
+  client.onPairingCode((code) => {
+    storePairingCode(businessId, code);
+    logger.info({ businessId }, "pairing code stored — visit /admin/whatsapp/pair to see it");
   });
 
   client.onConnect(() => {
@@ -66,7 +72,7 @@ async function startWhatsappFor(businessId: string): Promise<void> {
       "whatsapp dropped, scheduling reconnect",
     );
     setTimeout(() => {
-      startWhatsappFor(businessId).catch((err) => {
+      startWhatsappFor(businessId, whatsappNumber).catch((err) => {
         logger.error({ err, businessId }, "whatsapp reconnect failed");
       });
     }, RECONNECT_DELAY_MS).unref();
@@ -90,7 +96,7 @@ async function bootWhatsapp(): Promise<void> {
       { businessId: business.id, name: business.name, whatsappNumber: business.whatsappNumber },
       "booting whatsapp client for business",
     );
-    startWhatsappFor(business.id).catch((err) => {
+    startWhatsappFor(business.id, business.whatsappNumber).catch((err) => {
       logger.error({ err, businessId: business.id }, "whatsapp boot failed for business");
     });
   }

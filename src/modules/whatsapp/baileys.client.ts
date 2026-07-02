@@ -16,10 +16,14 @@ export type MessageHandler = (raw: WAMessage) => Promise<void> | void
 export type DisconnectHandler = (reason: 'logout' | 'transient') => void
 export type QRHandler = (qr: string) => void
 export type ConnectHandler = () => void
+export type PairingCodeHandler = (code: string) => void
 
 export interface WhatsappClientOptions {
   businessId: string
   sessionDir: string
+  // If set and creds are not yet registered, requestPairingCode fires immediately
+  // after socket creation (before the QR handshake advances on WA servers).
+  pairingPhoneNumber?: string
 }
 
 export interface WhatsappClient {
@@ -29,6 +33,7 @@ export interface WhatsappClient {
   onDisconnect(handler: DisconnectHandler): void
   onQR(handler: QRHandler): void
   onConnect(handler: ConnectHandler): void
+  onPairingCode(handler: PairingCodeHandler): void
   requestPairingCode(phoneNumber: string): Promise<string>
 }
 
@@ -61,6 +66,20 @@ export async function makeWhatsappClient(
   const disconnectHandlers: DisconnectHandler[] = []
   const qrHandlers: QRHandler[] = []
   const connectHandlers: ConnectHandler[] = []
+  const pairingCodeHandlers: PairingCodeHandler[] = []
+
+  // Fire requestPairingCode immediately if a phone number was provided and this
+  // is a fresh session (not yet registered). Must happen before the WA handshake
+  // advances to avoid the code being tied to the wrong session state.
+  if (opts.pairingPhoneNumber && !state.creds.registered) {
+    const digits = opts.pairingPhoneNumber.replace(/\D/g, '')
+    sock.requestPairingCode(digits).then((code) => {
+      log.info('pairing code generated')
+      for (const h of pairingCodeHandlers) h(code)
+    }).catch((err: unknown) => {
+      log.warn({ err }, 'requestPairingCode at startup failed')
+    })
+  }
 
   sock.ev.on('creds.update', saveCreds)
 
@@ -113,6 +132,9 @@ export async function makeWhatsappClient(
     },
     onConnect(handler) {
       connectHandlers.push(handler)
+    },
+    onPairingCode(handler) {
+      pairingCodeHandlers.push(handler)
     },
     async requestPairingCode(phoneNumber: string): Promise<string> {
       const digits = phoneNumber.replace(/\D/g, '')

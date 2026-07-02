@@ -165,27 +165,41 @@ app.get('/admin/whatsapp/pair', async (c) => {
     )
   }
 
-  const business = await businessRepo.findById(businessId)
-  if (!business) {
-    return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
-  }
+  const refreshUrl = `?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
 
-  let code: string
-  try {
-    code = await client.requestPairingCode(business.whatsappNumber)
-    storePairingCode(businessId, code)
-  } catch (err) {
-    const msg = (err as Error).message ?? 'error desconocido'
-    const isAlreadyRegistered = msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')
-    if (isAlreadyRegistered) {
+  // Use the code that was auto-generated at socket startup (best timing).
+  // Fall back to on-demand generation only when the user explicitly requests a new code.
+  const forceNew = c.req.query('new') === '1'
+  let code = state?.pairingCode ?? null
+
+  if (!code || forceNew) {
+    const business = await businessRepo.findById(businessId)
+    if (!business) {
+      return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
+    }
+    try {
+      code = await client.requestPairingCode(business.whatsappNumber)
+      storePairingCode(businessId, code)
+    } catch (err) {
+      const msg = (err as Error).message ?? 'error desconocido'
+      const isAlreadyRegistered = msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')
+      if (isAlreadyRegistered) {
+        return c.html(
+          renderPage('Ya vinculado', '<p style="color:green">✅ Este número ya tiene sesión activa. No es necesario vincular.</p>'),
+          200,
+        )
+      }
       return c.html(
-        renderPage('Ya vinculado', '<p style="color:green">✅ Este número ya tiene sesión activa. No es necesario vincular.</p>'),
-        200,
+        renderPage('Error', `<p style="color:red">No se pudo generar el código: ${msg}</p><p><a href="${refreshUrl}">Reintentar</a></p>`),
+        500,
       )
     }
+  }
+
+  if (!code) {
     return c.html(
-      renderPage('Error', `<p style="color:red">No se pudo generar el código: ${msg}</p><p><a href="?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}">Reintentar</a></p>`),
-      500,
+      renderPage('Generando...', `<p>Generando código de vinculación…</p><p><a href="${refreshUrl}">Recargar</a></p>`, 3),
+      200,
     )
   }
 
@@ -201,8 +215,8 @@ app.get('/admin/whatsapp/pair', async (c) => {
       <li>Ingresá este código:</li>
     </ol>
     <div style="font-size:2.5rem;font-weight:bold;letter-spacing:0.2rem;margin:1rem auto;font-family:monospace;background:#f4f4f4;padding:1rem 2rem;border-radius:8px;display:inline-block">${formatted}</div>
-    <p style="color:#888;font-size:0.85rem;margin-top:1rem">El código expira en ~60 segundos. La página se recarga automáticamente.</p>
-    <p><a href="?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}">Pedir código nuevo</a></p>`
+    <p style="color:#888;font-size:0.85rem;margin-top:1rem">El código expira en ~60 segundos.</p>
+    <p><a href="${refreshUrl}&new=1">Pedir código nuevo</a></p>`
 
   return c.html(renderPage('Código de vinculación', body, 60), 200)
 })
