@@ -230,8 +230,8 @@ function renderPage(title: string, body: string, refreshSecs?: number): string {
 </head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`
 }
 
-app.route('/', adminRoutes)
 app.route('/', dashboardRoutes)
+app.route('/', adminRoutes)
 
 app.onError((err, c) => {
   logger.error({ err, path: c.req.path }, 'unhandled error')
