@@ -3,6 +3,7 @@ import qrcode from 'qrcode'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
 import { adminRoutes } from './modules/admin/admin.routes.js'
+import { dashboardRoutes } from './modules/admin/dashboard.routes.js'
 import { googleAuthRoutes } from './modules/google/auth.routes.js'
 import * as businessRepo from './modules/business/business.repo.js'
 import { getConnectionState, getClient, storePairingCode } from './modules/whatsapp/clientRegistry.js'
@@ -230,6 +231,7 @@ function renderPage(title: string, body: string, refreshSecs?: number): string {
 }
 
 app.route('/', adminRoutes)
+app.route('/', dashboardRoutes)
 
 app.onError((err, c) => {
   logger.error({ err, path: c.req.path }, 'unhandled error')
