@@ -747,7 +747,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
       </div>
       <div class="stat-card">
         <div class="stat-label">Google Calendar</div>
-        <div class="stat-value" style="font-size:14px;margin-top:.4rem">${detail.googleConnected ? '<span class="badge badge-green">Conectado</span>' : '<span class="badge badge-gray">Sin conectar</span>'}</div>
+        <div class="stat-value" style="font-size:14px;margin-top:.4rem">${detail.googleConnectedEmail ? '<span class="badge badge-green">Conectado</span>' : '<span class="badge badge-gray">Sin conectar</span>'}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Bot</div>
@@ -779,6 +779,33 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
             <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-ghost btn-sm">Ver estado completo</a>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header">
+        <span class="card-title">Google Calendar</span>
+        ${detail.googleConnectedEmail
+          ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
+          : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'}
+      </div>
+      <div class="card-body">
+        ${detail.googleConnectedEmail
+          ? `<div class="info-row" style="margin-bottom:1rem">
+               <span class="info-label">Cuenta</span>
+               <span class="info-value">${esc(detail.googleConnectedEmail)}</span>
+             </div>
+             <div class="actions">
+               <form method="post" action="/admin/dashboard/${bid}/google-disconnect?secret=${se}" style="display:inline"
+                 onsubmit="return confirm('¿Desconectar Google Calendar? Las citas futuras no se crearán en el calendario.')">
+                 <button type="submit" class="btn btn-danger btn-sm">Desconectar Calendar</button>
+               </form>
+               <a href="/auth/google/connect?businessId=${bid}" class="btn btn-ghost btn-sm">Reconectar / cambiar cuenta</a>
+             </div>`
+          : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+               Conectá Google Calendar para que las citas se registren automáticamente.
+             </p>
+             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`}
       </div>
     </div>
 
@@ -814,7 +841,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   if (!secret) return unauthorized(c)
 
   const businessId = c.req.param('id')
-  const business = await businessRepo.findById(businessId)
+  const [business, gcEmail] = await Promise.all([
+    businessRepo.findById(businessId),
+    dashRepo.getGoogleConnectedEmail(businessId),
+  ])
   if (!business) return c.html('<h1>404</h1>', 404) as Response
 
   const se = encodeURIComponent(secret)
@@ -977,6 +1007,33 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
 
     </form>
 
+    <div class="card" style="margin-top:1rem">
+      <div class="card-header">
+        <span class="card-title">Google Calendar</span>
+        ${gcEmail
+          ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
+          : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'}
+      </div>
+      <div class="card-body">
+        ${gcEmail
+          ? `<div class="info-row" style="margin-bottom:1rem">
+               <span class="info-label">Cuenta</span>
+               <span class="info-value">${esc(gcEmail)}</span>
+             </div>
+             <div class="actions">
+               <form method="post" action="/admin/dashboard/${bid}/google-disconnect?secret=${se}" style="display:inline"
+                 onsubmit="return confirm('¿Desconectar Google Calendar?')">
+                 <button type="submit" class="btn btn-danger btn-sm">Desconectar Calendar</button>
+               </form>
+               <a href="/auth/google/connect?businessId=${bid}" class="btn btn-ghost btn-sm">Reconectar / cambiar cuenta</a>
+             </div>`
+          : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+               Conectá Google Calendar para que las citas se creen automáticamente.
+             </p>
+             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`}
+      </div>
+    </div>
+
     <script>
     let _svcCounter = ${initialServiceCount};
 
@@ -1117,6 +1174,22 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
 
   const se = encodeURIComponent(secret)
   return c.redirect(`/admin/whatsapp/pair?secret=${se}&businessId=${esc(businessId)}`, 302)
+})
+
+// ── POST /:id/google-disconnect — elimina credenciales de Google Calendar ────
+
+dashboardRoutes.post('/admin/dashboard/:id/google-disconnect', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  await dashRepo.deleteGoogleCredential(businessId)
+  logger.info({ businessId }, 'dashboard: Google Calendar disconnected by admin')
+
+  return c.redirect(
+    `/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}`,
+    302,
+  )
 })
 
 // ── POST /:id/disconnect — borra sesión y marca como logged_out ───────────────

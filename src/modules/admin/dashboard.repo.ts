@@ -8,6 +8,19 @@ import {
 } from '@/db/schema/index.js'
 import { and, count, desc, eq, gte, max } from 'drizzle-orm'
 
+export async function getGoogleConnectedEmail(businessId: string): Promise<string | null> {
+  const rows = await db
+    .select({ connectedEmail: googleCredentials.connectedEmail })
+    .from(googleCredentials)
+    .where(eq(googleCredentials.businessId, businessId))
+    .limit(1)
+  return rows[0]?.connectedEmail ?? null
+}
+
+export async function deleteGoogleCredential(businessId: string): Promise<void> {
+  await db.delete(googleCredentials).where(eq(googleCredentials.businessId, businessId))
+}
+
 // ── Business list stats ───────────────────────────────────────────────────────
 
 export interface BusinessStats {
@@ -78,7 +91,7 @@ export interface BusinessDetailStats {
   messagesToday: number
   messagesThisWeek: number
   appointmentsThisWeek: number
-  googleConnected: boolean
+  googleConnectedEmail: string | null
 }
 
 export async function getBusinessDetail(businessId: string): Promise<BusinessDetailStats> {
@@ -139,7 +152,7 @@ export async function getBusinessDetail(businessId: string): Promise<BusinessDet
       .where(and(eq(appointments.businessId, businessId), gte(appointments.scheduledAt, weekStart))),
 
     db
-      .select({ id: googleCredentials.id })
+      .select({ connectedEmail: googleCredentials.connectedEmail })
       .from(googleCredentials)
       .where(eq(googleCredentials.businessId, businessId))
       .limit(1),
@@ -158,6 +171,6 @@ export async function getBusinessDetail(businessId: string): Promise<BusinessDet
     messagesToday: Number(todayRow?.n ?? 0),
     messagesThisWeek: Number(weekRow?.n ?? 0),
     appointmentsThisWeek: Number(apptWeekRow?.n ?? 0),
-    googleConnected: gcRows.length > 0,
+    googleConnectedEmail: gcRows[0]?.connectedEmail ?? null,
   }
 }
