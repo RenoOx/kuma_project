@@ -255,12 +255,12 @@ const CSS = `
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#fafaf8;color:#0a0f0d;font-size:14px;line-height:1.6}
 a{color:inherit;text-decoration:none}
-.topbar{background:#fff;border-bottom:1px solid #e5e7eb;padding:0 1.5rem;display:flex;align-items:center;gap:1.5rem;height:52px;position:sticky;top:0;z-index:10}
-.brand{font-weight:700;font-size:15px;letter-spacing:-0.01em}
-.brand span{color:#059669}
+.topbar{background:#0a0f0d;border-bottom:1px solid #1a2b24;padding:0 1.5rem;display:flex;align-items:center;gap:1.5rem;height:52px;position:sticky;top:0;z-index:10}
+.brand{font-weight:700;font-size:15px;letter-spacing:-0.01em;color:#059669}
+.brand span{color:#d4b896}
 .nav{display:flex;gap:2px;margin-left:auto}
-.nav a{padding:.35rem .75rem;border-radius:6px;color:#6b7280;font-size:13px;font-weight:500}
-.nav a:hover{background:#f3f4f6;color:#0a0f0d}
+.nav a{padding:.35rem .75rem;border-radius:6px;color:#d4b896;font-size:13px;font-weight:500}
+.nav a:hover{background:rgba(212,184,150,0.08);color:#f0e6da}
 .nav a.active{background:#f0fdf4;color:#059669}
 .main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem}
@@ -375,14 +375,14 @@ function layout(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   ${refresh}
-  <title>Kuma Admin — ${esc(title)}</title>
+  <title>Emma Admin — ${esc(title)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>${CSS}</style>
 </head>
 <body>
   <div class="topbar">
-    <span class="brand">Kuma <span>Admin</span></span>
+    <span class="brand">Emma <span>Admin</span></span>
     <nav class="nav">
       ${navA('/admin/dashboard', 'Negocios', 'businesses')}
       ${navA('/admin/dashboard/sessions', 'Sesiones WA', 'sessions')}

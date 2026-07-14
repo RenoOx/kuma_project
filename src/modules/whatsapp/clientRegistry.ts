@@ -16,6 +16,21 @@ interface ConnectionState {
 
 const connectionStates = new Map<string, ConnectionState>()
 
+const pairingCodeRequestedAt = new Map<string, number>()
+
+const PAIRING_CODE_COOLDOWN_MS = 90_000
+
+export function getPairingCodeCooldownRemainingMs(businessId: string): number {
+  const last = pairingCodeRequestedAt.get(businessId)
+  if (!last) return 0
+  const elapsed = Date.now() - last
+  return Math.max(0, PAIRING_CODE_COOLDOWN_MS - elapsed)
+}
+
+export function recordPairingCodeRequest(businessId: string): void {
+  pairingCodeRequestedAt.set(businessId, Date.now())
+}
+
 export function registerClient(businessId: string, client: WhatsappClient): void {
   clients.set(businessId, client)
   connectionStates.set(businessId, { status: 'connecting', qr: null, pairingCode: null })
@@ -52,6 +67,7 @@ export function getClient(businessId: string): WhatsappClient | null {
 export function unregisterClient(businessId: string): void {
   clients.delete(businessId)
   connectionStates.delete(businessId)
+  pairingCodeRequestedAt.delete(businessId)
 }
 
 // Test-only helper: drops every registered client so isolated tests don't
@@ -59,4 +75,5 @@ export function unregisterClient(businessId: string): void {
 export function _resetRegistryForTests(): void {
   clients.clear()
   connectionStates.clear()
+  pairingCodeRequestedAt.clear()
 }

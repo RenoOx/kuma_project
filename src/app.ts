@@ -6,7 +6,13 @@ import { adminRoutes } from './modules/admin/admin.routes.js'
 import { dashboardRoutes } from './modules/admin/dashboard.routes.js'
 import { googleAuthRoutes } from './modules/google/auth.routes.js'
 import * as businessRepo from './modules/business/business.repo.js'
-import { getConnectionState, getClient, storePairingCode } from './modules/whatsapp/clientRegistry.js'
+import {
+  getConnectionState,
+  getClient,
+  storePairingCode,
+  getPairingCodeCooldownRemainingMs,
+  recordPairingCodeRequest,
+} from './modules/whatsapp/clientRegistry.js'
 
 const VERSION = '0.1.0'
 
@@ -174,12 +180,33 @@ app.get('/admin/whatsapp/pair', async (c) => {
   let code = state?.pairingCode ?? null
 
   if (!code || forceNew) {
+    // Server-side rate limit: prevent rapid pairing code requests that can trigger WA bans.
+    if (forceNew) {
+      const remainingMs = getPairingCodeCooldownRemainingMs(businessId)
+      if (remainingMs > 0) {
+        const remainingSecs = Math.ceil(remainingMs / 1000)
+        return c.html(
+          renderPage(
+            'Espera un momento',
+            `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong id="cd">${remainingSecs}</strong> segundos.</p>
+             <p><a href="${refreshUrl}">← Volver</a></p>
+             <script>
+               var s=${remainingSecs};
+               var t=setInterval(function(){s--;document.getElementById('cd').textContent=s;if(s<=0){clearInterval(t);location.href='${refreshUrl}';}},1000);
+             </script>`,
+          ),
+          429,
+        )
+      }
+    }
+
     const business = await businessRepo.findById(businessId)
     if (!business) {
       return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
     }
     try {
       code = await client.requestPairingCode(business.whatsappNumber)
+      recordPairingCodeRequest(businessId)
       storePairingCode(businessId, code)
     } catch (err) {
       const msg = (err as Error).message ?? 'error desconocido'
@@ -217,7 +244,37 @@ app.get('/admin/whatsapp/pair', async (c) => {
     </ol>
     <div style="font-size:2.5rem;font-weight:bold;letter-spacing:0.2rem;margin:1rem auto;font-family:monospace;background:#f4f4f4;padding:1rem 2rem;border-radius:8px;display:inline-block">${formatted}</div>
     <p style="color:#888;font-size:0.85rem;margin-top:1rem">El código expira en ~60 segundos.</p>
-    <p><a href="${refreshUrl}&new=1">Pedir código nuevo</a></p>`
+    <p>
+      <a id="new-code-link" href="${refreshUrl}&new=1"
+         style="color:#059669;font-size:0.9rem"
+         onclick="handleNewCode(event)">Pedir código nuevo</a>
+      <span id="new-code-wait" style="display:none;color:#b45309;font-size:0.9rem">
+        Podés pedir uno nuevo en <strong id="new-code-cd"></strong>s
+      </span>
+    </p>
+    <script>
+    (function(){
+      var KEY='kuma_pair_ts_${businessId}';
+      var COOLDOWN=90000;
+      function updateUI(){
+        var ts=parseInt(localStorage.getItem(KEY)||'0',10);
+        var rem=COOLDOWN-(Date.now()-ts);
+        if(rem>0){
+          document.getElementById('new-code-link').style.display='none';
+          document.getElementById('new-code-wait').style.display='';
+          document.getElementById('new-code-cd').textContent=Math.ceil(rem/1000);
+          setTimeout(updateUI,1000);
+        } else {
+          document.getElementById('new-code-link').style.display='';
+          document.getElementById('new-code-wait').style.display='none';
+        }
+      }
+      window.handleNewCode=function(e){
+        localStorage.setItem(KEY,Date.now().toString());
+      };
+      updateUI();
+    })();
+    </script>`
 
   return c.html(renderPage('Código de vinculación', body, 60), 200)
 })
@@ -225,7 +282,7 @@ app.get('/admin/whatsapp/pair', async (c) => {
 function renderPage(title: string, body: string, refreshSecs?: number): string {
   const refresh = refreshSecs ? `<meta http-equiv="refresh" content="${refreshSecs}">` : ''
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">${refresh}
-<title>Kuma — ${title}</title>
+<title>Emma — ${title}</title>
 <style>body{font-family:sans-serif;max-width:480px;margin:3rem auto;text-align:center}</style>
 </head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`
 }

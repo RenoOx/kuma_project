@@ -15,7 +15,7 @@ function htmlPage(title: string, body: string): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${title} · Kuma</title>
+  <title>${title} · Emma</title>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; max-width: 540px; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; color: #222; }
     .ok { color: #1d6f42; }
