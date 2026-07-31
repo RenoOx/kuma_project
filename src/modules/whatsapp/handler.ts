@@ -1,7 +1,9 @@
+import { env } from "@/config/env.js";
 import { logger } from "@/config/logger.js";
 import * as businessService from "@/modules/business/business.service.js";
 import * as conversationService from "@/modules/conversation/conversation.service.js";
 import * as customerService from "@/modules/customer/customer.service.js";
+import * as demoService from "@/modules/demo/demo.service.js";
 import * as eventsRepo from "@/modules/events/events.repo.js";
 import * as llmService from "@/modules/llm/llm.service.js";
 import * as messageService from "@/modules/message/message.service.js";
@@ -10,7 +12,7 @@ import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
-  "Disculpa, estoy con un problema técnico. Intenta de nuevo en un memento.";
+  "Mmm, algo no salió bien de mi lado. Intenta de nuevo en un momento, ¿va?";
 
 const PAUSED_REPLY =
   "En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.";
@@ -110,6 +112,27 @@ async function processMessage(
   }
   const business = businessResult.data;
 
+  // DEMO COMMAND — #demo <profile> from the verified admin phone switches the
+  // business profile instantly. Checked before owner/customer routing so it
+  // works regardless of whether the admin is also the business owner.
+  if (env.DEMO_ADMIN_PHONE && phone === env.DEMO_ADMIN_PHONE) {
+    const trimmed = text.trim()
+    const demoMatch = /^#demo\s+(\w+)$/i.exec(trimmed)
+    if (demoMatch) {
+      const keyword = demoMatch[1]!.toLowerCase()
+      const result = await demoService.applyDemoProfile(businessId, keyword)
+      let reply: string
+      if (result.ok) {
+        reply = `✅ Demo activado: *${result.data}*\nServicios, horarios y precios del perfil "${keyword}" ya están activos. El próximo mensaje al bot usará este perfil.`
+      } else {
+        reply = result.error.userMessage
+      }
+      log.info({ keyword, ok: result.ok }, "demo command processed")
+      try { await send(jid, reply) } catch {}
+      return
+    }
+  }
+
   // OWNER FLOW — bypass customer lookup, talk to the personal assistant.
   if (business.ownerWhatsappNumber && business.ownerWhatsappNumber === phone) {
     const ownerThread =
@@ -182,6 +205,7 @@ async function processMessage(
       { err: customerResult.error.logContext, code: customerResult.error.code },
       "getOrCreate customer failed",
     );
+    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
     return;
   }
   const customer = customerResult.data;
@@ -198,6 +222,7 @@ async function processMessage(
       },
       "getOrCreateOpen conversation failed",
     );
+    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
     return;
   }
   const conversation = conversationResult.data;
@@ -213,6 +238,7 @@ async function processMessage(
       { err: userMsgResult.error.logContext, code: userMsgResult.error.code },
       "append user message failed",
     );
+    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
     return;
   }
 

@@ -21,11 +21,11 @@ import { kumaTools } from './tools.js'
 const MODEL = 'gpt-4o-mini'
 const TEMPERATURE = 0.4
 const MAX_TOKENS = 300
-const HISTORY_LIMIT = 10
+const HISTORY_LIMIT = 20
 const MAX_TOOL_ITERATIONS = 5
 const OPENAI_TIMEOUT_MS = 30_000
 const MAX_ITERATIONS_FALLBACK_TEXT =
-  'Disculpa, no pude resolver tu consulta. Un humano te va a contactar.'
+  'No me quedó claro cómo ayudarte con eso. Un encargado te va a contactar para orientarte mejor.'
 
 function convertHistoryToChatMessages(history: Message[]): ChatCompletionMessageParam[] {
   const out: ChatCompletionMessageParam[] = []

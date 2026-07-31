@@ -33,6 +33,12 @@ const envSchema = z.object({
     (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
     z.string().min(8).optional(),
   ),
+  // E.164 phone of the Vamvu Labs admin who can send #demo commands via WA.
+  // If unset the demo feature is disabled. E.g. "+51999123456"
+  DEMO_ADMIN_PHONE: z.preprocess(
+    (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;

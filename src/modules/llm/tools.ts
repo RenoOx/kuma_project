@@ -53,7 +53,7 @@ export const kumaTools: ChatCompletionTool[] = [
     function: {
       name: 'escalate_to_human',
       description:
-        'Marca la conversación para que un humano la atienda. Usar cuando el cliente está molesto, pide hablar con persona, o pide algo que no podés resolver con tus herramientas.',
+        'Marca la conversación para que un humano la atienda. Usar cuando: el cliente pide hablar con una persona, el cliente está molesto o frustrado, el cliente menciona una queja sobre un servicio anterior, el cliente pregunta por pagos o reembolsos o descuentos especiales, o el cliente repite la misma pregunta sin haber recibido una respuesta útil.',
       parameters: {
         type: 'object',
         properties: {
