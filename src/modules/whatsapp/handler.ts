@@ -115,6 +115,7 @@ async function processMessage(
   // DEMO COMMAND — #demo <profile> from the verified admin phone switches the
   // business profile instantly. Checked before owner/customer routing so it
   // works regardless of whether the admin is also the business owner.
+  log.debug({ phone, demoAdminPhone: env.DEMO_ADMIN_PHONE ?? 'not set' }, "demo auth check")
   if (env.DEMO_ADMIN_PHONE && phone === env.DEMO_ADMIN_PHONE) {
     const trimmed = text.trim()
     const demoMatch = /^#demo\s+(\w+)$/i.exec(trimmed)
