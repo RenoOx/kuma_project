@@ -19,7 +19,20 @@ const PAUSED_REPLY =
 
 const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, prueba de nuevo.";
 
-export type SendFn = (jid: string, text: string) => Promise<void>;
+export type SendFn = (jid: string, text: string) => Promise<void>
+
+// Converts any stray Markdown that GPT produces into WhatsApp-native formatting.
+// Acts as a hard backstop so the prompt rules never reach the customer as
+// literal asterisks or hyphens even if the model ignores the formatting section.
+function sanitizeForWhatsApp(text: string): string {
+  return text
+    // **bold** → *bold*  (double asterisk Markdown → single asterisk WA bold)
+    .replace(/\*\*([^*\n]+)\*\*/g, '*$1*')
+    // ## Heading → Heading  (strip Markdown headings)
+    .replace(/^#{1,6}\s+/gm, '')
+    // "- item" at line start → "· item"
+    .replace(/^- /gm, '· ')
+}
 
 // Serialises message processing per (businessId, sender-phone) so that two
 // rapid messages from the same number never run their LLM calls concurrently,
@@ -152,7 +165,7 @@ async function processMessage(
     );
     let replyText: string;
     if (result.ok) {
-      replyText = result.data.content;
+      replyText = sanitizeForWhatsApp(result.data.content);
       log.info(
         {
           conversationId: ownerThread.data.id,
@@ -316,7 +329,7 @@ async function processMessage(
 
   let replyText: string;
   if (llmResult.ok) {
-    replyText = llmResult.data.content;
+    replyText = sanitizeForWhatsApp(llmResult.data.content);
     log.info(
       {
         conversationId: conversation.id,
