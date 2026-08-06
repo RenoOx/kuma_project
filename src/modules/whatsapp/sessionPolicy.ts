@@ -14,6 +14,14 @@ export const RECONNECT_BASE_DELAY_MS = 5_000
 export const RECONNECT_MAX_DELAY_MS = 160_000
 export const MAX_RECONNECT_ATTEMPTS = 6
 
+// While a QR is on screen waiting to be scanned, WhatsApp closes the socket
+// every time the code expires. Those closes are the normal rhythm of pairing,
+// not failures, so they get their own generous budget and a short fixed delay —
+// a person needs time to find their phone, open WhatsApp and scan. Sharing the
+// transient budget meant six expired QRs looked identical to six crashes.
+export const MAX_QR_PAIRING_CYCLES = 20
+export const QR_PAIRING_RETRY_DELAY_MS = 2_000
+
 // Delay right after a 515 restartRequired. This is a normal step of the pairing
 // handshake (WhatsApp asks for a reconnect once linking succeeds), not a
 // failure, so it gets a short fixed delay and no backoff.

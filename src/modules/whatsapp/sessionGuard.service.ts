@@ -175,6 +175,30 @@ export async function recordPairingCode(
 }
 
 /**
+ * Records that a session stopped for a reason that carries no ban risk, without
+ * imposing any cool-off.
+ *
+ * Giving up on reconnects is not abuse. The clearest case: while a QR is on
+ * screen waiting to be scanned, WhatsApp closes the socket with `timedOut` every
+ * time the code expires. Counting those as failures meant six unscanned QRs
+ * locked the number out for six hours — punishing the operator for taking too
+ * long to pick up their phone. Ban protection belongs on the actions that
+ * actually reach WhatsApp (pairing codes and restarts), which are counted
+ * separately.
+ */
+export async function recordSessionStopped(
+  whatsappNumber: string,
+  businessId: string | null,
+  reason: string,
+): Promise<void> {
+  await safeUpsert({ whatsappNumber, businessId, blockedUntil: null, haltReason: reason })
+  log.warn(
+    { whatsappNumber, businessId, reason },
+    'whatsapp session stopped — reconnect halted, number NOT blocked (no ban risk in this reason)',
+  )
+}
+
+/**
  * WhatsApp handed us a fatal disconnect, or a reconnect loop burned its budget.
  * Always stops the reconnect loop; imposes the cool-off block ONLY when there is
  * evidence we were hammering.

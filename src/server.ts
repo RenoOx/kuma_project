@@ -7,6 +7,7 @@ import * as businessRepo from "./modules/business/business.repo.js";
 import { makeWhatsappClient } from "./modules/whatsapp/baileys.client.js";
 import {
   getClient,
+  getConnectionState,
   registerClient,
   setConnectionStatus,
   storePairingCode,
@@ -14,7 +15,9 @@ import {
 } from "./modules/whatsapp/clientRegistry.js";
 import * as sessionGuard from "./modules/whatsapp/sessionGuard.service.js";
 import {
+  MAX_QR_PAIRING_CYCLES,
   MAX_RECONNECT_ATTEMPTS,
+  QR_PAIRING_RETRY_DELAY_MS,
   RESTART_REQUIRED_DELAY_MS,
   hasExhaustedReconnects,
   reconnectDelayMs,
@@ -41,6 +44,8 @@ const server = serve(
 // connection so a healthy socket that blips months later gets a full budget.
 const reconnectAttempts = new Map<string, number>();
 const reconnectTimers = new Map<string, NodeJS.Timeout>();
+// Counted apart from reconnectAttempts: an expired QR is not a failure.
+const qrPairingCycles = new Map<string, number>();
 
 function cancelPendingReconnect(businessId: string): void {
   const timer = reconnectTimers.get(businessId);
@@ -103,6 +108,7 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
     // A successful link proves the number is healthy: drop the backoff counter
     // and clear any accumulated rate-limit state for it.
     reconnectAttempts.delete(businessId);
+    qrPairingCycles.delete(businessId);
     cancelPendingReconnect(businessId);
     sessionGuard.recordConnected(whatsappNumber, businessId).catch((err) => {
       logger.error({ err, businessId }, "failed to clear session guard on connect");
@@ -148,20 +154,51 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
       return;
     }
 
+    // Still waiting for someone to scan the QR? Then this close is just the code
+    // expiring, not a fault. Re-issue a fresh QR on its own budget so the
+    // operator isn't punished for taking a minute to grab their phone.
+    const pairing = getConnectionState(businessId)?.status === "qr_pending";
+    if (pairing) {
+      const cycle = (qrPairingCycles.get(businessId) ?? 0) + 1;
+      if (cycle > MAX_QR_PAIRING_CYCLES) {
+        setConnectionStatus(businessId, "logged_out");
+        qrPairingCycles.delete(businessId);
+        sessionGuard
+          .recordSessionStopped(whatsappNumber, businessId, `qr_not_scanned:${info.reasonName}`)
+          .catch((err) => {
+            logger.error({ err, businessId }, "failed to persist qr pairing stop");
+          });
+        logger.warn(
+          { businessId, cycles: MAX_QR_PAIRING_CYCLES },
+          "QR went unscanned for the whole window — stopping. Press Conectar to try again (number NOT blocked)",
+        );
+        return;
+      }
+      qrPairingCycles.set(businessId, cycle);
+      logger.info(
+        { businessId, cycle, maxCycles: MAX_QR_PAIRING_CYCLES },
+        "QR expired unscanned — issuing a fresh one",
+      );
+      scheduleReconnect(businessId, whatsappNumber, QR_PAIRING_RETRY_DELAY_MS);
+      return;
+    }
+
     // Transient drop (network hiccup, WA server blip) — credentials are still
     // valid, so reconnect with exponential backoff and a finite budget.
     const attempt = (reconnectAttempts.get(businessId) ?? 0) + 1;
     if (hasExhaustedReconnects(attempt)) {
       setConnectionStatus(businessId, "logged_out");
       reconnectAttempts.delete(businessId);
+      // Giving up reconnecting is not abuse — no cool-off. The ban budget is
+      // spent by pairing codes and restarts, which are counted on their own.
       sessionGuard
-        .recordHalt(whatsappNumber, businessId, `reconnect_budget_exhausted:${info.reasonName}`)
+        .recordSessionStopped(whatsappNumber, businessId, `reconnect_budget_exhausted:${info.reasonName}`)
         .catch((err) => {
           logger.error({ err, businessId }, "failed to persist reconnect exhaustion");
         });
       logger.error(
         { businessId, attempts: MAX_RECONNECT_ATTEMPTS, reasonName: info.reasonName },
-        "whatsapp reconnect budget exhausted — giving up instead of hammering WA",
+        "whatsapp reconnect budget exhausted — giving up instead of hammering WA (number NOT blocked)",
       );
       return;
     }
@@ -189,6 +226,7 @@ export async function restartWhatsappFor(businessId: string, whatsappNumber: str
   const sessionDir = `${env.SESSIONS_DIR}/${businessId}`;
   await rm(sessionDir, { recursive: true, force: true });
   reconnectAttempts.delete(businessId);
+  qrPairingCycles.delete(businessId);
   logger.info({ businessId, sessionDir }, "manual resume: session cleared, booting fresh client");
   return startWhatsappFor(businessId, whatsappNumber);
 }
