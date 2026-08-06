@@ -18,6 +18,10 @@ export const businesses = pgTable(
     // because not every business has linked an owner yet.
     ownerWhatsappNumber: text('owner_whatsapp_number'),
     ownerName: text('owner_name'),
+    // Street address. Structured rather than left to the knowledge base so Emma
+    // can answer "where are you?" without depending on someone having written
+    // it into a KB entry. googleMapsUrl complements it, it does not replace it.
+    address: text('address'),
     googleMapsUrl: text('google_maps_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

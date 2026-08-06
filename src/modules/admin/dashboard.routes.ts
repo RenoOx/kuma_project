@@ -684,6 +684,18 @@ dashboardRoutes.get('/admin/dashboard/new', (c) => {
             <input id="ownerName" name="ownerName" type="text" class="form-input"
               placeholder="ej. Carlos Ramos">
           </div>
+          <div class="form-group">
+            <label class="form-label" for="address">Dirección del negocio</label>
+            <input id="address" name="address" type="text" class="form-input"
+              placeholder="ej. Av. Ejército 820, Yanahuara, Arequipa">
+            <p class="form-hint">Emma la responde cuando preguntan dónde están</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="googleMapsUrl">Link de Google Maps</label>
+            <input id="googleMapsUrl" name="googleMapsUrl" type="url" class="form-input"
+              placeholder="https://maps.app.goo.gl/...">
+            <p class="form-hint">Complementario a la dirección</p>
+          </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Crear negocio</button>
             <a href="/admin/dashboard?secret=${se}" class="btn btn-ghost">Cancelar</a>
@@ -707,13 +719,23 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
   const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
   const ownerName = formData.get('ownerName')?.toString().trim() || null
   const timezone = formData.get('timezone')?.toString().trim() || 'America/Lima'
+  const address = formData.get('address')?.toString().trim() || null
+  const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
 
   if (!name || !whatsappNumber) {
     const errMsg = encodeURIComponent('Nombre y número WhatsApp son obligatorios.')
     return c.redirect(`/admin/dashboard/new?secret=${se}&error=${errMsg}`, 302)
   }
 
-  const result = await businessService.register({ name, whatsappNumber, ownerWhatsappNumber, ownerName, timezone })
+  const result = await businessService.register({
+    name,
+    whatsappNumber,
+    ownerWhatsappNumber,
+    ownerName,
+    timezone,
+    address,
+    googleMapsUrl,
+  })
   if (!result.ok) {
     const errMsg = encodeURIComponent(result.error.message ?? 'Error al crear el negocio.')
     return c.redirect(`/admin/dashboard/new?secret=${se}&error=${errMsg}`, 302)
@@ -853,6 +875,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
           <div class="info-row"><span class="info-label">Dueño</span><span class="info-value">${esc(business.ownerName ?? '—')}</span></div>
           <div class="info-row"><span class="info-label">Tel. dueño</span><span class="info-value mono">${esc(business.ownerWhatsappNumber ?? '—')}</span></div>
           <div class="info-row"><span class="info-label">Zona horaria</span><span class="info-value">${esc(business.timezone)}</span></div>
+          <div class="info-row"><span class="info-label">Dirección</span><span class="info-value">${business.address ? esc(business.address) : '<span class="muted">Sin configurar</span>'}</span></div>
           <div class="info-row"><span class="info-label">Google Maps</span><span class="info-value">${business.googleMapsUrl ? `<a href="${esc(business.googleMapsUrl)}" target="_blank" rel="noopener">${esc(business.googleMapsUrl)}</a>` : '<span class="muted">Sin configurar</span>'}</span></div>
           <div class="info-row"><span class="info-label">Servicios</span><span class="info-value">${services.length > 0 ? services.map((s) => esc(s.name ?? '')).join(', ') : '<span class="muted">Sin configurar</span>'}</span></div>
           <div class="info-row"><span class="info-label">Creado</span><span class="info-value">${fmtDate(business.createdAt)}</span></div>
@@ -1196,10 +1219,19 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           </div>
           <div class="form-row">
             <div class="form-group">
+              <label class="form-label" for="address">Dirección del negocio</label>
+              <input id="address" name="address" type="text" class="form-input"
+                value="${esc(business.address ?? '')}"
+                placeholder="ej. Av. Ejército 820, Yanahuara, Arequipa">
+              <p class="form-hint">Emma la responde cuando preguntan dónde están o cómo llegar</p>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
               <label class="form-label" for="googleMapsUrl">Link de Google Maps</label>
               <input id="googleMapsUrl" name="googleMapsUrl" type="url" class="form-input"
                 value="${esc(business.googleMapsUrl ?? '')}" placeholder="https://maps.app.goo.gl/...">
-              <p class="form-hint">Emma lo incluye cuando el cliente pregunta por la ubicación</p>
+              <p class="form-hint">Complementario a la dirección — Emma manda los dos juntos</p>
             </div>
           </div>
         </div>
@@ -1466,6 +1498,7 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
   const ownerName = formData.get('ownerName')?.toString().trim() || null
   const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
   const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
+  const address = formData.get('address')?.toString().trim() || null
   const whatsappNumber = formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
 
   const configureError = (msg: string) =>
@@ -1517,9 +1550,16 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     timezone !== business.timezone ||
     ownerName !== business.ownerName ||
     ownerWhatsappNumber !== business.ownerWhatsappNumber ||
-    googleMapsUrl !== business.googleMapsUrl
+    googleMapsUrl !== business.googleMapsUrl ||
+    address !== business.address
   ) {
-    await businessRepo.update(businessId, { timezone, ownerName, ownerWhatsappNumber, googleMapsUrl })
+    await businessRepo.update(businessId, {
+      timezone,
+      ownerName,
+      ownerWhatsappNumber,
+      googleMapsUrl,
+      address,
+    })
   }
 
   // Preserve existing botPaused state (managed by the bot, not by this form)

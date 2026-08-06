@@ -26,6 +26,28 @@ function remainingMs(until: Date | null | undefined, now: Date): number {
   return Math.max(0, until.getTime() - now.getTime())
 }
 
+/**
+ * Reads the guard row, treating an unreadable guard as "no data" instead of an
+ * error.
+ *
+ * The distinction that matters: "the guard says blocked" must stop the caller,
+ * but "the guard cannot be read" must not. They are not the same evidence. A
+ * missing table or a DB blip previously propagated out of assertCanRestart and
+ * turned the admin panel's Connect button into a 500 — leaving no way at all to
+ * link WhatsApp, which is far worse than losing one attempt counter.
+ */
+async function readGuard(whatsappNumber: string): Promise<WhatsappSessionGuard | null> {
+  try {
+    return await guardRepo.findByNumber(whatsappNumber)
+  } catch (err) {
+    log.error(
+      { err, whatsappNumber },
+      'session guard unreadable — proceeding without ban protection for this action',
+    )
+    return null
+  }
+}
+
 function toStatus(guard: WhatsappSessionGuard | null, now: Date): GuardStatus {
   const retryAfterMs = remainingMs(guard?.blockedUntil, now)
   return {
@@ -39,7 +61,7 @@ function toStatus(guard: WhatsappSessionGuard | null, now: Date): GuardStatus {
 
 /** Read-only view of a number's guard state. Safe to call from render paths. */
 export async function getStatus(whatsappNumber: string): Promise<GuardStatus> {
-  const guard = await guardRepo.findByNumber(whatsappNumber)
+  const guard = await readGuard(whatsappNumber)
   return toStatus(guard, new Date())
 }
 
@@ -75,7 +97,7 @@ function assertCooldownElapsed(
 /** Throws unless a fresh socket may be booted for this number right now. */
 export async function assertCanRestart(whatsappNumber: string): Promise<void> {
   const now = new Date()
-  const guard = await guardRepo.findByNumber(whatsappNumber)
+  const guard = await readGuard(whatsappNumber)
   assertNotBlocked(guard, whatsappNumber, now)
   assertCooldownElapsed(guard?.lastRestartAt, RESTART_COOLDOWN_MS, whatsappNumber, now)
 }
@@ -83,9 +105,29 @@ export async function assertCanRestart(whatsappNumber: string): Promise<void> {
 /** Throws unless a pairing code may be requested from WhatsApp right now. */
 export async function assertCanRequestPairingCode(whatsappNumber: string): Promise<void> {
   const now = new Date()
-  const guard = await guardRepo.findByNumber(whatsappNumber)
+  const guard = await readGuard(whatsappNumber)
   assertNotBlocked(guard, whatsappNumber, now)
   assertCooldownElapsed(guard?.lastPairingCodeAt, PAIRING_CODE_COOLDOWN_MS, whatsappNumber, now)
+}
+
+/**
+ * Persists guard state without letting a storage failure abort the caller's
+ * action. Bookkeeping is worth less than the operation it accompanies: losing a
+ * counter tick degrades protection, while throwing here would block the
+ * operator from connecting WhatsApp at all.
+ */
+async function safeUpsert(
+  data: Parameters<typeof guardRepo.upsert>[0],
+): Promise<WhatsappSessionGuard | null> {
+  try {
+    return await guardRepo.upsert(data)
+  } catch (err) {
+    log.error(
+      { err, whatsappNumber: data.whatsappNumber },
+      'failed to persist session guard state — action continues unprotected',
+    )
+    return null
+  }
 }
 
 async function recordAttempt(
@@ -94,12 +136,12 @@ async function recordAttempt(
   field: 'lastRestartAt' | 'lastPairingCodeAt',
 ): Promise<GuardStatus> {
   const now = new Date()
-  const guard = await guardRepo.findByNumber(whatsappNumber)
+  const guard = await readGuard(whatsappNumber)
   const window = nextAttemptWindow(guard, now)
   const tripped = shouldTripBreaker(window)
   const blockedUntil = tripped ? new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS) : (guard?.blockedUntil ?? null)
 
-  const saved = await guardRepo.upsert({
+  const saved = await safeUpsert({
     whatsappNumber,
     businessId,
     [field]: now,
@@ -144,7 +186,7 @@ export async function recordHalt(
 ): Promise<void> {
   const now = new Date()
   const blockedUntil = new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS)
-  await guardRepo.upsert({ whatsappNumber, businessId, blockedUntil, haltReason: reason })
+  await safeUpsert({ whatsappNumber, businessId, blockedUntil, haltReason: reason })
   log.error(
     { whatsappNumber, businessId, reason, blockedUntil },
     'whatsapp session HALTED — number blocked until cool-off or explicit operator override',
@@ -156,7 +198,7 @@ export async function recordConnected(
   whatsappNumber: string,
   businessId: string | null,
 ): Promise<void> {
-  await guardRepo.upsert({
+  await safeUpsert({
     whatsappNumber,
     businessId,
     attemptCount: 0,
@@ -171,8 +213,8 @@ export async function recordConnected(
  * the previous production number got burned, so every use leaves a trail.
  */
 export async function forceUnblock(whatsappNumber: string, businessId: string | null): Promise<void> {
-  const previous = await guardRepo.findByNumber(whatsappNumber)
-  await guardRepo.upsert({
+  const previous = await readGuard(whatsappNumber)
+  await safeUpsert({
     whatsappNumber,
     businessId,
     attemptCount: 0,

@@ -35,6 +35,7 @@ const createBusinessBody = z
     ownerWhatsappNumber: z.string().min(1).nullable().optional(),
     ownerName: z.string().min(1).nullable().optional(),
     timezone: z.string().optional(),
+    address: z.string().min(1).nullable().optional(),
     googleMapsUrl: z.string().url().nullable().optional(),
   })
   .refine(
@@ -59,6 +60,7 @@ const patchBusinessBody = z
     ownerWhatsappNumber: z.string().min(1).nullable().optional(),
     ownerName: z.string().min(1).nullable().optional(),
     timezone: z.string().optional(),
+    address: z.string().min(1).nullable().optional(),
     googleMapsUrl: z.string().url().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })

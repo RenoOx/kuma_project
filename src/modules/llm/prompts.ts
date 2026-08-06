@@ -190,18 +190,33 @@ function renderOperatingHours(hours: BusinessSettings['operatingHours']): string
   }).join('\n')
 }
 
-function renderLocationBlock(googleMapsUrl: string | null): string {
-  if (!googleMapsUrl) {
-    return [
-      'Este negocio no tiene un link de Google Maps configurado.',
-      'Si te preguntan por la ubicación, respondé con la dirección que tengas en tu conocimiento (si la tienes) sin inventar un link. Si tampoco tenés la dirección, respondé con honestidad que no tenés esa información todavía.',
-    ].join('\n')
+function renderLocationBlock(address: string | null, googleMapsUrl: string | null): string {
+  const hasAddress = typeof address === 'string' && address.trim() !== ''
+  const hasMap = typeof googleMapsUrl === 'string' && googleMapsUrl.trim() !== ''
+
+  if (!hasAddress && !hasMap) {
+    return 'Este negocio no tiene dirección ni link de Google Maps configurados. Si te preguntan por la ubicación, respondé con honestidad que no tenés ese dato todavía. NO inventes una dirección ni un link.'
   }
-  return [
-    `Link de Google Maps de este negocio: ${googleMapsUrl}`,
-    'Cuando el cliente pregunte por la ubicación, cómo llegar, o la dirección, incluí este link junto con la dirección (si la tenés en tu conocimiento), usando 📍.',
-    `  Ejemplo: "Estamos en Av. Ejército 820, Arequipa 📍 ${googleMapsUrl}"`,
-  ].join('\n')
+
+  const lines: string[] = []
+  if (hasAddress) lines.push(`Dirección del negocio: ${address}`)
+  if (hasMap) lines.push(`Link de Google Maps: ${googleMapsUrl}`)
+
+  lines.push(
+    'Cuando el cliente pregunte por la ubicación, cómo llegar o la dirección, respondé con estos datos usando 📍.',
+  )
+
+  if (hasAddress && hasMap) {
+    lines.push(`  Ejemplo: "Estamos en ${address} 📍 ${googleMapsUrl}"`)
+  } else if (hasAddress) {
+    lines.push(`  Ejemplo: "Estamos en ${address} 📍"`)
+    lines.push('No tenés link de Google Maps: no inventes uno.')
+  } else {
+    lines.push(`  Ejemplo: "Te paso la ubicación 📍 ${googleMapsUrl}"`)
+    lines.push('No tenés la dirección escrita: pasá el link y no inventes una calle ni un número.')
+  }
+
+  return lines.join('\n')
 }
 
 function renderServices(services: BusinessSettings['services']): string {
@@ -323,7 +338,7 @@ function buildStaticBody(
     renderKnowledgeBase(knowledgeBase),
     '',
     '# Ubicación',
-    renderLocationBlock(business.googleMapsUrl),
+    renderLocationBlock(business.address, business.googleMapsUrl),
     '',
     settings ? renderConfiguredBlock(settings, todayISO) : NOT_CONFIGURED_BLOCK,
     '',
