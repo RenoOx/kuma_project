@@ -1,9 +1,12 @@
 import { env } from '@/config/env.js'
+import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
 import { businesses, knowledgeBase } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
+import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
+import { SessionGuardError } from '@/shared/errors.js'
 import { asc, eq } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { nanoid } from 'nanoid'
@@ -42,6 +45,12 @@ const createBusinessBody = z
       path: ['ownerWhatsappNumber'],
     },
   )
+
+// Deliberately awkward: forcing past the anti-ban guard should require typing
+// the consequence out, not a reflexive `-d '{}'`.
+const forceUnblockBody = z.object({
+  confirm: z.literal('I understand this can get the number banned'),
+})
 
 const patchBusinessBody = z
   .object({
@@ -130,13 +139,68 @@ adminRoutes.patch('/admin/businesses/:id', async (c) => {
   if (!body.success) {
     return c.json({ error: 'validation_error', issues: body.error.flatten().fieldErrors }, 400)
   }
+
+  const businessId = c.req.param('id')
+  const existing = await businessRepo.findById(businessId)
+  if (!existing) {
+    return c.json({ error: 'update_failed', message: `business ${businessId} not found` }, 404)
+  }
+
+  const nextNumber = body.data.whatsappNumber
+  const numberChanged = nextNumber !== undefined && nextNumber !== existing.whatsappNumber
+
+  // Guard the invariant against the stored value too — a PATCH that only sets
+  // ownerWhatsappNumber can still collide with the existing bot number.
+  const effectiveOwner = body.data.ownerWhatsappNumber ?? existing.ownerWhatsappNumber
+  const effectiveBot = nextNumber ?? existing.whatsappNumber
+  if (effectiveOwner && effectiveOwner === effectiveBot) {
+    return c.json(
+      {
+        error: 'validation_error',
+        message:
+          'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant.',
+      },
+      400,
+    )
+  }
+
+  let updated: Awaited<ReturnType<typeof businessRepo.update>>
   try {
-    const updated = await businessRepo.update(c.req.param('id'), body.data)
-    return c.json(updated)
+    updated = await businessRepo.update(businessId, body.data)
   } catch (err) {
     const msg = (err as Error).message ?? 'unknown error'
     const status = msg.includes('not found') ? 404 : 500
     return c.json({ error: 'update_failed', message: msg }, status)
+  }
+
+  if (!numberChanged) {
+    return c.json(updated)
+  }
+
+  // Changing the number in the DB alone would leave the live socket logged in
+  // as the old one — the bot would keep answering on a number the DB no longer
+  // knows about. Rebind, and report honestly if the guard blocked it.
+  try {
+    const { restartWhatsappFor } = await import('@/server.js')
+    await restartWhatsappFor(businessId, updated.whatsappNumber)
+    return c.json({ ...updated, whatsappRebind: 'pending_scan' })
+  } catch (err) {
+    if (err instanceof SessionGuardError) {
+      return c.json(
+        {
+          ...updated,
+          whatsappRebind: 'blocked',
+          rebindError: err.userMessage,
+          retryAfterMs: err.retryAfterMs,
+        },
+        409,
+      )
+    }
+    logger.error({ err, businessId }, 'admin: rebind after number change failed')
+    return c.json(
+      { ...updated, whatsappRebind: 'failed', rebindError: (err as Error).message },
+      500,
+    )
   }
 })
 
@@ -256,6 +320,65 @@ adminRoutes.post('/admin/businesses/:id/session/resume', async (c) => {
       next: 'Visit /admin/whatsapp/qr to scan the fresh QR.',
     })
   } catch (err) {
+    if (err instanceof SessionGuardError) {
+      return c.json(
+        {
+          error: err.code,
+          message: err.userMessage,
+          retryAfterMs: err.retryAfterMs,
+          next: 'Wait out the cool-off. Only force-unblock if you are certain this is a false positive.',
+        },
+        429,
+      )
+    }
     return c.json({ error: 'resume_failed', message: (err as Error).message }, 500)
   }
+})
+
+// Read-only view of the anti-ban guard for a business's number.
+adminRoutes.get('/admin/businesses/:id/session/guard', async (c) => {
+  const business = await businessRepo.findById(c.req.param('id'))
+  if (!business) return c.json({ error: 'not_found' }, 404)
+
+  const status = await sessionGuard.getStatus(business.whatsappNumber)
+  return c.json({ whatsappNumber: business.whatsappNumber, ...status })
+})
+
+// Operator escape hatch: clears cooldowns, the attempt window and any halt for
+// this business's number. Requires an explicit confirm in the body so it can't
+// be triggered by a stray curl or a retried request. Every call is logged loudly
+// — forcing past this guard is how the previous production number got burned.
+adminRoutes.post('/admin/businesses/:id/session/force-unblock', async (c) => {
+  const business = await businessRepo.findById(c.req.param('id'))
+  if (!business) return c.json({ error: 'not_found' }, 404)
+
+  const body = forceUnblockBody.safeParse(await c.req.json().catch(() => null))
+  if (!body.success) {
+    return c.json(
+      {
+        error: 'confirmation_required',
+        message:
+          'Send {"confirm":"I understand this can get the number banned"} to force-unblock. Prefer waiting out the cool-off.',
+      },
+      400,
+    )
+  }
+
+  const before = await sessionGuard.getStatus(business.whatsappNumber)
+  await sessionGuard.forceUnblock(business.whatsappNumber, business.id)
+  logger.warn(
+    {
+      businessId: business.id,
+      whatsappNumber: business.whatsappNumber,
+      clearedBlockedUntil: before.blockedUntil,
+      clearedHaltReason: before.haltReason,
+    },
+    'admin: whatsapp session guard force-unblocked via API',
+  )
+
+  return c.json({
+    unblocked: business.id,
+    cleared: before,
+    next: 'POST /admin/businesses/:id/session/resume to boot a fresh client, then scan the QR once.',
+  })
 })

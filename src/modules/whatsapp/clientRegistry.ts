@@ -16,20 +16,11 @@ interface ConnectionState {
 
 const connectionStates = new Map<string, ConnectionState>()
 
-const pairingCodeRequestedAt = new Map<string, number>()
-
-const PAIRING_CODE_COOLDOWN_MS = 90_000
-
-export function getPairingCodeCooldownRemainingMs(businessId: string): number {
-  const last = pairingCodeRequestedAt.get(businessId)
-  if (!last) return 0
-  const elapsed = Date.now() - last
-  return Math.max(0, PAIRING_CODE_COOLDOWN_MS - elapsed)
-}
-
-export function recordPairingCodeRequest(businessId: string): void {
-  pairingCodeRequestedAt.set(businessId, Date.now())
-}
+// Rate-limit state deliberately does NOT live here. It is keyed by phone number
+// and persisted in `whatsapp_session_guard` (see sessionGuard.service.ts),
+// because WhatsApp throttles the number rather than our process — an in-memory
+// cooldown resets on every Railway deploy, which is exactly when the risk of
+// re-hammering a punished number is highest.
 
 export function registerClient(businessId: string, client: WhatsappClient): void {
   clients.set(businessId, client)
@@ -67,7 +58,6 @@ export function getClient(businessId: string): WhatsappClient | null {
 export function unregisterClient(businessId: string): void {
   clients.delete(businessId)
   connectionStates.delete(businessId)
-  pairingCodeRequestedAt.delete(businessId)
 }
 
 // Test-only helper: drops every registered client so isolated tests don't
@@ -75,5 +65,4 @@ export function unregisterClient(businessId: string): void {
 export function _resetRegistryForTests(): void {
   clients.clear()
   connectionStates.clear()
-  pairingCodeRequestedAt.clear()
 }

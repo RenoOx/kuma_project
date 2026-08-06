@@ -118,6 +118,42 @@ export class NotConnectedError extends AppError {
   }
 }
 
+export interface SessionGuardParams {
+  whatsappNumber: string
+  reason: 'cooldown' | 'blocked' | 'halted'
+  retryAfterMs: number
+  userMessage?: string
+  logContext?: Record<string, unknown>
+  cause?: unknown
+}
+
+// Raised when an action would hit WhatsApp for a number that is cooling down,
+// circuit-broken, or halted. Carries retryAfterMs so HTTP callers can render a
+// countdown instead of a dead end.
+export class SessionGuardError extends AppError {
+  readonly retryAfterMs: number
+  readonly reason: 'cooldown' | 'blocked' | 'halted'
+
+  constructor(params: SessionGuardParams) {
+    super({
+      code: `session_guard_${params.reason}`,
+      message: `whatsapp linking blocked for ${params.whatsappNumber} (${params.reason}), retry in ${params.retryAfterMs}ms`,
+      userMessage:
+        params.userMessage ??
+        'Esperá antes de reintentar la vinculación — WhatsApp bloquea números que insisten.',
+      logContext: {
+        whatsappNumber: params.whatsappNumber,
+        reason: params.reason,
+        retryAfterMs: params.retryAfterMs,
+        ...params.logContext,
+      },
+      cause: params.cause,
+    })
+    this.retryAfterMs = params.retryAfterMs
+    this.reason = params.reason
+  }
+}
+
 export function toLogObject(error: AppError): Record<string, unknown> {
   return {
     name: error.name,

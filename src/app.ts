@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import qrcode from 'qrcode'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
@@ -6,13 +6,9 @@ import { adminRoutes } from './modules/admin/admin.routes.js'
 import { dashboardRoutes } from './modules/admin/dashboard.routes.js'
 import { googleAuthRoutes } from './modules/google/auth.routes.js'
 import * as businessRepo from './modules/business/business.repo.js'
-import {
-  getConnectionState,
-  getClient,
-  storePairingCode,
-  getPairingCodeCooldownRemainingMs,
-  recordPairingCodeRequest,
-} from './modules/whatsapp/clientRegistry.js'
+import { getConnectionState, getClient, storePairingCode } from './modules/whatsapp/clientRegistry.js'
+import * as sessionGuard from './modules/whatsapp/sessionGuard.service.js'
+import { SessionGuardError } from './shared/errors.js'
 
 const VERSION = '0.1.0'
 
@@ -98,13 +94,33 @@ app.get('/admin/whatsapp/qr', async (c) => {
     )
   }
 
+  const qrBase = `/admin/whatsapp/qr?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
+  const cycle = refreshCycle(c)
+  const nextUrl = nextRefreshUrl(qrBase, cycle)
+
   if (state.status === 'connecting') {
-    return c.html(renderPage('Iniciando...', '<p>Iniciando conexión…</p>', 5), 200)
+    return c.html(
+      renderPage(
+        'Iniciando...',
+        `<p>Iniciando conexión…</p>${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
+        nextUrl ? 5 : undefined,
+        nextUrl ?? undefined,
+      ),
+      200,
+    )
   }
 
   // qr_pending
   if (!state.qr) {
-    return c.html(renderPage('Esperando QR...', '<p>Generando QR…</p>', 3), 200)
+    return c.html(
+      renderPage(
+        'Esperando QR...',
+        `<p>Generando QR…</p>${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
+        nextUrl ? 3 : undefined,
+        nextUrl ?? undefined,
+      ),
+      200,
+    )
   }
 
   const dataUrl = await qrcode.toDataURL(state.qr, { width: 300, margin: 2 })
@@ -114,8 +130,10 @@ app.get('/admin/whatsapp/qr', async (c) => {
       'Escanear QR',
       `<p>Escaneá este código con WhatsApp en tu teléfono.</p>
        <img src="${dataUrl}" alt="WhatsApp QR" style="display:block;margin:1rem auto"/>
-       <p style="margin-top:1.5rem;font-size:0.9rem;color:#666">¿Problemas con el QR? <a href="${pairHref}">Usá código de texto</a></p>`,
-      10,
+       <p style="margin-top:1.5rem;font-size:0.9rem;color:#666">¿Problemas con el QR? <a href="${pairHref}">Usá código de texto</a></p>
+       ${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
+      nextUrl ? 10 : undefined,
+      nextUrl ?? undefined,
     ),
     200,
   )
@@ -173,6 +191,10 @@ app.get('/admin/whatsapp/pair', async (c) => {
   }
 
   const refreshUrl = `?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
+  const pairNextUrl = nextRefreshUrl(
+    `/admin/whatsapp/pair?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`,
+    refreshCycle(c),
+  )
 
   // Use the code that was auto-generated at socket startup (best timing).
   // Fall back to on-demand generation only when the user explicitly requests a new code.
@@ -180,33 +202,27 @@ app.get('/admin/whatsapp/pair', async (c) => {
   let code = state?.pairingCode ?? null
 
   if (!code || forceNew) {
-    // Server-side rate limit: prevent rapid pairing code requests that can trigger WA bans.
-    if (forceNew) {
-      const remainingMs = getPairingCodeCooldownRemainingMs(businessId)
-      if (remainingMs > 0) {
-        const remainingSecs = Math.ceil(remainingMs / 1000)
-        return c.html(
-          renderPage(
-            'Espera un momento',
-            `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong id="cd">${remainingSecs}</strong> segundos.</p>
-             <p><a href="${refreshUrl}">← Volver</a></p>
-             <script>
-               var s=${remainingSecs};
-               var t=setInterval(function(){s--;document.getElementById('cd').textContent=s;if(s<=0){clearInterval(t);location.href='${refreshUrl}';}},1000);
-             </script>`,
-          ),
-          429,
-        )
-      }
-    }
-
     const business = await businessRepo.findById(businessId)
     if (!business) {
       return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
     }
+
+    // Guard EVERY path that reaches WhatsApp, not just the explicit "new code"
+    // button. This page auto-refreshes, so an unguarded cached-miss branch
+    // would quietly request a fresh pairing code on a timer — the fastest way
+    // to get a number rate-limited.
+    try {
+      await sessionGuard.assertCanRequestPairingCode(business.whatsappNumber)
+    } catch (err) {
+      if (err instanceof SessionGuardError) {
+        return renderGuardBlocked(c, err, refreshUrl)
+      }
+      throw err
+    }
+
     try {
       code = await client.requestPairingCode(business.whatsappNumber)
-      recordPairingCodeRequest(businessId)
+      await sessionGuard.recordPairingCode(business.whatsappNumber, business.id)
       storePairingCode(businessId, code)
     } catch (err) {
       const msg = (err as Error).message ?? 'error desconocido'
@@ -274,17 +290,92 @@ app.get('/admin/whatsapp/pair', async (c) => {
       };
       updateUI();
     })();
-    </script>`
+    </script>
+    ${pairNextUrl ? '' : REFRESH_STOPPED_NOTE}`
 
-  return c.html(renderPage('Código de vinculación', body, 60), 200)
+  return c.html(
+    renderPage('Código de vinculación', body, pairNextUrl ? 60 : undefined, pairNextUrl ?? undefined),
+    200,
+  )
 })
 
-function renderPage(title: string, body: string, refreshSecs?: number): string {
-  const refresh = refreshSecs ? `<meta http-equiv="refresh" content="${refreshSecs}">` : ''
+function renderPage(
+  title: string,
+  body: string,
+  refreshSecs?: number,
+  refreshUrl?: string,
+): string {
+  const content = refreshUrl ? `${refreshSecs};url=${refreshUrl}` : `${refreshSecs}`
+  const refresh = refreshSecs ? `<meta http-equiv="refresh" content="${content}">` : ''
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">${refresh}
 <title>Emma — ${title}</title>
 <style>body{font-family:sans-serif;max-width:480px;margin:3rem auto;text-align:center}</style>
 </head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`
+}
+
+// A linking page left open in a tab used to auto-refresh forever, keeping a
+// pairing socket alive indefinitely. Cap the cycles and make the operator opt
+// back in by reloading.
+const MAX_AUTO_REFRESH_CYCLES = 20
+
+function refreshCycle(c: Context): number {
+  const raw = Number.parseInt(c.req.query('r') ?? '0', 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+
+/**
+ * Builds the URL for the next auto-refresh, or null once the budget is spent.
+ * `base` must already carry secret/businessId.
+ */
+function nextRefreshUrl(base: string, cycle: number): string | null {
+  if (cycle >= MAX_AUTO_REFRESH_CYCLES) return null
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}r=${cycle + 1}`
+}
+
+const REFRESH_STOPPED_NOTE = `<p style="margin-top:1.5rem;font-size:.85rem;color:#888">
+  La actualización automática se detuvo para no mantener la sesión abierta de más.
+  <a href="javascript:location.reload()">Actualizar manualmente</a>
+</p>`
+
+/** Renders a SessionGuardError as a countdown (cooldown) or a hard stop (block). */
+function renderGuardBlocked(c: Context, err: SessionGuardError, backUrl: string): Response {
+  const secs = Math.ceil(err.retryAfterMs / 1000)
+
+  if (err.reason === 'cooldown') {
+    return c.html(
+      renderPage(
+        'Espera un momento',
+        `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong id="cd">${secs}</strong> segundos.</p>
+         <p style="font-size:.85rem;color:#888">WhatsApp bloquea los números que piden códigos muy seguido.</p>
+         <p><a href="${backUrl}">← Volver</a></p>
+         <script>
+           var s=${secs};
+           var t=setInterval(function(){s--;document.getElementById('cd').textContent=s;if(s<=0){clearInterval(t);location.href='${backUrl}';}},1000);
+         </script>`,
+      ),
+      429,
+    ) as Response
+  }
+
+  const hours = Math.floor(secs / 3600)
+  const mins = Math.ceil((secs % 3600) / 60)
+  const wait = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`
+  return c.html(
+    renderPage(
+      'Vinculación bloqueada',
+      `<p style="color:#b91c1c;font-size:1.1rem">🛑 Este número está bloqueado por protección anti-ban.</p>
+       <p>Se hicieron demasiados intentos de vinculación. Reintentar ahora puede hacer que
+          WhatsApp banee el número de forma permanente.</p>
+       <p style="margin-top:1rem"><strong>Podés reintentar en ${wait}.</strong></p>
+       <p style="font-size:.85rem;color:#888;margin-top:1.5rem">
+         Si estás seguro de que es un falso positivo, un admin puede forzar el desbloqueo con
+         <code>POST /admin/businesses/:id/session/force-unblock</code>.
+       </p>
+       <p><a href="${backUrl}">← Volver</a></p>`,
+    ),
+    429,
+  ) as Response
 }
 
 app.route('/', dashboardRoutes)

@@ -14,6 +14,7 @@ import {
   getConnectionState,
   setConnectionStatus,
 } from '@/modules/whatsapp/clientRegistry.js'
+import { SessionGuardError } from '@/shared/errors.js'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
@@ -100,6 +101,15 @@ function apptStatusBadge(status: string): string {
   return `<span class="badge ${cfg[status] ?? 'badge-gray'}">${esc(status)}</span>`
 }
 
+/** Formats a millisecond wait as "6h 12min" / "45 min" / "30 s" for operators. */
+function humanizeMs(ms: number): string {
+  const totalSecs = Math.ceil(ms / 1000)
+  if (totalSecs < 60) return `${totalSecs} s`
+  const hours = Math.floor(totalSecs / 3600)
+  const mins = Math.ceil((totalSecs % 3600) / 60)
+  return hours > 0 ? `${hours}h ${mins}min` : `${mins} min`
+}
+
 function waActions(businessId: string, status: WaStatus | undefined, secret: string): string {
   const se = encodeURIComponent(secret)
   const bid = esc(businessId)
@@ -125,7 +135,15 @@ function waActions(businessId: string, status: WaStatus | undefined, secret: str
     return `<span class="badge badge-gray" style="font-size:11px">Iniciando…</span>`
   }
   const label = status === 'logged_out' ? 'Reconectar' : 'Conectar'
-  return `<form method="post" action="${connectUrl}" style="display:inline">
+  // Confirmation is not cosmetic here: every click is a fresh pairing attempt
+  // that WhatsApp counts against the number, and a double-click used to mean
+  // two of them.
+  const warn =
+    status === 'logged_out'
+      ? '¿Reintentar la vinculación? WhatsApp cerró esta sesión. Reintentar demasiadas veces puede banear el número de forma permanente.'
+      : '¿Iniciar sesión de WhatsApp para este negocio? Cada intento cuenta contra el límite de WhatsApp.'
+  return `<form method="post" action="${connectUrl}" style="display:inline"
+    onsubmit="return confirm('${warn}')">
     <button type="submit" class="btn btn-warning btn-sm">${label}</button>
   </form>`
 }
@@ -414,6 +432,7 @@ tr:hover td{background:#fafaf8}
 .alert{padding:.75rem 1rem;border-radius:8px;font-size:13px;margin-bottom:1.25rem}
 .alert-error{background:#fee2e2;border:1px solid #fca5a5;color:#b91c1c}
 .alert-success{background:#dcfce7;border:1px solid #86efac;color:#15803d}
+.alert-warning{background:#fef3c7;border:1px solid #fcd34d;color:#b45309}
 .section-label{font-size:13px;font-weight:600;margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:1px solid #f3f4f6}
 .hours-table{width:100%;border-collapse:collapse}
 .hours-table th{font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;padding:.5rem .4rem;border-bottom:1px solid #f3f4f6;text-align:center}
@@ -1053,6 +1072,24 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   const bid = esc(businessId)
   const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
   const saved = c.req.query('saved') === '1'
+  const rebind = c.req.query('rebind')
+
+  const rebindNotice =
+    rebind === 'pending'
+      ? `<div class="alert alert-warning">
+           📱 <strong>Falta vincular el número nuevo.</strong>
+           Emma se desconectó del número anterior. Escaneá el QR con el teléfono de
+           <strong>${esc(business.whatsappNumber)}</strong> para reactivarla.
+           <div style="margin-top:.75rem">
+             <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-primary btn-sm">Ver QR</a>
+             <a href="/admin/whatsapp/pair?secret=${se}&businessId=${bid}" class="btn btn-ghost btn-sm">Vincular con código</a>
+           </div>
+           <p class="form-hint" style="margin-top:.75rem">
+             Acordate de desvincular Emma del teléfono anterior desde
+             WhatsApp → Dispositivos vinculados.
+           </p>
+         </div>`
+      : ''
 
   const raw = business.settings as Partial<BusinessSettings>
   const hours = (raw?.operatingHours ?? {}) as Partial<Record<DayKey, DayHours>>
@@ -1099,8 +1136,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     </div>
     ${saved ? '<div class="alert alert-success">✓ Cambios guardados correctamente.</div>' : ''}
     ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
+    ${rebindNotice}
 
-    <form method="post" action="/admin/dashboard/${bid}/configure?secret=${se}">
+    <form method="post" action="/admin/dashboard/${bid}/configure?secret=${se}"
+      onsubmit="return confirmNumberChange()">
 
       <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">Información del negocio</span></div>
@@ -1127,6 +1166,18 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                   .map(([v, l]) => `<option value="${v}" ${business.timezone === v ? 'selected' : ''}>${l}</option>`)
                   .join('')}
               </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="whatsappNumber">Número de WhatsApp del bot</label>
+              <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
+                value="${esc(business.whatsappNumber)}" placeholder="51XXXXXXXXX" required
+                data-original="${esc(business.whatsappNumber)}">
+              <p class="form-hint" style="color:#b45309">
+                ⚠️ Cambiar este número desconecta la sesión actual y hay que escanear un QR nuevo
+                con el teléfono del número nuevo. Las citas, conversaciones e historial NO se pierden.
+              </p>
             </div>
           </div>
           <div class="form-row">
@@ -1267,6 +1318,20 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     <script>
     let _svcCounter = ${initialServiceCount};
 
+    function confirmNumberChange() {
+      const el = document.getElementById('whatsappNumber');
+      if (!el) return true;
+      const current = el.value.trim();
+      const original = el.getAttribute('data-original');
+      if (current === original) return true;
+      return confirm(
+        'Vas a cambiar el número del bot de ' + original + ' a ' + current + '.\\n\\n' +
+        'Emma se va a desconectar del número anterior y vas a tener que escanear un QR nuevo ' +
+        'con el teléfono del número nuevo.\\n\\n' +
+        'Las citas, conversaciones e historial NO se borran.\\n\\n¿Continuar?'
+      );
+    }
+
     function toggleDay(day) {
       const enabled = document.getElementById('day_' + day + '_enabled').checked;
       ['open','close','break','break_start','break_end'].forEach(function(f) {
@@ -1401,6 +1466,49 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
   const ownerName = formData.get('ownerName')?.toString().trim() || null
   const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
   const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
+  const whatsappNumber = formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
+
+  const configureError = (msg: string) =>
+    c.redirect(
+      `/admin/dashboard/${bid}/configure?secret=${se}&error=${encodeURIComponent(msg)}`,
+      302,
+    )
+
+  // The bot number is logged in as `whatsappNumber`, so messages from it are
+  // treated as fromMe and would never reach the owner assistant.
+  if (ownerWhatsappNumber && ownerWhatsappNumber === whatsappNumber) {
+    return configureError(
+      'El WhatsApp del dueño debe ser distinto al número del bot. Usá un número personal aparte.',
+    )
+  }
+
+  const numberChanged = whatsappNumber !== business.whatsappNumber
+  if (numberChanged) {
+    const takenBy = await businessRepo.findByWhatsappNumber(whatsappNumber)
+    if (takenBy && takenBy.id !== businessId) {
+      return configureError(`El número ${whatsappNumber} ya está en uso por "${takenBy.name}".`)
+    }
+  }
+
+  // Validate settings BEFORE any write: a number change tears down the WhatsApp
+  // session, and we must not do that only to bail out on an unrelated form error.
+  const parsed = await parseSettingsFromForm(formData)
+  if (!parsed.ok) {
+    return configureError(parsed.errors.join(' | '))
+  }
+
+  if (numberChanged) {
+    try {
+      await businessRepo.update(businessId, { whatsappNumber })
+    } catch (err) {
+      logger.error({ err, businessId, whatsappNumber }, 'dashboard: whatsapp number update failed')
+      return configureError('No se pudo actualizar el número. ¿Ya está registrado en otro negocio?')
+    }
+    logger.info(
+      { businessId, from: business.whatsappNumber, to: whatsappNumber },
+      'dashboard: bot whatsapp number changed by admin',
+    )
+  }
 
   if (name && name !== business.name) {
     await businessRepo.update(businessId, { name })
@@ -1414,13 +1522,6 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     await businessRepo.update(businessId, { timezone, ownerName, ownerWhatsappNumber, googleMapsUrl })
   }
 
-  // Parse and validate settings
-  const parsed = await parseSettingsFromForm(formData)
-  if (!parsed.ok) {
-    const errMsg = encodeURIComponent(parsed.errors.join(' | '))
-    return c.redirect(`/admin/dashboard/${bid}/configure?secret=${se}&error=${errMsg}`, 302)
-  }
-
   // Preserve existing botPaused state (managed by the bot, not by this form)
   const existingRaw = business.settings as Partial<BusinessSettings>
   const newSettings = {
@@ -1430,7 +1531,29 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
 
   await businessRepo.update(businessId, { settings: newSettings as Record<string, unknown> })
 
-  return c.redirect(`/admin/dashboard/${bid}/configure?secret=${se}&saved=1`, 302)
+  if (!numberChanged) {
+    return c.redirect(`/admin/dashboard/${bid}/configure?secret=${se}&saved=1`, 302)
+  }
+
+  // The DB now points at the new number but the live socket is still logged in
+  // as the old one, so rebind it. Best-effort: the number change is already
+  // committed, and the operator can retry from the "Conectar" button.
+  let rebindError: string | null = null
+  try {
+    const { restartWhatsappFor } = await import('@/server.js')
+    await restartWhatsappFor(businessId, whatsappNumber)
+  } catch (err) {
+    rebindError =
+      err instanceof SessionGuardError
+        ? `${err.userMessage} Reintentá en ${humanizeMs(err.retryAfterMs)}.`
+        : 'No se pudo iniciar la sesión con el número nuevo. Usá el botón "Conectar".'
+    logger.error({ err, businessId, whatsappNumber }, 'dashboard: rebind after number change failed')
+  }
+
+  const params = rebindError
+    ? `saved=1&rebind=failed&error=${encodeURIComponent(rebindError)}`
+    : 'saved=1&rebind=pending'
+  return c.redirect(`/admin/dashboard/${bid}/configure?secret=${se}&${params}`, 302)
 })
 
 // ── POST /:id/connect — arranca cliente WA y redirige a pair ─────────────────
@@ -1447,6 +1570,25 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
     const { restartWhatsappFor } = await import('@/server.js')
     await restartWhatsappFor(business.id, business.whatsappNumber)
   } catch (err) {
+    if (err instanceof SessionGuardError) {
+      logger.warn(
+        { businessId, retryAfterMs: err.retryAfterMs, reason: err.reason },
+        'dashboard: connect blocked by session guard',
+      )
+      return c.html(
+        layout(
+          'Vinculación bloqueada',
+          `<a href="/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}" class="back">← Volver</a>
+           <div class="alert alert-error" style="margin-top:1rem">
+             🛑 ${esc(err.userMessage)}<br>
+             <strong>Podés reintentar en ${esc(humanizeMs(err.retryAfterMs))}.</strong>
+           </div>`,
+          secret,
+          'businesses',
+        ),
+        429,
+      )
+    }
     logger.error({ err, businessId }, 'dashboard: connect failed')
     return c.html(
       layout(

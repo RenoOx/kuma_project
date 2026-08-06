@@ -136,7 +136,9 @@ export async function generateReply(
     customerId: conversation.customerId,
   }
 
-  const systemPrompt = buildSystemPrompt(business, kbResult.data, settings)
+  // History drives the call-to-action decision (see decideCallToAction): the
+  // model no longer judges whether it already invited recently.
+  const systemPrompt = buildSystemPrompt(business, kbResult.data, settings, historyResult.data)
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...convertHistoryToChatMessages(historyResult.data),

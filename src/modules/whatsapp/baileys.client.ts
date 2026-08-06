@@ -2,7 +2,6 @@ import { logger as rootLogger } from '@/config/logger.js'
 import {
   makeWASocket,
   Browsers,
-  DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type WAMessage,
@@ -12,12 +11,25 @@ import type { Boom } from '@hapi/boom'
 import { mkdir } from 'node:fs/promises'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
+import { classifyDisconnect, disconnectReasonName, type DisconnectKind } from './sessionPolicy.js'
 
 export type MessageHandler = (raw: WAMessage) => Promise<void> | void
-export type DisconnectHandler = (reason: 'logout' | 'transient') => void
+export interface DisconnectInfo {
+  kind: DisconnectKind
+  statusCode: number | undefined
+  reasonName: string
+  errMessage: string | undefined
+}
+export type DisconnectHandler = (info: DisconnectInfo) => void
 export type QRHandler = (qr: string) => void
 export type ConnectHandler = () => void
 export type PairingCodeHandler = (code: string) => void
+export interface IncomingCall {
+  id: string
+  from: string
+  isVideo: boolean
+}
+export type CallHandler = (call: IncomingCall) => Promise<void> | void
 
 export interface WhatsappClientOptions {
   businessId: string
@@ -32,7 +44,17 @@ export interface WhatsappClient {
   onQR(handler: QRHandler): void
   onConnect(handler: ConnectHandler): void
   onPairingCode(handler: PairingCodeHandler): void
+  onCall(handler: CallHandler): void
+  /** Hangs up an incoming call so the caller isn't left ringing. */
+  rejectCall(callId: string, callFrom: string): Promise<void>
   requestPairingCode(phoneNumber: string): Promise<string>
+  /**
+   * Tears the socket down on purpose. Suppresses the disconnect handlers so a
+   * deliberate close never looks like a drop and never triggers a reconnect —
+   * without this, replacing a client stacks live sockets that all keep talking
+   * to WhatsApp with the same number.
+   */
+  close(): Promise<void>
 }
 
 export async function makeWhatsappClient(
@@ -83,12 +105,16 @@ export async function makeWhatsappClient(
   const qrHandlers: QRHandler[] = []
   const connectHandlers: ConnectHandler[] = []
   const pairingCodeHandlers: PairingCodeHandler[] = []
+  const callHandlers: CallHandler[] = []
+  let intentionallyClosed = false
 
   sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
     log.info({ connection, hasQr: !!qr }, 'connection.update')
+
+    if (intentionallyClosed) return
 
     if (qr) {
       log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
@@ -103,13 +129,28 @@ export async function makeWhatsappClient(
       const err = lastDisconnect?.error as Boom | undefined
       const statusCode = err?.output?.statusCode
       const errMessage = err?.message
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut
-      log.warn(
-        { statusCode, errMessage, isLoggedOut, disconnectReasonName: statusCode ? DisconnectReason[statusCode] : undefined },
-        'whatsapp connection closed',
-      )
-      const reason: 'logout' | 'transient' = isLoggedOut ? 'logout' : 'transient'
-      for (const handler of disconnectHandlers) handler(reason)
+      const kind = classifyDisconnect(statusCode)
+      const reasonName = disconnectReasonName(statusCode)
+      log.warn({ statusCode, errMessage, kind, reasonName }, 'whatsapp connection closed')
+      for (const handler of disconnectHandlers) handler({ kind, statusCode, reasonName, errMessage })
+    }
+  })
+
+  // A single call raises several events (offer → ringing → timeout/terminate).
+  // Only the initial offer is actionable; the rest would fan out into duplicate
+  // replies to the same caller.
+  sock.ev.on('call', async (calls) => {
+    if (intentionallyClosed) return
+    for (const call of calls) {
+      if (call.status !== 'offer') continue
+      log.info({ callId: call.id, from: call.from, isVideo: call.isVideo }, 'incoming call offer')
+      for (const handler of callHandlers) {
+        try {
+          await handler({ id: call.id, from: call.from, isVideo: call.isVideo === true })
+        } catch (err) {
+          log.error({ err, callId: call.id }, 'call handler threw')
+        }
+      }
     }
   })
 
@@ -179,9 +220,41 @@ export async function makeWhatsappClient(
     onPairingCode(handler) {
       pairingCodeHandlers.push(handler)
     },
+    onCall(handler) {
+      callHandlers.push(handler)
+    },
+    async rejectCall(callId, callFrom) {
+      await sock.rejectCall(callId, callFrom)
+    },
     async requestPairingCode(phoneNumber: string): Promise<string> {
       const digits = phoneNumber.replace(/\D/g, '')
       return sock.requestPairingCode(digits)
+    },
+    async close() {
+      if (intentionallyClosed) return
+      // Flip the flag BEFORE ending the socket: sock.end() emits a close event
+      // synchronously, and it must not reach the disconnect handlers.
+      intentionallyClosed = true
+      messageHandlers.length = 0
+      disconnectHandlers.length = 0
+      qrHandlers.length = 0
+      connectHandlers.length = 0
+      pairingCodeHandlers.length = 0
+      callHandlers.length = 0
+      try {
+        sock.end(undefined)
+      } catch (err) {
+        log.warn({ err }, 'sock.end threw while closing — socket considered dead anyway')
+      }
+      try {
+        sock.ev.removeAllListeners('connection.update')
+        sock.ev.removeAllListeners('messages.upsert')
+        sock.ev.removeAllListeners('creds.update')
+        sock.ev.removeAllListeners('call')
+      } catch (err) {
+        log.warn({ err }, 'removeAllListeners threw while closing')
+      }
+      log.info('whatsapp client closed intentionally')
     },
   }
 }

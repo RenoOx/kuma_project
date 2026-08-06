@@ -9,6 +9,12 @@ import * as llmService from "@/modules/llm/llm.service.js";
 import * as messageService from "@/modules/message/message.service.js";
 import * as ownerAssistantService from "@/modules/ownerAssistant/ownerAssistant.service.js";
 import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
+import {
+  classifyIncoming,
+  describeFormat,
+  pickUnsupportedReply,
+  type UnsupportedFormat,
+} from "@/modules/whatsapp/messageKind.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
@@ -20,6 +26,10 @@ const PAUSED_REPLY =
 const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, prueba de nuevo.";
 
 export type SendFn = (jid: string, text: string) => Promise<void>
+
+// Structural subset of the Pino logger, so helpers accept a child logger
+// without fighting Pino's generics over custom-level type parameters.
+type HandlerLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
 
 // Converts any stray Markdown that GPT produces into WhatsApp-native formatting.
 // Acts as a hard backstop so the prompt rules never reach the customer as
@@ -49,15 +59,75 @@ function withSenderLock(key: string, work: () => Promise<void>): Promise<void> {
   return next;
 }
 
-// Returns the user-visible text of a Baileys message, or null if the message
-// has no plain text payload we can answer to (media, reactions, status, etc.).
-function extractText(msg: WAMessage): string | null {
-  const message = msg.message;
-  if (!message) return null;
-  if (message.conversation) return message.conversation;
-  if (message.extendedTextMessage?.text)
-    return message.extendedTextMessage.text;
-  return null;
+// Sending the "text only" notice once per media is helpful; sending it after
+// each of five voice notes is noise, and repeated identical outbound messages
+// are exactly the pattern WhatsApp flags. In-memory on purpose: unlike the
+// anti-ban guard, a reset after a deploy costs one extra polite message.
+const UNSUPPORTED_NOTICE_COOLDOWN_MS = 10 * 60 * 1000;
+const unsupportedNoticeSentAt = new Map<string, number>();
+
+function shouldSendUnsupportedNotice(conversationId: string): boolean {
+  const last = unsupportedNoticeSentAt.get(conversationId);
+  const now = Date.now();
+  if (last !== undefined && now - last < UNSUPPORTED_NOTICE_COOLDOWN_MS) return false;
+  unsupportedNoticeSentAt.set(conversationId, now);
+  return true;
+}
+
+// Recorded for every unreadable message, including while the bot is paused, so
+// the frequency of these is measurable regardless of whether we replied.
+async function recordUnsupportedEvent(
+  businessId: string,
+  conversationId: string,
+  format: UnsupportedFormat,
+  phone: string,
+  log: HandlerLogger,
+): Promise<void> {
+  try {
+    await eventsRepo.create({
+      businessId,
+      conversationId,
+      type: "unsupported_media",
+      payload: { format, phone },
+    });
+  } catch (err) {
+    log.error({ err, format }, "failed to record unsupported_media event");
+  }
+}
+
+// Sends the "text only" notice, subject to the per-conversation cooldown.
+async function respondUnsupportedFormat(params: {
+  businessId: string;
+  conversationId: string;
+  format: UnsupportedFormat;
+  jid: string;
+  send: SendFn;
+  log: HandlerLogger;
+}): Promise<void> {
+  const { businessId, conversationId, format, jid, send, log } = params;
+
+  if (!shouldSendUnsupportedNotice(conversationId)) {
+    log.info({ conversationId, format }, "unsupported format within cooldown; event only");
+    return;
+  }
+
+  const reply = pickUnsupportedReply();
+  const persisted = await messageService.append({
+    businessId,
+    conversationId,
+    role: "assistant",
+    content: reply,
+  });
+  if (!persisted.ok) {
+    log.error({ code: persisted.error.code }, "append unsupported-format reply failed");
+  }
+
+  try {
+    await send(jid, reply);
+    log.info({ conversationId, format }, "unsupported format notice sent");
+  } catch (err) {
+    log.error({ err, jid, format }, "failed to send unsupported format notice");
+  }
 }
 
 // Returns the peer's E.164 phone (with leading '+') from a Baileys JID or null
@@ -103,15 +173,29 @@ function extractPhone(msg: WAMessage): string | null {
   return null;
 }
 
+// What processMessage was handed: either readable text, or a format we can
+// only acknowledge. Both still create the customer/conversation records.
+type Payload =
+  | { kind: "text"; text: string }
+  | { kind: "unsupported"; format: UnsupportedFormat };
+
 async function processMessage(
   raw: WAMessage,
   businessId: string,
   send: SendFn,
   jid: string,
   phone: string,
-  text: string,
+  payload: Payload,
 ): Promise<void> {
   const log = logger.child({ component: "whatsapp.handler", businessId });
+
+  // History placeholder for unreadable messages: without it the transcript
+  // shows an assistant turn with nothing before it, which reads as a non
+  // sequitur to the LLM on the next turn.
+  const text =
+    payload.kind === "text"
+      ? payload.text
+      : `[El cliente envió ${describeFormat(payload.format)} que no puedo procesar]`;
 
   // Load business once to figure out who is talking to us (owner or customer)
   // and to feed downstream services without re-fetching.
@@ -155,6 +239,28 @@ async function processMessage(
         { code: ownerThread.error.code },
         "findOrCreateOwnerThread failed",
       );
+      return;
+    }
+
+    if (payload.kind === "unsupported") {
+      await recordUnsupportedEvent(businessId, ownerThread.data.id, payload.format, phone, log);
+      const persisted = await messageService.append({
+        businessId,
+        conversationId: ownerThread.data.id,
+        role: "user",
+        content: text,
+      });
+      if (!persisted.ok) {
+        log.error({ code: persisted.error.code }, "append owner unsupported placeholder failed");
+      }
+      await respondUnsupportedFormat({
+        businessId,
+        conversationId: ownerThread.data.id,
+        format: payload.format,
+        jid,
+        send,
+        log,
+      });
       return;
     }
 
@@ -255,6 +361,12 @@ async function processMessage(
     return;
   }
 
+  // Recorded before the paused check so the metric counts every occurrence,
+  // not only the ones that got a reply.
+  if (payload.kind === "unsupported") {
+    await recordUnsupportedEvent(businessId, conversation.id, payload.format, phone, log);
+  }
+
   // BOT PAUSED — keep the customer record + the message, but skip LLM and
   // escalate so a human notices.
   const paused = await businessService.isBotPaused(businessId);
@@ -317,6 +429,19 @@ async function processMessage(
     } catch (err) {
       log.error({ err, jid }, "failed to send paused canned reply");
     }
+    return;
+  }
+
+  // Nothing to reason about — acknowledge the format and stop before the LLM.
+  if (payload.kind === "unsupported") {
+    await respondUnsupportedFormat({
+      businessId,
+      conversationId: conversation.id,
+      format: payload.format,
+      jid,
+      send,
+      log,
+    });
     return;
   }
 
@@ -418,14 +543,31 @@ export function handleIncomingMessage(
     );
     return Promise.resolve();
   }
-  const text = extractText(raw);
-  if (!text) {
-    log.info({ jid, msgKeys: raw.message ? Object.keys(raw.message) : [] }, "handler skip: no text payload");
+  const incoming = classifyIncoming(raw);
+  if (incoming.kind === "ignorable") {
+    // Unknown shapes are warn-logged rather than dropped quietly: silence here
+    // is what hid the ephemeral-message bug, where ordinary text from anyone
+    // using disappearing messages never reached Emma at all.
+    if (incoming.reason === "unknown") {
+      log.warn({ jid, msgKeys: incoming.keys }, "handler skip: unrecognised message shape");
+    } else {
+      log.info({ jid, reason: incoming.reason }, "handler skip: no answerable payload");
+    }
     return Promise.resolve();
   }
 
-  log.info({ phone, textPreview: text.slice(0, 60) }, "handler accepted incoming message");
+  const payload: Payload =
+    incoming.kind === "text"
+      ? { kind: "text", text: incoming.text }
+      : { kind: "unsupported", format: incoming.format };
+
+  log.info(
+    incoming.kind === "text"
+      ? { phone, textPreview: incoming.text.slice(0, 60) }
+      : { phone, format: incoming.format },
+    "handler accepted incoming message",
+  );
   return withSenderLock(`${businessId}:${phone}`, () =>
-    processMessage(raw, businessId, send, jid, phone, text),
+    processMessage(raw, businessId, send, jid, phone, payload),
   );
 }

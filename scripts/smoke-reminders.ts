@@ -38,6 +38,15 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     async requestPairingCode() {
       return ''
     },
+    onCall() {
+      // noop
+    },
+    async rejectCall() {
+      // noop
+    },
+    async close() {
+      // noop
+    },
   }
   return { client, sent }
 }
