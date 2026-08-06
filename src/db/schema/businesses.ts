@@ -18,6 +18,7 @@ export const businesses = pgTable(
     // because not every business has linked an owner yet.
     ownerWhatsappNumber: text('owner_whatsapp_number'),
     ownerName: text('owner_name'),
+    googleMapsUrl: text('google_maps_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

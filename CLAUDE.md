@@ -2,14 +2,14 @@
 
 ## Qué es este repo
 
-Kuma es un asistente de WhatsApp multi-tenant por Vamvu Labs, para negocios 
+Emma es un asistente de WhatsApp multi-tenant por Vamvu Labs, para negocios 
 de servicios con citas (peluquerías, dentales, vets, barberías). Cada 
 `business_id` tiene su knowledge base, su número de WhatsApp, sus clientes 
 y citas. Un solo deploy atiende N negocios.
 
 ## Identidad del producto
 
-- Nombre: Kuma (熊, "oso" en japonés)
+- Nombre: Emma
 - Empresa: Vamvu Labs
 - Tono del bot al usuario final: cálido pero profesional, breve, sin emojis 
   excesivos, tutea en español de Perú neutro
@@ -259,12 +259,14 @@ Pregunta ANTES de:
 - Borrar archivos o funciones existentes
 - Saltar tests para "ir más rápido"
 - Tocar lógica de seguridad o multi-tenancy
+- Escribir cualquier test nuevo (propón primero, ejecuta solo con OK explícito)
+- Ejecutar cualquier cambio que toque más de 1 archivo
 
 ## Workflow por tarea
 
 1. **Explora.** Lee los archivos relevantes, corre tests existentes, mira 
    el schema. Usa bash si necesitas info del filesystem.
-2. **Planea.** Lista pasos en respuesta antes de tocar código. Si el cambio 
+2. **Planea.** Lista pasos en respuesta antes de tocar código. SIEMPRE espera OK explícito al plan antes de implementar — sin excepción. No hay umbral de archivos que exima de esto. Si no recibes "OK", "adelante" o "procede", no escribas código.
    toca más de 3 archivos, espera mi OK al plan.
 3. **Implementa incrementalmente.** Un commit por unidad lógica, no megacommits.
 4. **Verifica.** Corre `npm run check` antes de decir que terminaste.
@@ -312,3 +314,11 @@ vuelve a pasar la próxima sesión.
 
 Léelos solo cuando trabajes en su área. No los cargues todos al iniciar 
 sesión — quema budget de contexto.
+
+## Estrategia de testing en esta sesión
+
+NO corras tests después de cada tarea individual.
+Implementa todas las tareas de la sesión primero.
+Corre `npm run check` UNA SOLA VEZ al final, cuando yo diga "corre los tests".
+Si una tarea rompe algo evidente en compilación, avísame — pero no pares a testear.
+El ciclo es: planea → apruebo → implementas → siguiente tarea → al final testeas todo.

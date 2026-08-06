@@ -834,6 +834,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
           <div class="info-row"><span class="info-label">Dueño</span><span class="info-value">${esc(business.ownerName ?? '—')}</span></div>
           <div class="info-row"><span class="info-label">Tel. dueño</span><span class="info-value mono">${esc(business.ownerWhatsappNumber ?? '—')}</span></div>
           <div class="info-row"><span class="info-label">Zona horaria</span><span class="info-value">${esc(business.timezone)}</span></div>
+          <div class="info-row"><span class="info-label">Google Maps</span><span class="info-value">${business.googleMapsUrl ? `<a href="${esc(business.googleMapsUrl)}" target="_blank" rel="noopener">${esc(business.googleMapsUrl)}</a>` : '<span class="muted">Sin configurar</span>'}</span></div>
           <div class="info-row"><span class="info-label">Servicios</span><span class="info-value">${services.length > 0 ? services.map((s) => esc(s.name ?? '')).join(', ') : '<span class="muted">Sin configurar</span>'}</span></div>
           <div class="info-row"><span class="info-label">Creado</span><span class="info-value">${fmtDate(business.createdAt)}</span></div>
         </div>
@@ -1142,6 +1143,14 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <p class="form-hint">Diferente al número del bot</p>
             </div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="googleMapsUrl">Link de Google Maps</label>
+              <input id="googleMapsUrl" name="googleMapsUrl" type="url" class="form-input"
+                value="${esc(business.googleMapsUrl ?? '')}" placeholder="https://maps.app.goo.gl/...">
+              <p class="form-hint">Emma lo incluye cuando el cliente pregunta por la ubicación</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1391,12 +1400,18 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
   const timezone = formData.get('timezone')?.toString().trim() ?? business.timezone
   const ownerName = formData.get('ownerName')?.toString().trim() || null
   const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
+  const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
 
   if (name && name !== business.name) {
     await businessRepo.update(businessId, { name })
   }
-  if (timezone !== business.timezone || ownerName !== business.ownerName || ownerWhatsappNumber !== business.ownerWhatsappNumber) {
-    await businessRepo.update(businessId, { timezone, ownerName, ownerWhatsappNumber })
+  if (
+    timezone !== business.timezone ||
+    ownerName !== business.ownerName ||
+    ownerWhatsappNumber !== business.ownerWhatsappNumber ||
+    googleMapsUrl !== business.googleMapsUrl
+  ) {
+    await businessRepo.update(businessId, { timezone, ownerName, ownerWhatsappNumber, googleMapsUrl })
   }
 
   // Parse and validate settings

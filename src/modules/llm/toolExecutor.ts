@@ -54,7 +54,7 @@ const NOT_CONFIGURED_BOOK_INSTRUCTION =
   'No se puede agendar: el negocio aún no terminó la configuración. Llamá escalate_to_human porque es una acción que no podés completar.'
 
 const UNKNOWN_SERVICE_INSTRUCTION =
-  'Ese servicio no está en la lista de servicios del negocio. Informá al cliente cuáles SÍ hay (los tienes en details.availableServices) y ofrécele uno de los disponibles.'
+  'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
 
 export async function executeTool(
   name: string,

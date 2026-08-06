@@ -1,0 +1,1 @@
+ALTER TABLE "businesses" ADD COLUMN "google_maps_url" text;
