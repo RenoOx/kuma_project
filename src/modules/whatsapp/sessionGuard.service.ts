@@ -176,8 +176,15 @@ export async function recordPairingCode(
 
 /**
  * WhatsApp handed us a fatal disconnect, or a reconnect loop burned its budget.
- * Blocks the number so neither an operator click nor a Railway redeploy can
- * re-hammer it before the cool-off passes.
+ * Always stops the reconnect loop; imposes the cool-off block ONLY when there is
+ * evidence we were hammering.
+ *
+ * `loggedOut` (401) is the same status code whether WhatsApp revoked our
+ * credentials for abuse or the owner simply tapped "log out" on their phone.
+ * The two are indistinguishable at the protocol level but opposite in risk, so
+ * the attempt counter breaks the tie: a number that made zero linking attempts
+ * in the current window is not being punished for anything, and blocking it for
+ * six hours only locks the owner out of their own bot.
  */
 export async function recordHalt(
   whatsappNumber: string,
@@ -185,11 +192,26 @@ export async function recordHalt(
   reason: string,
 ): Promise<void> {
   const now = new Date()
-  const blockedUntil = new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS)
+  const guard = await readGuard(whatsappNumber)
+  const window = nextAttemptWindow(guard, now)
+  // nextAttemptWindow folds in a hypothetical new attempt, so the count of
+  // attempts that actually happened is one less.
+  const priorAttempts = window.attemptCount - 1
+  const wasHammering = priorAttempts > 0
+
+  const blockedUntil = wasHammering ? new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS) : null
   await safeUpsert({ whatsappNumber, businessId, blockedUntil, haltReason: reason })
-  log.error(
-    { whatsappNumber, businessId, reason, blockedUntil },
-    'whatsapp session HALTED — number blocked until cool-off or explicit operator override',
+
+  if (wasHammering) {
+    log.error(
+      { whatsappNumber, businessId, reason, priorAttempts, blockedUntil },
+      'whatsapp session HALTED after repeated attempts — number blocked until cool-off or explicit operator override',
+    )
+    return
+  }
+  log.warn(
+    { whatsappNumber, businessId, reason },
+    'whatsapp session ended with no prior linking attempts (likely unlinked from the phone) — reconnect stopped, but the number is NOT blocked',
   )
 }
 
