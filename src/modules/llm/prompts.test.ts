@@ -14,6 +14,7 @@ function fakeBusiness(overrides: Partial<Business> = {}): Business {
     settings: {},
     ownerWhatsappNumber: null,
     ownerName: null,
+    address: null,
     googleMapsUrl: null,
     createdAt: new Date(),
     updatedAt: new Date(),
