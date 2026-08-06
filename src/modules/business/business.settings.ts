@@ -41,9 +41,21 @@ const operatingHoursSchema = z.object({
   sunday: dayHoursSchema,
 })
 
+// Date-specific override of operatingHours (holiday closure, one-off special
+// hours). `hours: null` means closed that day; an object means custom hours
+// for that day only — same shape as a weekly dayHoursSchema entry.
+const specialDaySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD'),
+  hours: dayHoursSchema,
+  label: z.string().optional(),
+})
+
 const serviceSchema = z.object({
   name: z.string().min(1),
   durationMinutes: z.number().int().positive(),
+  // Optional — services without a set price fall back to the free-text
+  // knowledge_base "pricing" entries when Emma answers.
+  price: z.number().nonnegative().optional(),
 })
 
 // Pause state for the customer-facing bot. The owner toggles this via the
@@ -69,6 +81,9 @@ export const businessSettingsSchema = z.object({
   // Excludes past slots and slots too close in the immediate future.
   // Optional — falls back to DEFAULT_MIN_BOOKING_NOTICE_MINUTES (30) when unset.
   minBookingNoticeMinutes: z.number().int().min(0).max(1440).optional(),
+  // Date-specific exceptions to operatingHours (holidays, one-off special
+  // hours). Optional — businesses without any keep using the weekly schedule.
+  specialDays: z.array(specialDaySchema).optional(),
 })
 
 export type BusinessSettings = z.infer<typeof businessSettingsSchema>
@@ -76,6 +91,7 @@ export type DayHours = z.infer<typeof dayHoursSchema>
 export type DayBreak = z.infer<typeof breakSchema>
 export type Service = z.infer<typeof serviceSchema>
 export type BotPausedState = z.infer<typeof botPausedSchema>
+export type SpecialDay = z.infer<typeof specialDaySchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
 
 // Default lead time when the business hasn't set its own value.
@@ -113,6 +129,16 @@ const dayKeysByJsDow: readonly DayKey[] = [
 
 export function dayKeyForJsDow(dow: number): DayKey | null {
   return dayKeysByJsDow[dow] ?? null
+}
+
+// Resolves the effective hours for a specific calendar date: a matching
+// specialDays entry overrides the recurring weekly operatingHours for that
+// date. Used by checkAvailability and bookAppointment so both stay in sync —
+// call this instead of reading settings.operatingHours[dayKey] directly.
+export function resolveDayHours(settings: BusinessSettings, dateISO: string, dayKey: DayKey): DayHours {
+  const special = settings.specialDays?.find((d) => d.date === dateISO)
+  if (special) return special.hours
+  return settings.operatingHours[dayKey]
 }
 
 function isEmptyObject(value: unknown): boolean {

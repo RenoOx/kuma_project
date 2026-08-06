@@ -4,6 +4,7 @@ import * as businessService from "@/modules/business/business.service.js";
 import {
   dayKeyForJsDow,
   getMinBookingNoticeMinutes,
+  resolveDayHours,
   type BusinessSettings,
   type DayBreak,
   type DayHours,
@@ -191,7 +192,7 @@ export async function checkAvailability(
       );
     }
 
-    const dayHours = settings.operatingHours[dayKey];
+    const dayHours = resolveDayHours(settings, dateISO, dayKey);
     if (dayHours === null) {
       return ok({ availableSlots: [], closedReason: "cerrado este día" });
     }
@@ -326,7 +327,7 @@ export async function bookAppointment(
         }),
       );
     }
-    const dayHours = settings.operatingHours[dayKey];
+    const dayHours = resolveDayHours(settings, tzDateISO, dayKey);
     if (dayHours === null) {
       return err(
         new ValidationError({

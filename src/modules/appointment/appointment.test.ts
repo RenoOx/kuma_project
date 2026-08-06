@@ -43,11 +43,12 @@ vi.mock('@/modules/whatsapp/ownerNotifier.js', () => ({
 
 // Calendar references for the fixtures below. Picked in the future relative
 // to the current date so the lead-time filter (Día 9.5) doesn't drop slots
-// just for being on a past Monday during development.
-//   2026-07-06 Monday  → open per DEFAULT_TEST_SETTINGS
-//   2026-07-05 Sunday  → null per DEFAULT_TEST_SETTINGS (closed)
-const MONDAY_ISO = '2026-07-06'
-const SUNDAY_ISO = '2026-07-05'
+// just for being on a past Monday during development. These will need
+// bumping again once 2027-07-05 rolls around.
+//   2027-07-05 Monday  → open per DEFAULT_TEST_SETTINGS
+//   2027-07-04 Sunday  → null per DEFAULT_TEST_SETTINGS (closed)
+const MONDAY_ISO = '2027-07-05'
+const SUNDAY_ISO = '2027-07-04'
 
 describe('appointment module', () => {
   let seed: TwoBusinessesSeed
@@ -190,6 +191,42 @@ describe('appointment module', () => {
     ])
   })
 
+  it('checkAvailability treats a specialDays entry with hours:null as closed, overriding the weekly schedule', async () => {
+    // Monday is normally open (09:00–19:00) per DEFAULT_TEST_SETTINGS — a
+    // specialDays override for that exact date should close it regardless.
+    const updateResult = await businessService.updateSettings(seed.businessA.id, {
+      specialDays: [{ date: MONDAY_ISO, hours: null, label: 'Feriado' }],
+    })
+    assert(updateResult.ok)
+
+    const result = await appointmentService.checkAvailability(
+      seed.businessA.id,
+      MONDAY_ISO,
+      'corte',
+    )
+    assert(result.ok)
+    expect(result.data.availableSlots).toEqual([])
+    expect(result.data.closedReason).toBe('cerrado este día')
+  })
+
+  it('checkAvailability uses specialDays custom hours instead of the weekly schedule for that date', async () => {
+    const updateResult = await businessService.updateSettings(seed.businessA.id, {
+      specialDays: [{ date: MONDAY_ISO, hours: { open: '10:00', close: '12:00' } }],
+    })
+    assert(updateResult.ok)
+
+    const result = await appointmentService.checkAvailability(
+      seed.businessA.id,
+      MONDAY_ISO,
+      'corte',
+    )
+    assert(result.ok)
+    expect(result.data.availableSlots).toEqual([
+      `${MONDAY_ISO}T10:00:00-05:00`,
+      `${MONDAY_ISO}T11:00:00-05:00`,
+    ])
+  })
+
   it('checkAvailability respects business.timezone (Mexico_City returns -06:00 slot offsets)', async () => {
     await db
       .update(businesses)
@@ -273,6 +310,26 @@ describe('appointment module', () => {
     })
     assert(!result.ok)
     expect(result.error).toBeInstanceOf(ValidationError)
+
+    const rows = await db.select().from(appointments)
+    expect(rows).toHaveLength(0)
+  })
+
+  it('bookAppointment rejects a slot on a date closed via specialDays, even though the weekday is normally open', async () => {
+    const updateResult = await businessService.updateSettings(seed.businessA.id, {
+      specialDays: [{ date: MONDAY_ISO, hours: null, label: 'Feriado' }],
+    })
+    assert(updateResult.ok)
+
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T11:00:00-05:00`,
+    })
+    assert(!result.ok)
+    expect(result.error).toBeInstanceOf(ValidationError)
+    expect(result.error.userMessage).toContain('no atiende ese día')
 
     const rows = await db.select().from(appointments)
     expect(rows).toHaveLength(0)

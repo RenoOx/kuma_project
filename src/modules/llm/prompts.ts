@@ -74,10 +74,35 @@ function renderOperatingHours(hours: BusinessSettings['operatingHours']): string
 }
 
 function renderServices(services: BusinessSettings['services']): string {
-  return services.map((s) => `- ${s.name} (${s.durationMinutes} min)`).join('\n')
+  return services
+    .map((s) => {
+      const price = s.price !== undefined ? ` — S/${s.price}` : ''
+      return `- ${s.name} (${s.durationMinutes} min)${price}`
+    })
+    .join('\n')
 }
 
-function renderConfiguredBlock(settings: BusinessSettings): string {
+// Only upcoming exceptions matter to the conversation — past dates would
+// just be noise the model has to ignore every turn.
+function renderSpecialDays(specialDays: BusinessSettings['specialDays'], todayISO: string): string {
+  const upcoming = (specialDays ?? [])
+    .filter((d) => d.date >= todayISO)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (upcoming.length === 0) return ''
+
+  const lines = upcoming.map((d) => {
+    const label = d.label ? ` (${d.label})` : ''
+    if (d.hours === null) return `- ${d.date}${label}: cerrado`
+    const breakText = d.hours.break ? ` (descanso ${d.hours.break.start}-${d.hours.break.end})` : ''
+    return `- ${d.date}${label}: ${d.hours.open} a ${d.hours.close}${breakText}`
+  })
+
+  return ['', '## Excepciones de horario (fechas puntuales que reemplazan el horario semanal)', ...lines].join(
+    '\n',
+  )
+}
+
+function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): string {
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
@@ -85,6 +110,7 @@ function renderConfiguredBlock(settings: BusinessSettings): string {
     '',
     '## Horarios',
     renderOperatingHours(settings.operatingHours),
+    renderSpecialDays(settings.specialDays, todayISO),
     '',
     `## Duración del slot por defecto: ${settings.slotDurationMinutes} minutos`,
   ].join('\n')
@@ -95,7 +121,7 @@ const NOT_CONFIGURED_BLOCK = [
   'Este negocio aún no completó su configuración (horarios, servicios, precios específicos).',
   '',
   '## Reglas para preguntas sobre información del negocio',
-  '- Si te preguntan algo que NO está en la knowledge base (horarios, precios, disponibilidad), respondé honestamente que no tenés esa información todavía. Ofrecé ayudar con algo que sí podés (responder lo que esté en la knowledge base) o decir que el dueño puede contactarlo si necesita ese dato puntual.',
+  '- Si te preguntan algo que NO está en la knowledge base (horarios, precios, disponibilidad), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas, y nunca afirmes ni niegues algo que no está confirmado (ej: no digas "no ofrecemos eso" si simplemente no tenés el dato).',
   '- NO inventes datos operativos bajo ninguna circunstancia.',
   '- NO escales a humano por preguntas sin respuesta — solo respondé con honestidad.',
   '',
@@ -171,18 +197,19 @@ export function buildSystemPrompt(
     '# Conocimiento del negocio',
     renderKnowledgeBase(knowledgeBase),
     '',
-    settings ? renderConfiguredBlock(settings) : NOT_CONFIGURED_BLOCK,
+    settings ? renderConfiguredBlock(settings, today) : NOT_CONFIGURED_BLOCK,
     '',
     '# Reglas generales',
-    '1. Solo respondes con información que está en tu conocimiento o en la configuración operativa de arriba. Si no tienes la info, decí honestamente que no sabés.',
-    '2. Nunca inventes precios, horarios o servicios.',
-    '3. Escalá a humano (escalate_to_human) en cualquiera de estos casos:',
+    '1. Solo respondes con información que está en tu conocimiento o en la configuración operativa de arriba.',
+    '2. Si te preguntan algo que NO está en tu conocimiento ni en la configuración (método de pago, estacionamiento, servicio a domicilio, o cualquier otro dato operativo no listado arriba), respondé exactamente con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo que no está confirmado en tu conocimiento (ej: no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés ese dato — eso es inventar tanto como dar un dato falso).',
+    '3. Nunca inventes precios, horarios o servicios.',
+    '4. NO llames a escalate_to_human solo porque no tenés una respuesta. Una pregunta sin respuesta en tu conocimiento se resuelve con el mensaje de "no tengo esa información", nunca escalando.',
+    '5. Escalá a humano (escalate_to_human) únicamente en estos casos:',
     '   - El cliente pide explícitamente hablar con una persona.',
     '   - El cliente parece molesto, frustrado o agresivo.',
     '   - El cliente menciona una queja o mala experiencia con un servicio anterior.',
-    '   - El cliente pregunta por pagos, reembolsos o descuentos especiales.',
     '   - El cliente repite la misma pregunta por segunda vez sin haber recibido una respuesta útil de tu parte.',
-    '   Antes de escalar, confirmá en tono cálido que lo vas a pasar con un encargado. Ejemplo: "Entiendo, para coordinar ese detalle te paso con un encargado. Te escriben en un momento."',
+    '   En cualquiera de estos casos LLAMÁ escalate_to_human en el mismo turno — no te limites a anunciar que vas a escalar, hacelo. El mensaje de confirmación va junto con la llamada a la tool, no en lugar de ella. Ejemplo de mensaje: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
     '',
     '# Respuestas duplicadas — prohibido repetir',
     'Antes de responder, revisá el historial: si tu respuesta anterior ya dijo lo mismo que estás por decir (mismo rango de horas, misma pregunta de aclaración, misma lista de servicios), NO la repitas.',

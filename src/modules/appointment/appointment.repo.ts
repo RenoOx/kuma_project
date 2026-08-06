@@ -5,7 +5,7 @@ import {
   type Appointment,
   type NewAppointment,
 } from '@/db/schema/index.js'
-import { and, asc, count, eq, gte, isNull, lt } from 'drizzle-orm'
+import { and, asc, count, eq, gte, isNull, lt, lte } from 'drizzle-orm'
 
 export async function findByBusinessAndDateRange(
   businessId: string,
@@ -170,7 +170,7 @@ export async function findDueForReminder(
         eq(appointments.status, 'scheduled'),
         isNull(column),
         gte(appointments.scheduledAt, windowStart),
-        lt(appointments.scheduledAt, windowEnd),
+        lte(appointments.scheduledAt, windowEnd),
       ),
     )
     .orderBy(asc(appointments.scheduledAt))

@@ -7,6 +7,9 @@ import {
 } from '@/modules/business/business.settings.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
+import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
+import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
+import { dayRangeInTimezone, shiftDateISO, todayInTimezone } from '@/modules/ownerAssistant/timezone.js'
 import {
   getConnectionState,
   setConnectionStatus,
@@ -172,13 +175,17 @@ function renderDayRow(key: DayKey, label: string, hours: DayHours): string {
   </tr>`
 }
 
-function renderServiceRows(services: Array<{ name: string; durationMinutes: number }>): string {
+function renderServiceRows(
+  services: Array<{ name: string; durationMinutes: number; price?: number }>,
+): string {
   if (services.length === 0) {
     return `<div class="service-row" id="service-row-0">
       <input type="text" class="form-input" name="service_0_name" data-field="name"
         placeholder="ej. Corte de cabello" style="flex:1">
       <input type="number" class="form-input" name="service_0_duration" data-field="duration"
         min="5" max="480" value="30" placeholder="Min" style="width:80px">
+      <input type="number" class="form-input" name="service_0_price" data-field="price"
+        min="0" step="0.01" placeholder="S/" style="width:90px">
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
     </div>`
   }
@@ -189,10 +196,44 @@ function renderServiceRows(services: Array<{ name: string; durationMinutes: numb
         value="${esc(s.name)}" placeholder="ej. Corte de cabello" style="flex:1" required>
       <input type="number" class="form-input" name="service_${i}_duration" data-field="duration"
         min="5" max="480" value="${s.durationMinutes}" placeholder="Min" style="width:80px">
+      <input type="number" class="form-input" name="service_${i}_price" data-field="price"
+        min="0" step="0.01" value="${s.price ?? ''}" placeholder="S/" style="width:90px">
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
     </div>`,
     )
     .join('')
+}
+
+type SpecialDayRow = { date: string; label?: string; hours: DayHours }
+
+function renderSpecialDayRow(i: number, s?: SpecialDayRow): string {
+  const date = s?.date ?? ''
+  const label = s?.label ?? ''
+  const closed = s ? s.hours === null : false
+  const open = s?.hours?.open ?? '09:00'
+  const close = s?.hours?.close ?? '13:00'
+  const dis = closed ? 'disabled' : ''
+
+  return `<div class="service-row special-row" id="special-row-${i}">
+    <input type="date" class="form-input" name="special_${i}_date" data-field="date"
+      value="${esc(date)}" style="width:150px">
+    <input type="text" class="form-input" name="special_${i}_label" data-field="label"
+      value="${esc(label)}" placeholder="ej. Navidad" style="flex:1">
+    <label style="display:flex;align-items:center;gap:.3rem;font-size:12px;white-space:nowrap">
+      <input type="checkbox" name="special_${i}_closed" data-field="closed"
+        ${closed ? 'checked' : ''} onchange="toggleSpecialClosed(${i})"> Cerrado
+    </label>
+    <input type="time" class="time-input" name="special_${i}_open" id="special_${i}_open"
+      data-field="open" value="${open}" ${dis}>
+    <input type="time" class="time-input" name="special_${i}_close" id="special_${i}_close"
+      data-field="close" value="${close}" ${dis}>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="removeSpecialDay(this)">✕</button>
+  </div>`
+}
+
+function renderSpecialDayRows(specialDays: SpecialDayRow[]): string {
+  if (specialDays.length === 0) return ''
+  return specialDays.map((s, i) => renderSpecialDayRow(i, s)).join('')
 }
 
 async function parseSettingsFromForm(
@@ -223,11 +264,40 @@ async function parseSettingsFromForm(
   const minNotice = minNoticeRaw ? Number(minNoticeRaw) : undefined
 
   const serviceCount = Number(formData.get('service_count') ?? 0)
-  const services: Array<{ name: string; durationMinutes: number }> = []
+  const services: Array<{ name: string; durationMinutes: number; price?: number }> = []
   for (let i = 0; i < serviceCount; i++) {
     const name = formData.get(`service_${i}_name`)?.toString().trim() ?? ''
     const duration = Number(formData.get(`service_${i}_duration`) ?? 30)
-    if (name) services.push({ name, durationMinutes: isNaN(duration) ? 30 : duration })
+    const priceRaw = formData.get(`service_${i}_price`)?.toString().trim()
+    const price = priceRaw ? Number(priceRaw) : undefined
+    if (name) {
+      services.push({
+        name,
+        durationMinutes: isNaN(duration) ? 30 : duration,
+        ...(price !== undefined && !isNaN(price) ? { price } : {}),
+      })
+    }
+  }
+
+  const specialDayCount = Number(formData.get('special_count') ?? 0)
+  const specialDays: Array<Record<string, unknown>> = []
+  for (let i = 0; i < specialDayCount; i++) {
+    const date = formData.get(`special_${i}_date`)?.toString().trim() ?? ''
+    if (!date) continue
+    const label = formData.get(`special_${i}_label`)?.toString().trim() || undefined
+    const closed = formData.get(`special_${i}_closed`) === 'on'
+    if (closed) {
+      specialDays.push({ date, hours: null, ...(label ? { label } : {}) })
+      continue
+    }
+    specialDays.push({
+      date,
+      hours: {
+        open: formData.get(`special_${i}_open`)?.toString() ?? '',
+        close: formData.get(`special_${i}_close`)?.toString() ?? '',
+      },
+      ...(label ? { label } : {}),
+    })
   }
 
   const raw = {
@@ -235,6 +305,7 @@ async function parseSettingsFromForm(
     slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
     services,
     ...(minNotice !== undefined && !isNaN(minNotice) ? { minBookingNoticeMinutes: minNotice } : {}),
+    ...(specialDays.length > 0 ? { specialDays } : {}),
   }
 
   const parsed = businessSettingsSchema.safeParse(raw)
@@ -821,7 +892,10 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
       </div>
 
       <div class="card">
-        <div class="card-header"><span class="card-title">Últimas citas</span></div>
+        <div class="card-header">
+          <span class="card-title">Últimas citas</span>
+          <a href="/admin/dashboard/${bid}/appointments?secret=${se}" class="btn btn-ghost btn-sm">Ver todas / gestionar</a>
+        </div>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Fecha</th><th>Servicio</th><th>Cliente</th><th>Estado</th></tr></thead>
@@ -832,6 +906,133 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
     </div>`
 
   return c.html(layout(business.name, body, secret, 'businesses'))
+})
+
+// ── Vista: Citas por día (listar + cancelar) ──────────────────────────────────
+
+function apptTimeLabel(d: Date, timezone: string): string {
+  return esc(
+    d.toLocaleString('es-PE', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: timezone,
+    }),
+  )
+}
+
+dashboardRoutes.get('/admin/dashboard/:id/appointments', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404</h1>', 404) as Response
+
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const canceled = c.req.query('cancelled') === '1'
+
+  const dateISO = c.req.query('date') || todayInTimezone(business.timezone)
+  const range = dayRangeInTimezone(dateISO, business.timezone)
+  if (!range) {
+    return c.html(layout('Fecha inválida', '<p class="muted">Fecha inválida.</p>', secret, 'businesses'), 400)
+  }
+
+  const items = await appointmentRepo.listScheduledInRange(businessId, range.start, range.end, 200)
+
+  const prevDate = shiftDateISO(dateISO, -1)
+  const nextDate = shiftDateISO(dateISO, 1)
+  const todayISO = todayInTimezone(business.timezone)
+
+  const rows =
+    items.length === 0
+      ? '<tr><td colspan="5" class="empty">Sin citas para este día</td></tr>'
+      : items
+          .map((a) => {
+            const canCancel = a.status === 'scheduled' || a.status === 'confirmed'
+            const cancelUrl = `/admin/dashboard/${bid}/appointments/${esc(a.id)}/cancel?secret=${se}&date=${dateISO}`
+            return `<tr>
+              <td>${apptTimeLabel(a.scheduledAt, business.timezone)}</td>
+              <td>${esc(a.service)}</td>
+              <td>${esc(a.customerName ?? '—')}</td>
+              <td><span class="mono muted">${esc(a.customerPhone)}</span></td>
+              <td>${apptStatusBadge(a.status)}</td>
+              <td>
+                ${canCancel
+                  ? `<form method="post" action="${cancelUrl}" style="display:inline"
+                       onsubmit="return confirm('¿Cancelar esta cita? Se le puede avisar al cliente por separado.')">
+                       <button type="submit" class="btn btn-danger btn-sm">Cancelar</button>
+                     </form>`
+                  : '<span class="muted">—</span>'}
+              </td>
+            </tr>`
+          })
+          .join('')
+
+  const body = `
+    <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
+    <div class="page-header">
+      <h1 class="page-title">Citas — ${esc(business.name)}</h1>
+    </div>
+    ${canceled ? '<div class="alert alert-success">✓ Cita cancelada.</div>' : ''}
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-body" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+        <a href="?secret=${se}&date=${prevDate}" class="btn btn-ghost btn-sm">← Día anterior</a>
+        <form method="get" action="/admin/dashboard/${bid}/appointments" style="display:inline-flex;gap:.5rem;align-items:center">
+          <input type="hidden" name="secret" value="${esc(secret)}">
+          <input type="date" name="date" class="form-input" value="${dateISO}" style="width:auto" onchange="this.form.submit()">
+        </form>
+        <a href="?secret=${se}&date=${nextDate}" class="btn btn-ghost btn-sm">Día siguiente →</a>
+        ${dateISO !== todayISO ? `<a href="?secret=${se}&date=${todayISO}" class="btn btn-ghost btn-sm">Hoy</a>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Hora</th><th>Servicio</th><th>Cliente</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`
+
+  return c.html(layout(`Citas — ${business.name}`, body, secret, 'businesses'))
+})
+
+dashboardRoutes.post('/admin/dashboard/:id/appointments/:apptId/cancel', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const apptId = c.req.param('apptId')
+  const se = encodeURIComponent(secret)
+  const dateISO = c.req.query('date')
+  const suffix = dateISO ? `&date=${encodeURIComponent(dateISO)}` : ''
+
+  const appt = await appointmentRepo.findById(businessId, apptId)
+  if (!appt) return c.html('<h1>404</h1>', 404) as Response
+
+  const updated = await appointmentRepo.update(businessId, apptId, { status: 'cancelled' })
+
+  // Best-effort Google Calendar sync, same pattern as bookAppointment: the
+  // local cancellation always sticks even if Calendar sync fails.
+  if (updated.googleEventId) {
+    const cancelResult = await googleCalendarService.cancelEvent(businessId, updated.googleEventId)
+    if (!cancelResult.ok) {
+      logger.warn(
+        { businessId, apptId, code: cancelResult.error.code },
+        'dashboard: appointment cancelled locally but Google Calendar sync failed',
+      )
+    }
+  }
+
+  logger.info({ businessId, apptId }, 'dashboard: appointment cancelled by admin')
+
+  return c.redirect(
+    `/admin/dashboard/${encodeURIComponent(businessId)}/appointments?secret=${se}&cancelled=1${suffix}`,
+    302,
+  )
 })
 
 // ── Configurar negocio: formulario ────────────────────────────────────────────
@@ -873,9 +1074,14 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     ? (raw.services as Array<{ name: string; durationMinutes: number }>)
     : []
 
+  const specialDays = Array.isArray(raw?.specialDays)
+    ? (raw.specialDays as SpecialDayRow[]).slice().sort((a, b) => a.date.localeCompare(b.date))
+    : []
+
   const slotDuration = raw?.slotDurationMinutes ?? 30
   const minNotice = raw?.minBookingNoticeMinutes ?? 30
   const initialServiceCount = Math.max(services.length, 1)
+  const initialSpecialDayCount = specialDays.length
 
   const hoursRows = DAYS.map(({ key, label }) =>
     renderDayRow(key, label, effectiveHours[key]),
@@ -962,11 +1168,26 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       </div>
 
       <div class="card" style="margin-bottom:1rem">
+        <div class="card-header"><span class="card-title">Días especiales</span></div>
+        <div class="card-body">
+          <p class="form-hint" style="margin-bottom:.75rem">Feriados u horarios puntuales que reemplazan el horario semanal para una fecha específica.</p>
+          <div id="special-days-container">
+            ${renderSpecialDayRows(specialDays)}
+          </div>
+          <input type="hidden" name="special_count" id="special_count" value="${initialSpecialDayCount}">
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addSpecialDay()">
+            + Agregar día especial
+          </button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">Servicios</span></div>
         <div class="card-body">
           <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
             <span style="flex:1;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Servicio</span>
             <span style="width:80px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Duración (min)</span>
+            <span style="width:90px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio (S/)</span>
             <span style="width:32px"></span>
           </div>
           <div id="services-container">
@@ -1071,6 +1292,8 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         ' placeholder="ej. Corte de cabello" style="flex:1" required>' +
         '<input type="number" class="form-input" name="service_' + idx + '_duration" data-field="duration"' +
         ' min="5" max="480" value="30" placeholder="Min" style="width:80px">' +
+        '<input type="number" class="form-input" name="service_' + idx + '_price" data-field="price"' +
+        ' min="0" step="0.01" placeholder="S/" style="width:90px">' +
         '<button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>';
       document.getElementById('services-container').appendChild(row);
       document.getElementById('service_count').value = _svcCounter;
@@ -1078,7 +1301,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
 
     function removeService(btn) {
       const row = btn.closest('.service-row');
-      if (document.querySelectorAll('.service-row').length <= 1) {
+      if (document.querySelectorAll('#services-container .service-row').length <= 1) {
         alert('El negocio debe tener al menos un servicio.');
         return;
       }
@@ -1087,13 +1310,63 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     }
 
     function reindexServices() {
-      const rows = document.querySelectorAll('.service-row');
+      const rows = document.querySelectorAll('#services-container .service-row');
       rows.forEach(function(row, i) {
         row.querySelector('[data-field="name"]').name = 'service_' + i + '_name';
         row.querySelector('[data-field="duration"]').name = 'service_' + i + '_duration';
+        row.querySelector('[data-field="price"]').name = 'service_' + i + '_price';
       });
       _svcCounter = rows.length;
       document.getElementById('service_count').value = _svcCounter;
+    }
+
+    let _specialCounter = ${initialSpecialDayCount};
+
+    function addSpecialDay() {
+      const idx = _specialCounter++;
+      const row = document.createElement('div');
+      row.className = 'service-row special-row';
+      row.id = 'special-row-' + idx;
+      row.innerHTML =
+        '<input type="date" class="form-input" name="special_' + idx + '_date" data-field="date" style="width:150px">' +
+        '<input type="text" class="form-input" name="special_' + idx + '_label" data-field="label"' +
+        ' placeholder="ej. Navidad" style="flex:1">' +
+        '<label style="display:flex;align-items:center;gap:.3rem;font-size:12px;white-space:nowrap">' +
+        '<input type="checkbox" name="special_' + idx + '_closed" data-field="closed" onchange="toggleSpecialClosed(' + idx + ')"> Cerrado</label>' +
+        '<input type="time" class="time-input" name="special_' + idx + '_open" id="special_' + idx + '_open" data-field="open" value="09:00">' +
+        '<input type="time" class="time-input" name="special_' + idx + '_close" id="special_' + idx + '_close" data-field="close" value="13:00">' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeSpecialDay(this)">✕</button>';
+      document.getElementById('special-days-container').appendChild(row);
+      document.getElementById('special_count').value = _specialCounter;
+    }
+
+    function removeSpecialDay(btn) {
+      btn.closest('.special-row').remove();
+      reindexSpecialDays();
+    }
+
+    function reindexSpecialDays() {
+      const rows = document.querySelectorAll('#special-days-container .special-row');
+      rows.forEach(function(row, i) {
+        row.querySelector('[data-field="date"]').name = 'special_' + i + '_date';
+        row.querySelector('[data-field="label"]').name = 'special_' + i + '_label';
+        row.querySelector('[data-field="closed"]').name = 'special_' + i + '_closed';
+        row.querySelector('[data-field="closed"]').setAttribute('onchange', 'toggleSpecialClosed(' + i + ')');
+        row.querySelector('[data-field="open"]').name = 'special_' + i + '_open';
+        row.querySelector('[data-field="open"]').id = 'special_' + i + '_open';
+        row.querySelector('[data-field="close"]').name = 'special_' + i + '_close';
+        row.querySelector('[data-field="close"]').id = 'special_' + i + '_close';
+      });
+      _specialCounter = rows.length;
+      document.getElementById('special_count').value = _specialCounter;
+    }
+
+    function toggleSpecialClosed(i) {
+      const closed = document.querySelector('#special-row-' + i + ' [data-field="closed"]').checked;
+      const openEl = document.getElementById('special_' + i + '_open');
+      const closeEl = document.getElementById('special_' + i + '_close');
+      if (openEl) openEl.disabled = closed;
+      if (closeEl) closeEl.disabled = closed;
     }
     </script>`
 

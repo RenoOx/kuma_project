@@ -73,18 +73,19 @@ async function dispatchReminder(
 export async function sendDueReminders(): Promise<ReminderRunResult> {
   const now = Date.now()
 
-  // Spec windows:
-  //   24h reminder → scheduledAt ∈ [now+23h, now+25h)
-  //   2h  reminder → scheduledAt ∈ [now+1.5h, now+2.5h)
+  // Spec windows: ceiling is the exact target (never fire late), floor is a
+  // grace period covering missed poll cycles (never fire more than that early).
+  //   24h reminder → scheduledAt ∈ [now+23h, now+24h]
+  //   2h  reminder → scheduledAt ∈ [now+1.5h, now+2h]
   const due24h = await appointmentRepo.findDueForReminder(
     '24h',
     new Date(now + 23 * HOUR_MS),
-    new Date(now + 25 * HOUR_MS),
+    new Date(now + 24 * HOUR_MS),
   )
   const due2h = await appointmentRepo.findDueForReminder(
     '2h',
     new Date(now + 1.5 * HOUR_MS),
-    new Date(now + 2.5 * HOUR_MS),
+    new Date(now + 2 * HOUR_MS),
   )
 
   let sent24h = 0
