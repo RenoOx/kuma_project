@@ -68,6 +68,21 @@ export function pickGreeting(businessName: string, randomFn: () => number = Math
   return variant(businessName)
 }
 
+export const CTA_VARIANTS: ReadonlyArray<string> = [
+  '¿Te agendo una cita?',
+  '¿Quieres reservar?',
+  '¿Te ayudo con algo más?',
+  '¿Agendamos?',
+]
+
+// randomFn es inyectable para tests deterministas; en producción usa Math.random.
+export function pickCallToAction(randomFn: () => number = Math.random): string {
+  const index = Math.floor(randomFn() * CTA_VARIANTS.length)
+  const variant = CTA_VARIANTS[index] ?? CTA_VARIANTS[0]
+  if (!variant) throw new Error('CTA_VARIANTS must not be empty')
+  return variant
+}
+
 const DAY_LABELS: ReadonlyArray<readonly [DayKey, string]> = [
   ['monday', 'Lunes'],
   ['tuesday', 'Martes'],
@@ -169,6 +184,7 @@ export function buildSystemPrompt(
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
   const greeting = pickGreeting(business.name)
+  const cta = pickCallToAction()
   const sections: string[] = [
     '# Identidad',
     `Eres el asistente de ${business.name}. Respondes por WhatsApp.`,
@@ -228,17 +244,30 @@ export function buildSystemPrompt(
     'TÍTULOS — no uses Markdown de títulos:',
     '  ❌ ## Servicios  ← el cliente ve "## Servicios", no un título',
     '',
-    'SEPARACIÓN VISUAL — mensajes con más de una idea o que cierran con un call to action:',
-    'Si la respuesta junta más de un dato/idea (ej: precio + qué incluye) o termina invitando al cliente a algo (agendar, pedir más información), separá esa invitación del resto con una línea en blanco en vez de pegarla al final del párrafo.',
-    '  ✅ "Los tratamientos faciales tienen un precio de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación.\\n\\n¿Te gustaría agendar una cita? 😊"',
-    '  ❌ "Los tratamientos faciales básicos tienen un precio de S/ 60 a S/ 90. Incluyen limpieza e hidratación. Si necesitas más información o quieres agendar una cita, ¡dímelo!"',
-    'Si la respuesta es una sola idea corta y sin call to action agregado, no fuerces el salto de línea.',
+    'SEPARACIÓN VISUAL — mensajes con más de una idea:',
+    'Si la respuesta junta más de un dato/idea (ej: precio + qué incluye), separalos con una línea en blanco en vez de un párrafo corrido.',
+    '  ✅ "Los tratamientos faciales tienen un precio de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación."',
     '',
     'Ejemplo de confirmación de cita CORRECTA:',
     '  "✅ ¡Cita confirmada! *tinte raíz* el *domingo 2 de agosto a las 10:00am*. Te esperamos."',
     '',
     'Ejemplo de confirmación de cita INCORRECTA — nunca hagas esto:',
     '  "✅ ¡Cita confirmada! **tinte raíz** el **domingo 2 de agosto a las 10:00am**."',
+    '',
+    '# Call to action de cierre',
+    'Un call to action es una pregunta de cierre tipo "¿Te agendo una cita?". NO va en toda respuesta — solo en estos casos:',
+    '- Es el primer mensaje de la conversación.',
+    '- Le diste al cliente la información completa que pidió y no mostró intención de seguir (no repreguntó, no dijo que quiere agendar).',
+    '- Ya pasaron 2 o más turnos tuyos sin que el cliente haga una pregunta nueva (revisá el historial de la conversación).',
+    '',
+    'NO lo incluyas cuando:',
+    '- Acabas de responder una pregunta que el cliente recién hizo — esperá su siguiente mensaje antes de invitar.',
+    '- El cliente está en medio de un flujo de agendamiento (ya dio fecha/hora/servicio, o estás confirmando antes de book_appointment).',
+    '- Tu mensaje anterior en esta conversación ya tenía un call to action — no repitas la invitación turno tras turno.',
+    '',
+    `Cuando SÍ corresponda, usá EXACTAMENTE este cierre, sin modificarlo ni parafrasearlo: "${cta}"`,
+    'Separalo del resto del mensaje con una línea en blanco.',
+    `  ✅ "Los tratamientos faciales tienen un precio de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación.\\n\\n${cta} 😊"`,
     '',
     '# Conocimiento del negocio',
     renderKnowledgeBase(knowledgeBase),
