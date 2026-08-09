@@ -33,6 +33,10 @@ const envSchema = z.object({
     (v) => (typeof v === "string" && v.length === 0 ? undefined : v),
     z.string().min(8).optional(),
   ),
+  // Knowledge base retrieval strategy. "category" is the keyword-routed lookup
+  // in use today. "semantic" is reserved for the RAG migration and currently
+  // falls back to "category" at runtime (see knowledgeBaseSearch.service).
+  KB_SEARCH_MODE: z.enum(["category", "semantic"]).default("category"),
   // E.164 phone of the Vamvu Labs admin who can send #demo commands via WA.
   // If unset the demo feature is disabled. E.g. "+51999123456"
   DEMO_ADMIN_PHONE: z.preprocess(

@@ -57,9 +57,23 @@ describe('llm.service.generateReply', () => {
       businessId: seed.businessA.id,
       customerId: customerA.id,
     })
+    // sendMode 'always' keeps both entries in the prompt regardless of which
+    // category the message routes to, which is what these tests assert on.
     await db.insert(knowledgeBase).values([
-      { businessId: seed.businessA.id, category: 'services', content: 'Corte de cabello' },
-      { businessId: seed.businessA.id, category: 'pricing', content: 'Corte: S/30' },
+      {
+        businessId: seed.businessA.id,
+        title: 'Corte de cabello',
+        category: 'servicios',
+        content: 'Corte de cabello',
+        sendMode: 'always',
+      },
+      {
+        businessId: seed.businessA.id,
+        title: 'Corte',
+        category: 'precios',
+        content: 'Corte: S/30',
+        sendMode: 'always',
+      },
     ])
     mockCreate.mockReset()
     mockExecuteTool.mockReset()

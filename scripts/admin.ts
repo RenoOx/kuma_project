@@ -11,18 +11,25 @@
  * business set-settings <id> <settings.json>   ← full replacement, not merge
  *
  * kb list <businessId>
- * kb add <businessId> --category=X --content=X
- * kb update <id> [--category=X] [--content=X]
- * kb delete <id>
+ * kb add <businessId> --category=X --content=X [--title=X] [--priority=N] ...
+ * kb update <businessId> <id> [--category=X] [--content=X] ...
+ * kb delete <businessId> <id>
  */
 import { readFileSync } from 'node:fs'
 import { db, queryClient } from '@/db/client.js'
-import { businesses, knowledgeBase } from '@/db/schema/index.js'
+import { businesses } from '@/db/schema/index.js'
+import type { KbAttachmentType, KbCategory, KbSendMode } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { asc, eq } from 'drizzle-orm'
-import { nanoid } from 'nanoid'
+import type { KnowledgeBasePatch } from '@/modules/knowledgeBase/knowledgeBase.repo.js'
+import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
+import {
+  KB_ATTACHMENT_TYPES,
+  KB_CATEGORIES,
+  KB_SEND_MODES,
+} from '@/modules/knowledgeBase/knowledgeBase.types.js'
+import { asc } from 'drizzle-orm'
 
 // ── Arg parser ────────────────────────────────────────────────────────────────
 
@@ -161,64 +168,107 @@ async function businessSetSettings(id: string, file: string): Promise<void> {
 
 // ── KB commands ───────────────────────────────────────────────────────────────
 
-async function kbList(businessId: string): Promise<void> {
-  const rows = await db
-    .select()
-    .from(knowledgeBase)
-    .where(eq(knowledgeBase.businessId, businessId))
-    .orderBy(asc(knowledgeBase.category), asc(knowledgeBase.createdAt))
+// Every KB command takes the businessId, including update and delete: an entry
+// id alone must never be enough to touch a row (rule 3 in CLAUDE.md).
 
-  if (rows.length === 0) {
+function parseCategory(value: string | undefined): KbCategory {
+  const category = KB_CATEGORIES.find((c) => c === value)
+  if (!category) {
+    die(`--category must be one of: ${KB_CATEGORIES.join(', ')}`, 2)
+  }
+  return category
+}
+
+function parseSendMode(value: string): KbSendMode {
+  const mode = KB_SEND_MODES.find((m) => m === value)
+  if (!mode) die(`--send-mode must be one of: ${KB_SEND_MODES.join(', ')}`, 2)
+  return mode
+}
+
+function parseAttachmentType(value: string): KbAttachmentType {
+  const type = KB_ATTACHMENT_TYPES.find((t) => t === value)
+  if (!type) die(`--attachment-type must be one of: ${KB_ATTACHMENT_TYPES.join(', ')}`, 2)
+  return type
+}
+
+async function kbList(businessId: string): Promise<void> {
+  const result = await knowledgeBaseService.getByBusiness(businessId)
+  if (!result.ok) die(`failed to load knowledge base: ${result.error.message}`)
+
+  if (result.data.length === 0) {
     console.log('\n(no knowledge base entries for this business)')
     return
   }
 
   console.log()
-  for (const row of rows) {
-    console.log(`[${row.id}]  ${row.category}`)
+  for (const row of result.data) {
+    const flags = [
+      row.active ? null : 'INACTIVE',
+      row.sendMode,
+      `priority=${row.priority}`,
+      row.attachmentType !== 'none' ? `${row.attachmentType}=${row.attachmentUrl ?? '?'}` : null,
+      row.triggerKeywords?.length ? `keywords=${row.triggerKeywords.join('|')}` : null,
+    ]
+      .filter((f) => f !== null)
+      .join('  ')
+    console.log(`[${row.id}]  ${row.category}  ${flags}`)
+    console.log(`  ${row.title}`)
     console.log(`  ${row.content.replace(/\n/g, '\n  ')}`)
     console.log()
   }
 }
 
 async function kbAdd(businessId: string, flags: Record<string, string>): Promise<void> {
-  if (!flags.category) die('--category is required', 2)
   if (!flags.content) die('--content is required', 2)
+  const category = parseCategory(flags.category)
 
-  const [row] = await db
-    .insert(knowledgeBase)
-    .values({ id: nanoid(), businessId, category: flags.category, content: flags.content })
-    .returning({ id: knowledgeBase.id })
+  const result = await knowledgeBaseService.create({
+    businessId,
+    category,
+    content: flags.content,
+    title: flags.title ?? null,
+    ...(flags['attachment-type']
+      ? { attachmentType: parseAttachmentType(flags['attachment-type']) }
+      : {}),
+    ...(flags['attachment-url'] ? { attachmentUrl: flags['attachment-url'] } : {}),
+    ...(flags['send-mode'] ? { sendMode: parseSendMode(flags['send-mode']) } : {}),
+    ...(flags.keywords ? { triggerKeywords: flags.keywords.split(',').map((k) => k.trim()) } : {}),
+    ...(flags.priority ? { priority: Number.parseInt(flags.priority, 10) } : {}),
+    ...(flags.active ? { active: flags.active !== 'false' } : {}),
+  })
 
-  ok(`KB entry created: ${row?.id}`)
+  if (!result.ok) die(`failed to create KB entry: ${result.error.message}`)
+  ok(`KB entry created: ${result.data.id}`)
 }
 
-async function kbUpdate(id: string, flags: Record<string, string>): Promise<void> {
-  const patch: { category?: string; content?: string; updatedAt: Date } = { updatedAt: new Date() }
-  if (flags.category) patch.category = flags.category
+async function kbUpdate(
+  businessId: string,
+  id: string,
+  flags: Record<string, string>,
+): Promise<void> {
+  const patch: KnowledgeBasePatch = {}
+  if (flags.category) patch.category = parseCategory(flags.category)
   if (flags.content) patch.content = flags.content
+  if (flags.title) patch.title = flags.title
+  if (flags['attachment-type']) patch.attachmentType = parseAttachmentType(flags['attachment-type'])
+  if (flags['attachment-url']) patch.attachmentUrl = flags['attachment-url']
+  if (flags['send-mode']) patch.sendMode = parseSendMode(flags['send-mode'])
+  if (flags.keywords) patch.triggerKeywords = flags.keywords.split(',').map((k) => k.trim())
+  if (flags.priority) patch.priority = Number.parseInt(flags.priority, 10)
+  if (flags.active) patch.active = flags.active !== 'false'
 
-  if (!flags.category && !flags.content) {
-    die('nothing to update — pass --category and/or --content', 2)
+  if (Object.keys(patch).length === 0) {
+    die('nothing to update — pass at least one of --category --content --title --priority ...', 2)
   }
 
-  const result = await db
-    .update(knowledgeBase)
-    .set(patch)
-    .where(eq(knowledgeBase.id, id))
-    .returning({ id: knowledgeBase.id })
-
-  if (result.length === 0) die(`KB entry not found: ${id}`)
+  const result = await knowledgeBaseService.update(businessId, id, patch)
+  if (!result.ok) die(`failed to update KB entry ${id}: ${result.error.message}`)
   ok(`KB entry updated: ${id}`)
 }
 
-async function kbDelete(id: string): Promise<void> {
-  const result = await db
-    .delete(knowledgeBase)
-    .where(eq(knowledgeBase.id, id))
-    .returning({ id: knowledgeBase.id })
-
-  if (result.length === 0) die(`KB entry not found: ${id}`)
+async function kbDelete(businessId: string, id: string): Promise<void> {
+  const result = await knowledgeBaseService.remove(businessId, id)
+  if (!result.ok) die(`failed to delete KB entry ${id}: ${result.error.message}`)
   ok(`KB entry deleted: ${id}`)
 }
 
@@ -238,15 +288,28 @@ BUSINESS
 
 KNOWLEDGE BASE
   kb list <businessId>
-  kb add <businessId> --category=X --content=X
-  kb update <id> [--category=X] [--content=X]
-  kb delete <id>
+  kb add <businessId> --category=X --content=X [options]
+  kb update <businessId> <id> [options]
+  kb delete <businessId> <id>
+
+  Options for add / update:
+    --title=X            short label (defaults to the first 50 chars of content)
+    --category=X         one of: ${KB_CATEGORIES.join(' | ')}
+    --content=X          the text Emma reads
+    --send-mode=X        one of: ${KB_SEND_MODES.join(' | ')}
+    --keywords=a,b,c     trigger words (only with --send-mode=trigger_based)
+    --attachment-type=X  one of: ${KB_ATTACHMENT_TYPES.join(' | ')}
+    --attachment-url=X   URL of the attachment
+    --priority=N         higher loads first within its category (default 0)
+    --active=false       hide from the prompt without deleting
 
 EXAMPLES
   npm run admin -- business create --name="Mi Barbería" --whatsapp="+51900000001" --owner="+51999000001" --owner-name="Juan"
   npm run admin -- business set-settings abc123 ./settings.json
   npm run admin -- kb add abc123 --category="ubicacion" --content="Estamos en Av. Larco 123, Miraflores"
-  npm run admin -- kb update entry456 --content="Nuevo texto..."
+  npm run admin -- kb add abc123 --category="servicios" --title="Portafolio" --content="Mirá nuestros trabajos" --attachment-type=link --attachment-url="https://instagram.com/x"
+  npm run admin -- kb update abc123 entry456 --content="Nuevo texto..."
+  npm run admin -- kb delete abc123 entry456
   `.trim())
   process.exit(2)
 }
@@ -298,12 +361,14 @@ async function main(): Promise<void> {
         return kbAdd(businessId, flags)
       }
       case 'update': {
-        const id = rest[0] ?? die('id required', 2)
-        return kbUpdate(id, flags)
+        const businessId = rest[0] ?? die('businessId required', 2)
+        const id = rest[1] ?? die('id required', 2)
+        return kbUpdate(businessId, id, flags)
       }
       case 'delete': {
-        const id = rest[0] ?? die('id required', 2)
-        return kbDelete(id)
+        const businessId = rest[0] ?? die('businessId required', 2)
+        const id = rest[1] ?? die('id required', 2)
+        return kbDelete(businessId, id)
       }
       default:
         die(`unknown kb command: ${command}`)

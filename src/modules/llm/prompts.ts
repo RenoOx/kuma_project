@@ -1,6 +1,7 @@
-import type { Business, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
+import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
 import { formatServicePrice } from '@/modules/business/business.settings.js'
 import type { BusinessSettings, DayKey } from '@/modules/business/business.settings.js'
+import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(
   entries: KnowledgeBaseEntry[],
@@ -14,6 +15,14 @@ function groupByCategory(
   return out
 }
 
+function renderEntry(entry: KnowledgeBaseEntry): string {
+  const attachment =
+    entry.attachmentType !== 'none' && entry.attachmentUrl
+      ? ` (adjunto: ${entry.attachmentUrl})`
+      : ''
+  return `- ${entry.title}: ${entry.content}${attachment}`
+}
+
 function renderKnowledgeBase(entries: KnowledgeBaseEntry[]): string {
   if (entries.length === 0) {
     return '(No hay información configurada para este negocio todavía.)'
@@ -22,8 +31,9 @@ function renderKnowledgeBase(entries: KnowledgeBaseEntry[]): string {
   const sortedCategories = Object.keys(grouped).sort()
   return sortedCategories
     .map((category) => {
-      const items = (grouped[category] ?? []).map((e) => `- ${e.content}`).join('\n')
-      return `## ${category}\n${items}`
+      const label = KB_CATEGORY_LABELS[category as KbCategory] ?? category
+      const items = (grouped[category] ?? []).map(renderEntry).join('\n')
+      return `## ${label}\n${items}`
     })
     .join('\n\n')
 }

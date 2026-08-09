@@ -42,8 +42,8 @@ describe('multi-tenant isolation', () => {
     const { businessA, businessB } = await seedTwoBusinesses()
 
     await db.insert(knowledgeBase).values([
-      { businessId: businessA.id, category: 'services', content: 'Corte, barba' },
-      { businessId: businessA.id, category: 'pricing', content: 'S/30 corte' },
+      { businessId: businessA.id, title: 'Servicios', category: 'servicios', content: 'Corte, barba' },
+      { businessId: businessA.id, title: 'Corte', category: 'precios', content: 'S/30 corte' },
     ])
 
     const aRows = await db
@@ -150,8 +150,8 @@ describe('multi-tenant isolation', () => {
     if (!custA || !custB) throw new Error('seed customers failed')
 
     await db.insert(knowledgeBase).values([
-      { businessId: businessA.id, category: 'services', content: 'A services' },
-      { businessId: businessB.id, category: 'services', content: 'B services' },
+      { businessId: businessA.id, title: 'A services', category: 'servicios', content: 'A services' },
+      { businessId: businessB.id, title: 'B services', category: 'servicios', content: 'B services' },
     ])
 
     const [convA] = await db

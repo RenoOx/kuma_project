@@ -1,10 +1,11 @@
+import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import type { Message } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
-import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
+import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -117,9 +118,30 @@ export async function generateReply(
     )
   }
 
-  // 4. Knowledge base
-  const kbResult = await knowledgeBaseService.getByBusiness(params.businessId)
+  // 4. Knowledge base — selective, not the whole table. The customer message
+  // routes to a category; `always` entries and matching `trigger_based` entries
+  // come along regardless. See knowledgeBaseSearch.service.
+  //
+  // KB_SEARCH_MODE=semantic is not implemented yet: we log and fall back to the
+  // category lookup rather than failing the reply over a misconfigured flag.
+  if (env.KB_SEARCH_MODE === 'semantic') {
+    log.warn(
+      { kbSearchMode: env.KB_SEARCH_MODE },
+      'KB_SEARCH_MODE=semantic is not implemented; falling back to category search',
+    )
+  }
+  const kbResult = await knowledgeBaseSearch.searchByCategory(
+    params.businessId,
+    params.userMessage,
+  )
   if (!kbResult.ok) return kbResult
+  log.debug(
+    {
+      matchedCategories: kbResult.data.matchedCategories,
+      kbEntryCount: kbResult.data.entries.length,
+    },
+    'knowledge base entries selected for prompt',
+  )
 
   // 5. Recent history (handler is expected to have appended the user msg
   // already; we don't re-append).
@@ -138,7 +160,12 @@ export async function generateReply(
 
   // History drives the call-to-action decision (see decideCallToAction): the
   // model no longer judges whether it already invited recently.
-  const systemPrompt = buildSystemPrompt(business, kbResult.data, settings, historyResult.data)
+  const systemPrompt = buildSystemPrompt(
+    business,
+    kbResult.data.entries,
+    settings,
+    historyResult.data,
+  )
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...convertHistoryToChatMessages(historyResult.data),

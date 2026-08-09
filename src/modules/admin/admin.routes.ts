@@ -1,15 +1,20 @@
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
-import { businesses, knowledgeBase } from '@/db/schema/index.js'
+import { businesses, type KbAttachmentType } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
+import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
+import {
+  kbAttachmentTypeSchema,
+  kbCategorySchema,
+  kbSendModeSchema,
+} from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
-import { asc, eq } from 'drizzle-orm'
+import { asc } from 'drizzle-orm'
 import { Hono } from 'hono'
-import { nanoid } from 'nanoid'
 import { rm } from 'node:fs/promises'
 import { z } from 'zod'
 import type { Context, Next } from 'hono'
@@ -73,18 +78,49 @@ const patchBusinessBody = z
     },
   )
 
-const createKbBody = z.object({
-  category: z.string().min(1),
+// An attachment type other than 'none' is meaningless without a URL, and a URL
+// is meaningless without a type. Rejected up front rather than stored half-set.
+function hasCoherentAttachment(v: {
+  attachmentType?: KbAttachmentType
+  attachmentUrl?: string | null
+}): boolean {
+  if (v.attachmentType === undefined) return true
+  return v.attachmentType === 'none' ? !v.attachmentUrl : Boolean(v.attachmentUrl)
+}
+
+const attachmentRefinement = {
+  message:
+    'attachmentUrl is required when attachmentType is not "none", and must be omitted when it is',
+  path: ['attachmentUrl'],
+}
+
+const kbFields = {
+  title: z.string().min(1).max(120).optional(),
   content: z.string().min(1),
-})
+  category: kbCategorySchema,
+  attachmentType: kbAttachmentTypeSchema.optional(),
+  attachmentUrl: z.string().url().nullable().optional(),
+  sendMode: kbSendModeSchema.optional(),
+  triggerKeywords: z.array(z.string().min(1)).nullable().optional(),
+  priority: z.number().int().min(-100).max(100).optional(),
+  active: z.boolean().optional(),
+}
+
+const createKbBody = z
+  .object(kbFields)
+  .refine(hasCoherentAttachment, attachmentRefinement)
+  .refine((v) => v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0, {
+    message: 'triggerKeywords is required when sendMode is "trigger_based"',
+    path: ['triggerKeywords'],
+  })
 
 const patchKbBody = z
-  .object({
-    category: z.string().min(1).optional(),
-    content: z.string().min(1).optional(),
-  })
-  .refine((v) => v.category !== undefined || v.content !== undefined, {
-    message: 'body must have at least one of: category, content',
+  .object({ ...kbFields, content: kbFields.content.optional(), category: kbFields.category.optional() })
+  .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
+  .refine(hasCoherentAttachment, attachmentRefinement)
+  .refine((v) => v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0, {
+    message: 'triggerKeywords is required when sendMode is "trigger_based"',
+    path: ['triggerKeywords'],
   })
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -242,14 +278,18 @@ adminRoutes.put('/admin/businesses/:id/settings', async (c) => {
 })
 
 // ── Knowledge base ────────────────────────────────────────────────────────────
+//
+// Every entry route is nested under /businesses/:id so the tenant is part of
+// the path and every query filters on it. The previous flat /admin/kb/:kbId
+// PATCH and DELETE were removed: an entry id on its own let a caller mutate any
+// tenant's row, which violates rule 3 in CLAUDE.md.
 
 adminRoutes.get('/admin/businesses/:id/kb', async (c) => {
-  const rows = await db
-    .select()
-    .from(knowledgeBase)
-    .where(eq(knowledgeBase.businessId, c.req.param('id')))
-    .orderBy(asc(knowledgeBase.category), asc(knowledgeBase.createdAt))
-  return c.json({ items: rows })
+  const result = await knowledgeBaseService.getByBusiness(c.req.param('id'))
+  if (!result.ok) {
+    return c.json({ error: result.error.code, message: result.error.message }, 500)
+  }
+  return c.json({ items: result.data })
 })
 
 adminRoutes.post('/admin/businesses/:id/kb', async (c) => {
@@ -257,34 +297,45 @@ adminRoutes.post('/admin/businesses/:id/kb', async (c) => {
   if (!body.success) {
     return c.json({ error: 'validation_error', issues: body.error.flatten().fieldErrors }, 400)
   }
-  const [row] = await db
-    .insert(knowledgeBase)
-    .values({ id: nanoid(), businessId: c.req.param('id'), ...body.data })
-    .returning()
-  return c.json(row, 201)
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.json({ error: 'not_found' }, 404)
+
+  const result = await knowledgeBaseService.create({ businessId, ...body.data })
+  if (!result.ok) {
+    return c.json({ error: result.error.code, message: result.error.message }, 500)
+  }
+  return c.json(result.data, 201)
 })
 
-adminRoutes.patch('/admin/kb/:id', async (c) => {
+adminRoutes.patch('/admin/businesses/:id/kb/:kbId', async (c) => {
   const body = patchKbBody.safeParse(await c.req.json().catch(() => null))
   if (!body.success) {
     return c.json({ error: 'validation_error', issues: body.error.flatten().fieldErrors }, 400)
   }
-  const rows = await db
-    .update(knowledgeBase)
-    .set({ ...body.data, updatedAt: new Date() })
-    .where(eq(knowledgeBase.id, c.req.param('id')))
-    .returning()
-  if (rows.length === 0) return c.json({ error: 'not_found' }, 404)
-  return c.json(rows[0])
+  const result = await knowledgeBaseService.update(
+    c.req.param('id'),
+    c.req.param('kbId'),
+    body.data,
+  )
+  if (!result.ok) {
+    return c.json(
+      { error: result.error.code, message: result.error.message },
+      appErrorStatus(result.error.code),
+    )
+  }
+  return c.json(result.data)
 })
 
-adminRoutes.delete('/admin/kb/:id', async (c) => {
-  const rows = await db
-    .delete(knowledgeBase)
-    .where(eq(knowledgeBase.id, c.req.param('id')))
-    .returning({ id: knowledgeBase.id })
-  if (rows.length === 0) return c.json({ error: 'not_found' }, 404)
-  return c.json({ deleted: rows[0]?.id })
+adminRoutes.delete('/admin/businesses/:id/kb/:kbId', async (c) => {
+  const result = await knowledgeBaseService.remove(c.req.param('id'), c.req.param('kbId'))
+  if (!result.ok) {
+    return c.json(
+      { error: result.error.code, message: result.error.message },
+      appErrorStatus(result.error.code),
+    )
+  }
+  return c.json({ deleted: result.data })
 })
 
 // ── WhatsApp session ──────────────────────────────────────────────────────────

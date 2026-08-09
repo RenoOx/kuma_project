@@ -1,8 +1,12 @@
+import type { KbCategory } from '@/db/schema/index.js'
 import type { BusinessSettings, Service } from '@/modules/business/business.settings.js'
 
 export interface DemoKbEntry {
-  category: string
+  category: KbCategory
   content: string
+  // Optional: demo entries are one-liners, so the title derived from the
+  // content is already the right label. Set it only when that reads badly.
+  title?: string
 }
 
 export interface DemoProfile {
@@ -57,22 +61,22 @@ const BARBERIA: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'Precios', content: 'Corte clásico: S/ 25' },
-    { category: 'Precios', content: 'Corte degradado: S/ 30' },
-    { category: 'Precios', content: 'Corte con tijera: S/ 28' },
-    { category: 'Precios', content: 'Corte infantil: S/ 20' },
-    { category: 'Precios', content: 'Corte con diseño: S/ 35' },
-    { category: 'Precios', content: 'Mohicano: S/ 35' },
-    { category: 'Precios', content: 'Arreglo de barba: S/ 15' },
-    { category: 'Precios', content: 'Corte y barba: S/ 40' },
-    { category: 'Precios', content: 'Afeitado a navaja: S/ 20' },
-    { category: 'Precios', content: 'Perfilado de cejas: S/ 10' },
-    { category: 'Precios', content: 'Mascarilla facial: S/ 20' },
-    { category: 'Precios', content: 'Ondulación: S/ 60' },
-    { category: 'Precios', content: 'Tinte: S/ 35–50 (varía según el largo)' },
-    { category: 'Precios', content: 'Tratamiento capilar: S/ 25' },
-    { category: 'Información general', content: 'Imperio Barber Studio — atendemos de lunes a sábado de 9:30 a 21:30.' },
-    { category: 'Información general', content: 'Aceptamos efectivo, Yape y Plin.' },
+    { category: 'precios', content: 'Corte clásico: S/ 25' },
+    { category: 'precios', content: 'Corte degradado: S/ 30' },
+    { category: 'precios', content: 'Corte con tijera: S/ 28' },
+    { category: 'precios', content: 'Corte infantil: S/ 20' },
+    { category: 'precios', content: 'Corte con diseño: S/ 35' },
+    { category: 'precios', content: 'Mohicano: S/ 35' },
+    { category: 'precios', content: 'Arreglo de barba: S/ 15' },
+    { category: 'precios', content: 'Corte y barba: S/ 40' },
+    { category: 'precios', content: 'Afeitado a navaja: S/ 20' },
+    { category: 'precios', content: 'Perfilado de cejas: S/ 10' },
+    { category: 'precios', content: 'Mascarilla facial: S/ 20' },
+    { category: 'precios', content: 'Ondulación: S/ 60' },
+    { category: 'precios', content: 'Tinte: S/ 35–50 (varía según el largo)' },
+    { category: 'precios', content: 'Tratamiento capilar: S/ 25' },
+    { category: 'informacion_general', content: 'Imperio Barber Studio — atendemos de lunes a sábado de 9:30 a 21:30.' },
+    { category: 'informacion_general', content: 'Aceptamos efectivo, Yape y Plin.' },
   ],
 }
 
@@ -100,16 +104,16 @@ const CONSULTORIO: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'Precios', content: 'Consulta general: S/ 60' },
-    { category: 'Precios', content: 'Limpieza dental: S/ 120' },
-    { category: 'Precios', content: 'Blanqueamiento dental: S/ 350' },
-    { category: 'Precios', content: 'Extracción simple: desde S/ 80' },
-    { category: 'Precios', content: 'Curación / empaste: desde S/ 100' },
-    { category: 'Precios', content: 'Radiografía digital: S/ 40' },
-    { category: 'Información general', content: 'Somos Dental Smile, clínica odontológica ubicada en Santiago de Surco, Lima.' },
-    { category: 'Información general', content: 'Todos los procedimientos tienen garantía por escrito.' },
-    { category: 'Información general', content: 'Aceptamos efectivo, tarjeta y transferencias.' },
-    { category: 'Información general', content: 'Trabajamos con seguros de salud (consultar cobertura).' },
+    { category: 'precios', content: 'Consulta general: S/ 60' },
+    { category: 'precios', content: 'Limpieza dental: S/ 120' },
+    { category: 'precios', content: 'Blanqueamiento dental: S/ 350' },
+    { category: 'precios', content: 'Extracción simple: desde S/ 80' },
+    { category: 'precios', content: 'Curación / empaste: desde S/ 100' },
+    { category: 'precios', content: 'Radiografía digital: S/ 40' },
+    { category: 'informacion_general', content: 'Somos Dental Smile, clínica odontológica ubicada en Santiago de Surco, Lima.' },
+    { category: 'informacion_general', content: 'Todos los procedimientos tienen garantía por escrito.' },
+    { category: 'informacion_general', content: 'Aceptamos efectivo, tarjeta y transferencias.' },
+    { category: 'informacion_general', content: 'Trabajamos con seguros de salud (consultar cobertura).' },
   ],
 }
 
@@ -141,18 +145,18 @@ const SPA: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'Precios', content: 'Uñas acrílicas: S/ 39' },
-    { category: 'Precios', content: 'Gel semipermanente: S/ 20' },
-    { category: 'Precios', content: 'Lifting de pestañas: S/ 25' },
-    { category: 'Precios', content: 'Extensiones de pestañas: S/ 39' },
-    { category: 'Precios', content: 'Pestañas 1x1 anime: S/ 20' },
-    { category: 'Precios', content: 'Planchado de cejas con visajismo: S/ 15' },
-    { category: 'Precios', content: 'Limpieza facial: S/ 35' },
-    { category: 'Precios', content: 'Dermaplaning: S/ 15' },
-    { category: 'Precios', content: 'Pigmentación de cejas con visajismo: S/ 20' },
-    { category: 'Precios', content: 'Planchado de cabello: S/ 20' },
-    { category: 'Información general', content: 'Bella Vida Salón & Spa — atendemos de lunes a sábado de 9:00 a 20:00 y domingos de 9:00 a 15:00.' },
-    { category: 'Información general', content: 'Aceptamos efectivo, Yape y Plin.' },
+    { category: 'precios', content: 'Uñas acrílicas: S/ 39' },
+    { category: 'precios', content: 'Gel semipermanente: S/ 20' },
+    { category: 'precios', content: 'Lifting de pestañas: S/ 25' },
+    { category: 'precios', content: 'Extensiones de pestañas: S/ 39' },
+    { category: 'precios', content: 'Pestañas 1x1 anime: S/ 20' },
+    { category: 'precios', content: 'Planchado de cejas con visajismo: S/ 15' },
+    { category: 'precios', content: 'Limpieza facial: S/ 35' },
+    { category: 'precios', content: 'Dermaplaning: S/ 15' },
+    { category: 'precios', content: 'Pigmentación de cejas con visajismo: S/ 20' },
+    { category: 'precios', content: 'Planchado de cabello: S/ 20' },
+    { category: 'informacion_general', content: 'Bella Vida Salón & Spa — atendemos de lunes a sábado de 9:00 a 20:00 y domingos de 9:00 a 15:00.' },
+    { category: 'informacion_general', content: 'Aceptamos efectivo, Yape y Plin.' },
   ],
 }
 

@@ -1,6 +1,7 @@
 import { db } from '@/db/client.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as knowledgeBaseRepo from '@/modules/knowledgeBase/knowledgeBase.repo.js'
+import { deriveTitle } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import { AppError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { DEMO_PROFILES, DEMO_PROFILE_KEYS } from './demoProfiles.js'
@@ -29,7 +30,11 @@ export async function applyDemoProfile(
       )
       await knowledgeBaseRepo.deleteByBusiness(businessId, tx)
       await knowledgeBaseRepo.bulkInsert(
-        profile.kbEntries.map((e) => ({ ...e, businessId })),
+        profile.kbEntries.map((e) => ({
+          ...e,
+          businessId,
+          title: e.title ?? deriveTitle(e.content),
+        })),
         tx,
       )
     })

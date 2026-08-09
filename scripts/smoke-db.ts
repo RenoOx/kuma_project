@@ -31,12 +31,14 @@ async function main(): Promise<void> {
         .values([
           {
             businessId: business.id,
-            category: 'services',
+            title: 'Servicios',
+        category: 'servicios',
             content: 'Corte de cabello, barba, cejas, lavado.',
           },
           {
             businessId: business.id,
-            category: 'pricing',
+            title: 'Precios',
+        category: 'precios',
             content: 'Corte: S/30. Barba: S/20. Cejas: S/10.',
           },
         ])

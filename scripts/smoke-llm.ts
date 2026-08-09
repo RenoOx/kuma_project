@@ -24,17 +24,20 @@ async function main(): Promise<void> {
     await db.insert(kbTable).values([
       {
         businessId: business.id,
-        category: 'services',
+        title: 'Servicios',
+        category: 'servicios',
         content: 'Corte de cabello, barba, cejas, lavado.',
       },
       {
         businessId: business.id,
-        category: 'pricing',
+        title: 'Precios',
+        category: 'precios',
         content: 'Corte: S/30. Barba: S/20. Cejas: S/10. Lavado: incluido en el corte.',
       },
       {
         businessId: business.id,
-        category: 'hours',
+        title: 'Horarios',
+        category: 'informacion_general',
         content: 'Lunes a sábado de 9am a 8pm. Domingos cerrado.',
       },
     ])

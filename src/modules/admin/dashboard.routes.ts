@@ -10,6 +10,21 @@ import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
+import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
+import {
+  KB_ATTACHMENT_TYPE_LABELS,
+  KB_ATTACHMENT_TYPES,
+  KB_CATEGORIES,
+  KB_CATEGORY_LABELS,
+  KB_SEND_MODE_LABELS,
+  KB_SEND_MODES,
+} from '@/modules/knowledgeBase/knowledgeBase.types.js'
+import type {
+  KbAttachmentType,
+  KbCategory,
+  KbSendMode,
+  KnowledgeBaseEntry,
+} from '@/db/schema/index.js'
 import { dayRangeInTimezone, shiftDateISO, todayInTimezone } from '@/modules/ownerAssistant/timezone.js'
 import {
   getClient,
@@ -22,7 +37,6 @@ import { SessionGuardError } from '@/shared/errors.js'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
-import qrcode from 'qrcode'
 import * as dashRepo from './dashboard.repo.js'
 
 export const dashboardRoutes = new Hono()
@@ -415,10 +429,7 @@ a{color:inherit;text-decoration:none}
 .topbar{background:#0a0f0d;border-bottom:1px solid #1a2b24;padding:0 1.5rem;display:flex;align-items:center;gap:1.5rem;height:52px;position:sticky;top:0;z-index:10}
 .brand{font-weight:700;font-size:15px;letter-spacing:-0.01em;color:#059669}
 .brand span{color:#d4b896}
-.nav{display:flex;gap:2px;margin-left:auto}
-.nav a{padding:.35rem .75rem;border-radius:6px;color:#d4b896;font-size:13px;font-weight:500}
-.nav a:hover{background:rgba(212,184,150,0.08);color:#f0e6da}
-.nav a.active{background:#f0fdf4;color:#059669}
+.brand:hover{opacity:.85}
 .main{max-width:1200px;margin:0 auto;padding:2rem 1.5rem}
 .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem}
 .page-title{font-size:18px;font-weight:700;letter-spacing:-0.02em}
@@ -477,17 +488,6 @@ tr:hover td{background:#fafaf8}
 @media(max-width:900px){.grid-2{grid-template-columns:1fr}}
 .empty{padding:2rem;text-align:center;color:#9ca3af;font-size:13px}
 
-.session-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:1.25rem;display:flex;align-items:flex-start;gap:1rem;margin-bottom:.75rem}
-.session-card.connected{border-left:3px solid #059669}
-.session-card.qr_pending{border-left:3px solid #f59e0b}
-.session-card.logged_out{border-left:3px solid #ef4444}
-.session-card.connecting,.session-card.none{border-left:3px solid #e5e7eb}
-.session-info{flex:1;min-width:0}
-.session-name{font-weight:600;font-size:14px;margin-bottom:.2rem}
-.session-meta{color:#9ca3af;font-size:12px;margin-bottom:.5rem}
-.session-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
-.qr-img{display:block;margin:.75rem 0 0;border:1px solid #e5e7eb;border-radius:8px}
-
 .form-group{margin-bottom:1.25rem}
 .form-label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:.35rem}
 .form-input{width:100%;padding:.5rem .75rem;border:1px solid #e5e7eb;border-radius:6px;font-size:14px;font-family:inherit;color:#0a0f0d;background:#fff}
@@ -517,17 +517,9 @@ tr:hover td{background:#fafaf8}
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 
-function layout(
-  title: string,
-  body: string,
-  secret: string,
-  active: 'businesses' | 'sessions',
-  refreshSecs?: number,
-): string {
+function layout(title: string, body: string, secret: string, refreshSecs?: number): string {
   const s = encodeURIComponent(secret)
   const refresh = refreshSecs ? `<meta http-equiv="refresh" content="${refreshSecs}">` : ''
-  const navA = (href: string, label: string, page: string) =>
-    `<a href="${href}?secret=${s}" class="${active === page ? 'active' : ''}">${label}</a>`
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -542,11 +534,7 @@ function layout(
 </head>
 <body>
   <div class="topbar">
-    <span class="brand">Emma <span>Admin</span></span>
-    <nav class="nav">
-      ${navA('/admin/dashboard', 'Negocios', 'businesses')}
-      ${navA('/admin/dashboard/sessions', 'Sesiones WA', 'sessions')}
-    </nav>
+    <a href="/admin/dashboard?secret=${s}" class="brand">Emma <span>Admin</span></a>
   </div>
   <main class="main">
     ${body}
@@ -575,7 +563,7 @@ dashboardRoutes.get('/admin/dashboard', async (c) => {
         <a href="/admin/dashboard/new?secret=${se}" class="btn btn-primary">+ Nuevo negocio</a>
       </div>
       <div class="card"><div class="empty">No hay negocios registrados.<br>Crea el primero con el botón de arriba.</div></div>`
-    return c.html(layout('Negocios', body, secret, 'businesses'))
+    return c.html(layout('Negocios', body, secret))
   }
 
   const rows = all
@@ -639,59 +627,7 @@ dashboardRoutes.get('/admin/dashboard', async (c) => {
     return s === 'connecting' || s === 'qr_pending'
   })
 
-  return c.html(layout('Negocios', body, secret, 'businesses', anyTransitioning ? 10 : undefined))
-})
-
-// ── Vista 3: Sesiones WA ──────────────────────────────────────────────────────
-
-dashboardRoutes.get('/admin/dashboard/sessions', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const all = await businessRepo.findAll()
-
-  const hasTransitioning = all.some((b) => {
-    const s = getConnectionState(b.id)?.status
-    return s === 'connecting' || s === 'qr_pending'
-  })
-
-  const cards = await Promise.all(
-    all.map(async (b) => {
-      const state = getConnectionState(b.id)
-      const status = state?.status as WaStatus | undefined
-      const cardClass = status ?? 'none'
-
-      let qrHtml = ''
-      if (status === 'qr_pending' && state?.qr) {
-        try {
-          const dataUrl = await qrcode.toDataURL(state.qr, { width: 200, margin: 2 })
-          qrHtml = `<img src="${dataUrl}" alt="QR" width="200" height="200" class="qr-img">`
-        } catch (err) {
-          logger.warn({ err, businessId: b.id }, 'dashboard: failed to generate QR data URL')
-        }
-      }
-
-      return `<div class="session-card ${esc(cardClass)}">
-        <div class="session-info">
-          <div class="session-name">${esc(b.name)}</div>
-          <div class="session-meta"><span class="mono">${esc(b.whatsappNumber)}</span></div>
-          ${statusBadge(status)}
-          ${qrHtml}
-        </div>
-        <div class="session-actions">
-          ${waActions(b.id, status, secret)}
-        </div>
-      </div>`
-    }),
-  )
-
-  const body = `
-    <h1 class="page-title" style="margin-bottom:1.5rem">Sesiones WhatsApp</h1>
-    ${all.length === 0 ? '<div class="card"><div class="empty">No hay negocios registrados.</div></div>' : cards.join('')}`
-
-  return c.html(
-    layout('Sesiones WA', body, secret, 'sessions', hasTransitioning ? 8 : undefined),
-  )
+  return c.html(layout('Negocios', body, secret, anyTransitioning ? 10 : undefined))
 })
 
 // ── Nuevo negocio: formulario ─────────────────────────────────────────────────
@@ -770,7 +706,7 @@ dashboardRoutes.get('/admin/dashboard/new', (c) => {
       </div>
     </div>`
 
-  return c.html(layout('Nuevo negocio', body, secret, 'businesses'))
+  return c.html(layout('Nuevo negocio', body, secret))
 })
 
 dashboardRoutes.post('/admin/dashboard/new', async (c) => {
@@ -847,7 +783,7 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
       </div>
     </div>`
 
-  return c.html(layout('Negocio creado', body, secret, 'businesses'))
+  return c.html(layout('Negocio creado', body, secret))
 })
 
 // ── Vista 2: Detalle de negocio ───────────────────────────────────────────────
@@ -857,14 +793,15 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
   if (!secret) return unauthorized(c)
 
   const businessId = c.req.param('id')
-  const [business, detail] = await Promise.all([
+  const [business, detail, kbResult] = await Promise.all([
     businessRepo.findById(businessId),
     dashRepo.getBusinessDetail(businessId),
+    knowledgeBaseService.getByBusiness(businessId),
   ])
 
   if (!business) {
     return c.html(
-      layout('No encontrado', '<p class="muted">Negocio no encontrado.</p>', secret, 'businesses'),
+      layout('No encontrado', '<p class="muted">Negocio no encontrado.</p>', secret),
       404,
     )
   }
@@ -892,6 +829,28 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
           </tr>`,
           )
           .join('')
+
+  // A failed KB read must not take the whole detail page down — the section
+  // renders its own error state and the rest of the page stays useful.
+  const kbEntries = kbResult.ok ? kbResult.data : []
+  const kbActive = kbEntries.filter((e) => e.active)
+  const kbByCategory = KB_CATEGORIES.map((cat) => ({
+    cat,
+    count: kbActive.filter((e) => e.category === cat).length,
+  })).filter((g) => g.count > 0)
+
+  const kbSummary = !kbResult.ok
+    ? '<p class="muted">No pudimos cargar la base de conocimiento.</p>'
+    : kbEntries.length === 0
+      ? '<p class="muted">Sin entradas todavía. Emma solo sabe lo que esté en la configuración.</p>'
+      : `<div class="info-row">
+           <span class="info-label">Entradas activas</span>
+           <span class="info-value">${kbActive.length} de ${kbEntries.length}</span>
+         </div>
+         <div class="info-row">
+           <span class="info-label">Categorías</span>
+           <span class="info-value">${kbByCategory.map((g) => `${esc(KB_CATEGORY_LABELS[g.cat])} (${g.count})`).join(', ')}</span>
+         </div>`
 
   const apptRows =
     detail.recentAppointments.length === 0
@@ -995,6 +954,16 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-header">
+        <span class="card-title">Base de conocimiento</span>
+        <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost btn-sm">Ver todas / gestionar</a>
+      </div>
+      <div class="card-body">
+        ${kbSummary}
+      </div>
+    </div>
+
     <div class="grid-2">
       <div class="card">
         <div class="card-header"><span class="card-title">Últimos clientes</span></div>
@@ -1020,7 +989,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
       </div>
     </div>`
 
-  return c.html(layout(business.name, body, secret, 'businesses'))
+  return c.html(layout(business.name, body, secret))
 })
 
 // ── Vista: Citas por día (listar + cancelar) ──────────────────────────────────
@@ -1050,7 +1019,7 @@ dashboardRoutes.get('/admin/dashboard/:id/appointments', async (c) => {
   const dateISO = c.req.query('date') || todayInTimezone(business.timezone)
   const range = dayRangeInTimezone(dateISO, business.timezone)
   if (!range) {
-    return c.html(layout('Fecha inválida', '<p class="muted">Fecha inválida.</p>', secret, 'businesses'), 400)
+    return c.html(layout('Fecha inválida', '<p class="muted">Fecha inválida.</p>', secret), 400)
   }
 
   const items = await appointmentRepo.listScheduledInRange(businessId, range.start, range.end, 200)
@@ -1112,7 +1081,7 @@ dashboardRoutes.get('/admin/dashboard/:id/appointments', async (c) => {
       </div>
     </div>`
 
-  return c.html(layout(`Citas — ${business.name}`, body, secret, 'businesses'))
+  return c.html(layout(`Citas — ${business.name}`, body, secret))
 })
 
 dashboardRoutes.post('/admin/dashboard/:id/appointments/:apptId/cancel', async (c) => {
@@ -1577,7 +1546,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     }
     </script>`
 
-  return c.html(layout(`Configurar — ${business.name}`, body, secret, 'businesses'))
+  return c.html(layout(`Configurar — ${business.name}`, body, secret))
 })
 
 dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
@@ -1725,7 +1694,6 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
              <strong>Podés reintentar en ${esc(humanizeMs(err.retryAfterMs))}.</strong>
            </div>`,
           secret,
-          'businesses',
         ),
         429,
       )
@@ -1737,7 +1705,6 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
         `<a href="/admin/dashboard?secret=${encodeURIComponent(secret)}" class="back">← Negocios</a>
          <p style="color:#b91c1c;margin-top:1rem">No se pudo iniciar la sesión: ${esc((err as Error).message ?? 'error desconocido')}</p>`,
         secret,
-        'businesses',
       ),
       500,
     )
@@ -1856,4 +1823,452 @@ dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
     `${target}?secret=${encodeURIComponent(secret)}`,
     302,
   )
+})
+
+// ── Vista: Base de conocimiento (listar + crear + editar + eliminar) ──────────
+
+function kbCategoryOptions(selected?: string): string {
+  return KB_CATEGORIES.map(
+    (cat) =>
+      `<option value="${cat}" ${selected === cat ? 'selected' : ''}>${esc(KB_CATEGORY_LABELS[cat])}</option>`,
+  ).join('')
+}
+
+function kbSendModeOptions(selected?: string): string {
+  return KB_SEND_MODES.map(
+    (mode) =>
+      `<option value="${mode}" ${selected === mode ? 'selected' : ''}>${esc(KB_SEND_MODE_LABELS[mode])}</option>`,
+  ).join('')
+}
+
+function kbAttachmentTypeOptions(selected?: string): string {
+  return KB_ATTACHMENT_TYPES.map(
+    (type) =>
+      `<option value="${type}" ${selected === type ? 'selected' : ''}>${esc(KB_ATTACHMENT_TYPE_LABELS[type])}</option>`,
+  ).join('')
+}
+
+function kbSendModeBadge(mode: KbSendMode): string {
+  const cls =
+    mode === 'always' ? 'badge-green' : mode === 'trigger_based' ? 'badge-yellow' : 'badge-gray'
+  return `<span class="badge ${cls}">${esc(KB_SEND_MODE_LABELS[mode])}</span>`
+}
+
+// The create form and the edit form share every field; only the action URL and
+// the prefilled values differ. A null `entry` renders the "new entry" variant.
+function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEntry | null): string {
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const action = entry
+    ? `/admin/dashboard/${bid}/kb/${esc(entry.id)}?secret=${se}`
+    : `/admin/dashboard/${bid}/kb?secret=${se}`
+  const keywords = entry?.triggerKeywords?.join(', ') ?? ''
+
+  return `
+    <form method="post" action="${action}">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="title">Título</label>
+          <input id="title" name="title" type="text" class="form-input" maxlength="120"
+            value="${esc(entry?.title ?? '')}" placeholder="Nombre corto de la entrada">
+          <p class="form-hint">Si lo dejás vacío se genera con los primeros 50 caracteres del contenido.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="category">Categoría</label>
+          <select id="category" name="category" class="form-input form-select" required>
+            ${kbCategoryOptions(entry?.category)}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="content">Contenido</label>
+        <textarea id="content" name="content" class="form-input" rows="5" required
+          placeholder="Lo que Emma debe saber">${esc(entry?.content ?? '')}</textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="attachmentType">Tipo de adjunto</label>
+          <select id="attachmentType" name="attachmentType" class="form-input form-select"
+            onchange="kbToggleAttachment()">
+            ${kbAttachmentTypeOptions(entry?.attachmentType)}
+          </select>
+        </div>
+        <div class="form-group" id="kb-attachment-url-group">
+          <label class="form-label" for="attachmentUrl">URL del adjunto</label>
+          <input id="attachmentUrl" name="attachmentUrl" type="url" class="form-input"
+            value="${esc(entry?.attachmentUrl ?? '')}" placeholder="https://...">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="sendMode">Modo de envío</label>
+          <select id="sendMode" name="sendMode" class="form-input form-select"
+            onchange="kbToggleKeywords()">
+            ${kbSendModeOptions(entry?.sendMode)}
+          </select>
+          <p class="form-hint">
+            <strong>Siempre</strong>: entra en todas las respuestas.
+            <strong>Bajo pedido</strong>: solo si el cliente pregunta por esa categoría.
+            <strong>Por palabras clave</strong>: solo si el mensaje contiene alguna keyword.
+          </p>
+        </div>
+        <div class="form-group" id="kb-keywords-group">
+          <label class="form-label" for="triggerKeywords">Palabras clave</label>
+          <input id="triggerKeywords" name="triggerKeywords" type="text" class="form-input"
+            value="${esc(keywords)}" placeholder="estacionamiento, parqueo, cochera">
+          <p class="form-hint">Separadas por coma. Solo se usan con "Por palabras clave".</p>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="priority">Prioridad</label>
+          <input id="priority" name="priority" type="number" class="form-input"
+            min="-100" max="100" value="${entry?.priority ?? 0}">
+          <p class="form-hint">Mayor número = se carga antes dentro de su categoría.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="active">Estado</label>
+          <select id="active" name="active" class="form-input form-select">
+            <option value="1" ${entry?.active !== false ? 'selected' : ''}>Activa</option>
+            <option value="0" ${entry?.active === false ? 'selected' : ''}>Desactivada</option>
+          </select>
+          <p class="form-hint">Desactivar la saca del prompt sin borrarla.</p>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">${entry ? 'Guardar cambios' : 'Crear entrada'}</button>
+        <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost">Cancelar</a>
+      </div>
+    </form>
+
+    <script>
+      function kbToggleAttachment() {
+        var type = document.getElementById('attachmentType').value
+        document.getElementById('kb-attachment-url-group').style.display = type === 'none' ? 'none' : ''
+      }
+      function kbToggleKeywords() {
+        var mode = document.getElementById('sendMode').value
+        document.getElementById('kb-keywords-group').style.display = mode === 'trigger_based' ? '' : 'none'
+      }
+      kbToggleAttachment()
+      kbToggleKeywords()
+    </script>`
+}
+
+function kbEntryRow(businessId: string, secret: string, e: KnowledgeBaseEntry): string {
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const preview = e.content.length > 140 ? `${e.content.slice(0, 140)}…` : e.content
+  const attachment = e.attachmentUrl
+    ? `<div style="font-size:12px;margin-top:.25rem"><a href="${esc(e.attachmentUrl)}" target="_blank" rel="noopener">${esc(KB_ATTACHMENT_TYPE_LABELS[e.attachmentType])} adjunto</a></div>`
+    : ''
+  const keywords =
+    e.sendMode === 'trigger_based' && e.triggerKeywords && e.triggerKeywords.length > 0
+      ? `<div class="muted" style="font-size:12px;margin-top:.25rem">${esc(e.triggerKeywords.join(', '))}</div>`
+      : ''
+
+  return `<tr>
+    <td>
+      <strong>${esc(e.title)}</strong>
+      ${e.active ? '' : ' <span class="badge badge-gray">Desactivada</span>'}
+      <div class="muted" style="font-size:12px;margin-top:.25rem">${esc(preview)}</div>
+      ${attachment}
+    </td>
+    <td>${kbSendModeBadge(e.sendMode)}${keywords}</td>
+    <td class="mono">${e.priority}</td>
+    <td>
+      <div class="actions">
+        <a href="/admin/dashboard/${bid}/kb/${esc(e.id)}/edit?secret=${se}" class="btn btn-ghost btn-sm">Editar</a>
+        <form method="post" action="/admin/dashboard/${bid}/kb/${esc(e.id)}/delete?secret=${se}" style="display:inline"
+          onsubmit="return confirm('¿Eliminar esta entrada? No se puede deshacer.')">
+          <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+        </form>
+      </div>
+    </td>
+  </tr>`
+}
+
+dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404</h1>', 404) as Response
+
+  const result = await knowledgeBaseService.getByBusiness(businessId)
+  if (!result.ok) {
+    logger.error({ err: result.error, businessId }, 'dashboard: failed to load knowledge base')
+    return c.html(
+      layout(
+        'Base de conocimiento',
+        `<div class="alert alert-error">${esc(result.error.userMessage)}</div>`,
+        secret,
+      ),
+      500,
+    ) as Response
+  }
+
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const saved = c.req.query('saved') === '1'
+  const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
+  const showNew = c.req.query('new') === '1'
+  const rawFilter = c.req.query('category')
+  const activeFilter = KB_CATEGORIES.find((cat) => cat === rawFilter) ?? null
+
+  const visible = activeFilter
+    ? result.data.filter((e) => e.category === activeFilter)
+    : result.data
+
+  const filterLinks = [
+    `<a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-sm ${activeFilter ? 'btn-ghost' : 'btn-primary'}">Todas (${result.data.length})</a>`,
+    ...KB_CATEGORIES.map((cat) => {
+      const count = result.data.filter((e) => e.category === cat).length
+      const cls = activeFilter === cat ? 'btn-primary' : 'btn-ghost'
+      return `<a href="/admin/dashboard/${bid}/kb?secret=${se}&category=${cat}" class="btn btn-sm ${cls}">${esc(KB_CATEGORY_LABELS[cat])} (${count})</a>`
+    }),
+  ].join(' ')
+
+  const groups = KB_CATEGORIES.map((cat) => {
+    const entries = visible.filter((e) => e.category === cat)
+    if (entries.length === 0) return ''
+    const rows = entries.map((e) => kbEntryRow(businessId, secret, e)).join('')
+    return `
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-header"><span class="card-title">${esc(KB_CATEGORY_LABELS[cat])}</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Entrada</th><th>Envío</th><th>Prioridad</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`
+  }).join('')
+
+  const emptyState =
+    visible.length === 0
+      ? `<div class="card"><div class="card-body"><p class="muted">${
+          activeFilter
+            ? 'No hay entradas en esta categoría.'
+            : 'Este negocio todavía no tiene entradas en su base de conocimiento.'
+        }</p></div></div>`
+      : ''
+
+  const newForm = showNew
+    ? `<div class="card" style="margin-bottom:1.5rem">
+         <div class="card-header"><span class="card-title">Nueva entrada</span></div>
+         <div class="card-body">${kbEntryForm(businessId, secret, null)}</div>
+       </div>`
+    : ''
+
+  const body = `
+    <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
+    <div class="page-header">
+      <h1 class="page-title">Base de conocimiento</h1>
+      <div class="actions">
+        <a href="/admin/dashboard/${bid}/kb?secret=${se}&new=1" class="btn btn-primary">Nueva entrada</a>
+      </div>
+    </div>
+    ${saved ? '<div class="alert alert-success">✓ Cambios guardados correctamente.</div>' : ''}
+    ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
+    ${newForm}
+    <div class="actions" style="margin-bottom:1rem;flex-wrap:wrap">${filterLinks}</div>
+    ${groups}
+    ${emptyState}`
+
+  return c.html(layout(`Base de conocimiento — ${business.name}`, body, secret))
+})
+
+dashboardRoutes.get('/admin/dashboard/:id/kb/:kbId/edit', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404</h1>', 404) as Response
+
+  const result = await knowledgeBaseService.getById(businessId, c.req.param('kbId'))
+  if (!result.ok) {
+    return c.html(
+      layout('Base de conocimiento', '<p class="muted">Entrada no encontrada.</p>', secret),
+      404,
+    ) as Response
+  }
+
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
+  const body = `
+    <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="back">← Base de conocimiento</a>
+    <div class="page-header">
+      <h1 class="page-title">Editar entrada</h1>
+    </div>
+    ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
+    <div class="card">
+      <div class="card-body">${kbEntryForm(businessId, secret, result.data)}</div>
+    </div>`
+
+  return c.html(layout(`Editar entrada — ${business.name}`, body, secret))
+})
+
+interface ParsedKbForm {
+  title: string | null
+  category: KbCategory
+  content: string
+  attachmentType: KbAttachmentType
+  attachmentUrl: string | null
+  sendMode: KbSendMode
+  triggerKeywords: string[]
+  priority: number
+  active: boolean
+}
+
+// Parses the shared KB form. Returns a message instead of throwing so the caller
+// can redirect back with it rendered in the error banner.
+function parseKbForm(
+  formData: FormData,
+): { ok: true; data: ParsedKbForm } | { ok: false; message: string } {
+  const rawCategory = formData.get('category')?.toString() ?? ''
+  const category = KB_CATEGORIES.find((cat) => cat === rawCategory)
+  if (!category) return { ok: false, message: 'Categoría inválida.' }
+
+  const content = formData.get('content')?.toString().trim() ?? ''
+  if (content.length === 0) return { ok: false, message: 'El contenido no puede estar vacío.' }
+
+  const rawSendMode = formData.get('sendMode')?.toString() ?? 'on_request'
+  const sendMode = KB_SEND_MODES.find((mode) => mode === rawSendMode)
+  if (!sendMode) return { ok: false, message: 'Modo de envío inválido.' }
+
+  const rawAttachmentType = formData.get('attachmentType')?.toString() ?? 'none'
+  const attachmentType = KB_ATTACHMENT_TYPES.find((type) => type === rawAttachmentType)
+  if (!attachmentType) return { ok: false, message: 'Tipo de adjunto inválido.' }
+
+  const attachmentUrl = formData.get('attachmentUrl')?.toString().trim() || null
+  if (attachmentType !== 'none' && !attachmentUrl) {
+    return { ok: false, message: 'Elegiste un tipo de adjunto pero no pusiste la URL.' }
+  }
+
+  const triggerKeywords = (formData.get('triggerKeywords')?.toString() ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0)
+  if (sendMode === 'trigger_based' && triggerKeywords.length === 0) {
+    return {
+      ok: false,
+      message: 'El modo "Por palabras clave" necesita al menos una palabra clave.',
+    }
+  }
+
+  const rawPriority = Number.parseInt(formData.get('priority')?.toString() ?? '0', 10)
+  const priority = Number.isFinite(rawPriority) ? Math.min(100, Math.max(-100, rawPriority)) : 0
+
+  return {
+    ok: true,
+    data: {
+      title: formData.get('title')?.toString().trim() || null,
+      category,
+      content,
+      attachmentType,
+      // A stale URL left over from a previous type would otherwise keep being
+      // rendered into the prompt.
+      attachmentUrl: attachmentType === 'none' ? null : attachmentUrl,
+      sendMode,
+      triggerKeywords,
+      priority,
+      active: formData.get('active')?.toString() !== '0',
+    },
+  }
+}
+
+dashboardRoutes.post('/admin/dashboard/:id/kb', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404</h1>', 404) as Response
+
+  const parsed = parseKbForm(await c.req.formData())
+  if (!parsed.ok) {
+    return c.redirect(
+      `/admin/dashboard/${bid}/kb?secret=${se}&new=1&error=${encodeURIComponent(parsed.message)}`,
+      302,
+    )
+  }
+
+  const result = await knowledgeBaseService.create({ businessId, ...parsed.data })
+  if (!result.ok) {
+    logger.error({ err: result.error, businessId }, 'dashboard: failed to create KB entry')
+    return c.redirect(
+      `/admin/dashboard/${bid}/kb?secret=${se}&new=1&error=${encodeURIComponent(result.error.userMessage)}`,
+      302,
+    )
+  }
+
+  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
+})
+
+dashboardRoutes.post('/admin/dashboard/:id/kb/:kbId', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const kbId = c.req.param('kbId')
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+
+  const parsed = parseKbForm(await c.req.formData())
+  if (!parsed.ok) {
+    return c.redirect(
+      `/admin/dashboard/${bid}/kb/${encodeURIComponent(kbId)}/edit?secret=${se}&error=${encodeURIComponent(parsed.message)}`,
+      302,
+    )
+  }
+
+  // A blank title on edit keeps the existing one instead of wiping it.
+  const { title, ...rest } = parsed.data
+  const result = await knowledgeBaseService.update(businessId, kbId, {
+    ...rest,
+    ...(title ? { title } : {}),
+  })
+  if (!result.ok) {
+    logger.error({ err: result.error, businessId, kbId }, 'dashboard: failed to update KB entry')
+    return c.redirect(
+      `/admin/dashboard/${bid}/kb?secret=${se}&error=${encodeURIComponent(result.error.userMessage)}`,
+      302,
+    )
+  }
+
+  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
+})
+
+dashboardRoutes.post('/admin/dashboard/:id/kb/:kbId/delete', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const kbId = c.req.param('kbId')
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+
+  const result = await knowledgeBaseService.remove(businessId, kbId)
+  if (!result.ok) {
+    logger.error({ err: result.error, businessId, kbId }, 'dashboard: failed to delete KB entry')
+    return c.redirect(
+      `/admin/dashboard/${bid}/kb?secret=${se}&error=${encodeURIComponent(result.error.userMessage)}`,
+      302,
+    )
+  }
+
+  logger.warn({ businessId, kbId }, 'dashboard: knowledge base entry deleted by admin')
+  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
 })
