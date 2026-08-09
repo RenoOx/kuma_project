@@ -55,6 +55,16 @@ export interface WhatsappClient {
    * to WhatsApp with the same number.
    */
   close(): Promise<void>
+  /**
+   * Unlinks this device from the customer's WhatsApp account, then closes.
+   *
+   * `close()` only drops our end of the socket: WhatsApp still lists the device
+   * on the owner's phone under "Dispositivos vinculados". This tells WhatsApp we
+   * are leaving, which is what offboarding a customer actually requires.
+   *
+   * Irreversible — coming back needs a fresh QR scan.
+   */
+  logout(): Promise<void>
 }
 
 export async function makeWhatsappClient(
@@ -255,6 +265,42 @@ export async function makeWhatsappClient(
         log.warn({ err }, 'removeAllListeners threw while closing')
       }
       log.info('whatsapp client closed intentionally')
+    },
+    async logout() {
+      // Same ordering rule as close(): sock.logout() makes WhatsApp answer with
+      // a loggedOut (401) disconnect, which classifyDisconnect routes to `halt`
+      // and would end up in recordHalt marking this number. Suppress the
+      // handlers FIRST so our own deliberate logout is never mistaken for
+      // WhatsApp punishing us.
+      if (intentionallyClosed) return
+      intentionallyClosed = true
+      messageHandlers.length = 0
+      disconnectHandlers.length = 0
+      qrHandlers.length = 0
+      connectHandlers.length = 0
+      pairingCodeHandlers.length = 0
+      callHandlers.length = 0
+
+      try {
+        await sock.logout()
+        log.warn('whatsapp device unlinked via logout — credentials are now invalid')
+      } finally {
+        // Runs even when logout throws: an unreachable WhatsApp must not leave
+        // a live socket behind still answering that business's customers.
+        try {
+          sock.end(undefined)
+        } catch (err) {
+          log.warn({ err }, 'sock.end threw after logout — socket considered dead anyway')
+        }
+        try {
+          sock.ev.removeAllListeners('connection.update')
+          sock.ev.removeAllListeners('messages.upsert')
+          sock.ev.removeAllListeners('creds.update')
+          sock.ev.removeAllListeners('call')
+        } catch (err) {
+          log.warn({ err }, 'removeAllListeners threw after logout')
+        }
+      }
     },
   }
 }

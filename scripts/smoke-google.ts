@@ -51,8 +51,8 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30 },
-        { name: 'barba', durationMinutes: 20 },
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, requiresEvaluation: false },
       ],
     })
     if (!updateResult.ok) throw updateResult.error

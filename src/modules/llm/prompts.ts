@@ -1,4 +1,5 @@
 import type { Business, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
+import { formatServicePrice } from '@/modules/business/business.settings.js'
 import type { BusinessSettings, DayKey } from '@/modules/business/business.settings.js'
 
 function groupByCategory(
@@ -219,11 +220,13 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
   return lines.join('\n')
 }
 
+// Duration is omitted rather than faked when the business never set one —
+// the model must not read a fallback slot length as a promise to the customer.
 function renderServices(services: BusinessSettings['services']): string {
   return services
     .map((s) => {
-      const price = s.price !== undefined ? ` — S/${s.price}` : ''
-      return `- ${s.name} (${s.durationMinutes} min)${price}`
+      const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
+      return `- ${s.name}${duration} — ${formatServicePrice(s)}`
     })
     .join('\n')
 }
@@ -341,6 +344,26 @@ function buildStaticBody(
     renderLocationBlock(business.address, business.googleMapsUrl),
     '',
     settings ? renderConfiguredBlock(settings, todayISO) : NOT_CONFIGURED_BLOCK,
+    '',
+    '# Precios de servicios — cómo responder',
+    'Cada servicio de la lista de arriba ya trae su precio resuelto. Copiá ese dato tal cual: no lo recalcules, no lo redondees, no lo promedies.',
+    'Según cómo esté escrito, respondé distinto:',
+    '',
+    '1. "requiere evaluación previa" → NO des ningún precio. Explicá que depende del caso y pedí una foto por WhatsApp, u ofrecé agendar una cita de evaluación.',
+    '   Ejemplo: "Para darte el precio exacto necesito verlo primero. ¿Me mandas una foto? Si prefieres, te agendo una evaluación 📅"',
+    '',
+    '2. "desde S/ X (requiere evaluación previa)" → mencioná ese monto SIEMPRE con la palabra "desde", como piso y nunca como precio final, y pedí la foto o la evaluación igual.',
+    '   Ejemplo: "Ese servicio arranca *desde S/ 80*, pero el precio final depende del caso. ¿Me mandas una foto y te confirmo?"',
+    '',
+    '3. "S/ X" (un solo monto) → es precio fijo y cerrado. Respondé con ese número y listo.',
+    '   Ejemplo: "El corte clásico cuesta *S/ 25*."',
+    '',
+    '4. "S/ X a S/ Y" → es un rango. Dá los dos extremos y aclará que depende del caso. Nunca menciones solo uno de los dos.',
+    '   Ejemplo: "El tinte va de *S/ 60* a *S/ 90*, según el largo del cabello."',
+    '',
+    '5. "desde S/ X" (sin evaluación) → precio abierto hacia arriba. Usá "desde" y no inventes un tope.',
+    '',
+    'Si un servicio dice "requiere evaluación previa" y el cliente insiste en un número, sostené la respuesta: no tenés ese dato hasta ver el caso. Inventar un precio es peor que no darlo.',
     '',
     '# Reglas generales',
     '1. Solo respondés con información que está en tu conocimiento o en la configuración operativa de arriba. Nunca inventes precios, horarios ni servicios.',

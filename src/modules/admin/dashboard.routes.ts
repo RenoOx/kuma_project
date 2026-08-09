@@ -4,6 +4,7 @@ import {
   businessSettingsSchema,
   type BusinessSettings,
   type DayKey,
+  type Service,
 } from '@/modules/business/business.settings.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
@@ -11,9 +12,12 @@ import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
 import { dayRangeInTimezone, shiftDateISO, todayInTimezone } from '@/modules/ownerAssistant/timezone.js'
 import {
+  getClient,
   getConnectionState,
   setConnectionStatus,
+  unregisterClient,
 } from '@/modules/whatsapp/clientRegistry.js'
+import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
@@ -113,7 +117,6 @@ function humanizeMs(ms: number): string {
 function waActions(businessId: string, status: WaStatus | undefined, secret: string): string {
   const se = encodeURIComponent(secret)
   const bid = esc(businessId)
-  const pairUrl = `/admin/whatsapp/pair?secret=${se}&businessId=${bid}`
   const qrUrl = `/admin/whatsapp/qr?secret=${se}&businessId=${bid}`
   const connectUrl = `/admin/dashboard/${bid}/connect?secret=${se}`
   const disconnectUrl = `/admin/dashboard/${bid}/disconnect?secret=${se}`
@@ -127,9 +130,7 @@ function waActions(businessId: string, status: WaStatus | undefined, secret: str
       <a href="${qrUrl}" class="btn btn-ghost btn-sm">Estado WA</a>`
   }
   if (status === 'qr_pending') {
-    return `
-      <a href="${pairUrl}" class="btn btn-primary btn-sm">Vincular</a>
-      <a href="${qrUrl}" class="btn btn-ghost btn-sm">Ver QR</a>`
+    return `<a href="${qrUrl}" class="btn btn-primary btn-sm">Ver QR / Vincular</a>`
   }
   if (status === 'connecting') {
     return `<span class="badge badge-gray" style="font-size:11px">Iniciando…</span>`
@@ -146,6 +147,60 @@ function waActions(businessId: string, status: WaStatus | undefined, secret: str
     onsubmit="return confirm('${warn}')">
     <button type="submit" class="btn btn-warning btn-sm">${label}</button>
   </form>`
+}
+
+// ── Session guard warning ─────────────────────────────────────────────────────
+//
+// The anti-ban guard is keyed by phone NUMBER and its row deliberately outlives
+// the business that used it. So a brand new business can inherit throttling from
+// a number's previous life, which reads as a bug unless we say it out loud.
+
+function hasResidualGuardState(status: sessionGuard.GuardStatus): boolean {
+  return status.blocked || status.haltReason !== null || status.attemptCount > 0
+}
+
+function renderGuardWarning(
+  status: sessionGuard.GuardStatus,
+  businessId: string,
+  whatsappNumber: string,
+  secret: string,
+): string {
+  if (!hasResidualGuardState(status)) return ''
+
+  const se = encodeURIComponent(secret)
+  const bid = esc(businessId)
+  const num = esc(whatsappNumber)
+
+  const rows: string[] = []
+  if (status.blocked) {
+    rows.push(
+      `<div class="info-row"><span class="info-label">Bloqueado hasta</span><span class="info-value">${fmtDatetime(status.blockedUntil)} — faltan ${esc(humanizeMs(status.retryAfterMs))}</span></div>`,
+    )
+  }
+  if (status.haltReason) {
+    rows.push(
+      `<div class="info-row"><span class="info-label">Motivo</span><span class="info-value mono">${esc(status.haltReason)}</span></div>`,
+    )
+  }
+  rows.push(
+    `<div class="info-row"><span class="info-label">Intentos</span><span class="info-value">${status.attemptCount}</span></div>`,
+  )
+
+  const confirmMsg = `¿Limpiar el estado de vinculación del número ${whatsappNumber}?\\n\\nBorra el bloqueo y el contador de intentos. Hacelo SOLO si el historial viene de otro negocio y no de intentos reales recientes: saltear esta protección es lo que puede hacer que WhatsApp banee el número.`
+
+  return `<div class="alert alert-error" style="display:block">
+      <strong>⚠️ El número ${num} arrastra estado de vinculaciones anteriores</strong>
+      <p style="margin-top:.5rem;font-size:13px">
+        La protección anti-ban sigue al número, no al negocio. Si este número ya se usó antes
+        (otro negocio, una prueba, un negocio borrado) hereda ese historial y puede bloquear
+        la vinculación aunque el negocio sea nuevo.
+      </p>
+      <div style="margin:.75rem 0">${rows.join('')}</div>
+      <form method="post" action="/admin/dashboard/${bid}/session/clear-guard?secret=${se}" style="display:inline"
+        onsubmit="return confirm('${confirmMsg}')">
+        <button type="submit" class="btn btn-danger btn-sm">Limpiar estado del número</button>
+      </form>
+    </div>`
 }
 
 // ── Settings form helpers ─────────────────────────────────────────────────────
@@ -193,17 +248,19 @@ function renderDayRow(key: DayKey, label: string, hours: DayHours): string {
   </tr>`
 }
 
-function renderServiceRows(
-  services: Array<{ name: string; durationMinutes: number; price?: number }>,
-): string {
+function renderServiceRows(services: Service[]): string {
   if (services.length === 0) {
     return `<div class="service-row" id="service-row-0">
       <input type="text" class="form-input" name="service_0_name" data-field="name"
         placeholder="ej. Corte de cabello" style="flex:1">
       <input type="number" class="form-input" name="service_0_duration" data-field="duration"
-        min="5" max="480" value="30" placeholder="Min" style="width:80px">
-      <input type="number" class="form-input" name="service_0_price" data-field="price"
-        min="0" step="0.01" placeholder="S/" style="width:90px">
+        min="5" max="480" placeholder="Min" style="width:80px">
+      <input type="number" class="form-input" name="service_0_price_min" data-field="price_min"
+        min="0" step="0.01" placeholder="Precio mínimo (S/)" style="width:130px">
+      <input type="number" class="form-input" name="service_0_price_max" data-field="price_max"
+        min="0" step="0.01" placeholder="Precio máximo (S/)" style="width:130px">
+      <label class="service-eval"><input type="checkbox" name="service_0_requires_evaluation"
+        data-field="requires_evaluation"> Requiere evaluación previa</label>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
     </div>`
   }
@@ -213,9 +270,13 @@ function renderServiceRows(
       <input type="text" class="form-input" name="service_${i}_name" data-field="name"
         value="${esc(s.name)}" placeholder="ej. Corte de cabello" style="flex:1" required>
       <input type="number" class="form-input" name="service_${i}_duration" data-field="duration"
-        min="5" max="480" value="${s.durationMinutes}" placeholder="Min" style="width:80px">
-      <input type="number" class="form-input" name="service_${i}_price" data-field="price"
-        min="0" step="0.01" value="${s.price ?? ''}" placeholder="S/" style="width:90px">
+        min="5" max="480" value="${s.durationMinutes ?? ''}" placeholder="Min" style="width:80px">
+      <input type="number" class="form-input" name="service_${i}_price_min" data-field="price_min"
+        min="0" step="0.01" value="${s.priceMin ?? ''}" placeholder="Precio mínimo (S/)" style="width:130px">
+      <input type="number" class="form-input" name="service_${i}_price_max" data-field="price_max"
+        min="0" step="0.01" value="${s.priceMax ?? ''}" placeholder="Precio máximo (S/)" style="width:130px">
+      <label class="service-eval"><input type="checkbox" name="service_${i}_requires_evaluation"
+        data-field="requires_evaluation"${s.requiresEvaluation ? ' checked' : ''}> Requiere evaluación previa</label>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
     </div>`,
     )
@@ -254,6 +315,15 @@ function renderSpecialDayRows(specialDays: SpecialDayRow[]): string {
   return specialDays.map((s, i) => renderSpecialDayRow(i, s)).join('')
 }
 
+// An empty input means the field is genuinely unset, which the settings schema
+// represents as null — never coerce it to 0 or NaN.
+function optionalNumberField(formData: FormData, key: string): number | null {
+  const raw = formData.get(key)?.toString().trim()
+  if (!raw) return null
+  const parsed = Number(raw)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
 async function parseSettingsFromForm(
   formData: FormData,
 ): Promise<{ ok: true; data: BusinessSettings } | { ok: false; errors: string[] }> {
@@ -282,19 +352,17 @@ async function parseSettingsFromForm(
   const minNotice = minNoticeRaw ? Number(minNoticeRaw) : undefined
 
   const serviceCount = Number(formData.get('service_count') ?? 0)
-  const services: Array<{ name: string; durationMinutes: number; price?: number }> = []
+  const services: Service[] = []
   for (let i = 0; i < serviceCount; i++) {
     const name = formData.get(`service_${i}_name`)?.toString().trim() ?? ''
-    const duration = Number(formData.get(`service_${i}_duration`) ?? 30)
-    const priceRaw = formData.get(`service_${i}_price`)?.toString().trim()
-    const price = priceRaw ? Number(priceRaw) : undefined
-    if (name) {
-      services.push({
-        name,
-        durationMinutes: isNaN(duration) ? 30 : duration,
-        ...(price !== undefined && !isNaN(price) ? { price } : {}),
-      })
-    }
+    if (!name) continue
+    services.push({
+      name,
+      durationMinutes: optionalNumberField(formData, `service_${i}_duration`),
+      priceMin: optionalNumberField(formData, `service_${i}_price_min`),
+      priceMax: optionalNumberField(formData, `service_${i}_price_max`),
+      requiresEvaluation: formData.get(`service_${i}_requires_evaluation`) === 'on',
+    })
   }
 
   const specialDayCount = Number(formData.get('special_count') ?? 0)
@@ -441,7 +509,9 @@ tr:hover td{background:#fafaf8}
 .hours-table tr:last-child td{border-bottom:none}
 .time-input{padding:.3rem .5rem;border:1px solid #e5e7eb;border-radius:5px;font-size:12px;font-family:inherit;width:90px}
 .time-input:disabled{background:#f9fafb;color:#d1d5db;cursor:not-allowed}
-.service-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem}
+.service-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
+.service-eval{display:flex;align-items:center;gap:.35rem;font-size:12px;color:#6b7280;white-space:nowrap}
+.service-eval input{margin:0}
 .form-actions{display:flex;gap:.75rem;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid #f3f4f6}
 `
 
@@ -579,7 +649,6 @@ dashboardRoutes.get('/admin/dashboard/sessions', async (c) => {
   if (!secret) return unauthorized(c)
 
   const all = await businessRepo.findAll()
-  const se = encodeURIComponent(secret)
 
   const hasTransitioning = all.some((b) => {
     const s = getConnectionState(b.id)?.status
@@ -602,15 +671,12 @@ dashboardRoutes.get('/admin/dashboard/sessions', async (c) => {
         }
       }
 
-      const pairUrl = `/admin/whatsapp/pair?secret=${se}&businessId=${esc(b.id)}`
-
       return `<div class="session-card ${esc(cardClass)}">
         <div class="session-info">
           <div class="session-name">${esc(b.name)}</div>
           <div class="session-meta"><span class="mono">${esc(b.whatsappNumber)}</span></div>
           ${statusBadge(status)}
           ${qrHtml}
-          ${status === 'qr_pending' ? `<div style="margin-top:.75rem"><a href="${pairUrl}" class="btn btn-primary btn-sm">Vincular con código</a></div>` : ''}
         </div>
         <div class="session-actions">
           ${waActions(b.id, status, secret)}
@@ -744,30 +810,36 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
   const newBusiness = result.data
   const bid = esc(newBusiness.id)
 
-  // Start the WhatsApp session for the new business
-  try {
-    const { restartWhatsappFor } = await import('@/server.js')
-    await restartWhatsappFor(newBusiness.id, newBusiness.whatsappNumber)
-  } catch (err) {
-    logger.error({ err, businessId: newBusiness.id }, 'dashboard: WA init after create failed')
-  }
+  // Creating a business deliberately does NOT touch WhatsApp. Booting a socket
+  // here also spent an attempt against the number (restartWhatsappFor records
+  // one), which left the guard at attemptCount=1 before the operator had done
+  // anything — and made the very first real linking attempt look like hammering.
+  // Linking is now a separate, explicit click.
+  const guardStatus = await sessionGuard.getStatus(newBusiness.whatsappNumber)
 
   const body = `
     <a href="/admin/dashboard?secret=${se}" class="back">← Negocios</a>
     <h1 class="page-title">Negocio creado</h1>
     <div class="alert alert-success">✓ <strong>${esc(newBusiness.name)}</strong> fue creado exitosamente.</div>
+    ${renderGuardWarning(guardStatus, newBusiness.id, newBusiness.whatsappNumber, secret)}
     <div class="card">
       <div class="card-body">
-        <p style="margin-bottom:1.25rem;color:#374151;font-size:13px">
-          El cliente de WhatsApp se está iniciando. Seguí estos pasos para poner el bot en marcha:
+        <p style="margin-bottom:.5rem;color:#374151;font-size:13px">
+          El negocio quedó creado, pero <strong>WhatsApp todavía no está vinculado</strong>:
+          Emma no va a responder hasta que lo vincules.
         </p>
-        <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <p style="margin-bottom:1.25rem;color:#6b7280;font-size:13px">
+          Vinculá recién cuando tengas el teléfono en la mano — cada intento cuenta
+          contra el límite de WhatsApp para ese número.
+        </p>
+        <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
           <a href="/admin/dashboard/${bid}/configure?secret=${se}" class="btn btn-primary">
             1. Configurar horarios y servicios
           </a>
-          <a href="/admin/whatsapp/pair?secret=${se}&businessId=${bid}" class="btn btn-warning">
-            2. Vincular WhatsApp
-          </a>
+          <form method="post" action="/admin/dashboard/${bid}/connect?secret=${se}" style="display:inline"
+            onsubmit="return confirm('¿Iniciar la vinculación de WhatsApp?\\n\\nSe va a generar un QR para escanear con el teléfono. Cada intento cuenta contra el límite de WhatsApp para este número.')">
+            <button type="submit" class="btn btn-warning">2. Vincular WhatsApp (QR)</button>
+          </form>
           <a href="/admin/dashboard/${bid}?secret=${se}" class="btn btn-ghost">
             Ver detalle
           </a>
@@ -1105,7 +1177,6 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
            <strong>${esc(business.whatsappNumber)}</strong> para reactivarla.
            <div style="margin-top:.75rem">
              <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-primary btn-sm">Ver QR</a>
-             <a href="/admin/whatsapp/pair?secret=${se}&businessId=${bid}" class="btn btn-ghost btn-sm">Vincular con código</a>
            </div>
            <p class="form-hint" style="margin-top:.75rem">
              Acordate de desvincular Emma del teléfono anterior desde
@@ -1131,9 +1202,11 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     DAYS.map(({ key }) => [key, key in hours ? (hours[key] ?? null) : defaultHours[key]]),
   ) as Record<DayKey, DayHours>
 
-  const services = Array.isArray(raw?.services)
-    ? (raw.services as Array<{ name: string; durationMinutes: number }>)
-    : []
+  // Unvalidated jsonb straight from the row. Services saved before the
+  // priceMin/priceMax split have none of the price fields, so they render as
+  // empty inputs and the owner has to re-enter them — which is the intended
+  // prompt, since there is no data migration.
+  const services = Array.isArray(raw?.services) ? (raw.services as Service[]) : []
 
   const specialDays = Array.isArray(raw?.specialDays)
     ? (raw.specialDays as SpecialDayRow[]).slice().sort((a, b) => a.date.localeCompare(b.date))
@@ -1279,7 +1352,8 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
             <span style="flex:1;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Servicio</span>
             <span style="width:80px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Duración (min)</span>
-            <span style="width:90px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio (S/)</span>
+            <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio mín. (S/)</span>
+            <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio máx. (S/)</span>
             <span style="width:32px"></span>
           </div>
           <div id="services-container">
@@ -1347,6 +1421,27 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       </div>
     </div>
 
+    <div class="card" style="margin-top:1rem;border-color:#fecaca">
+      <div class="card-header" style="border-bottom-color:#fee2e2">
+        <span class="card-title" style="color:#b91c1c">Zona de peligro</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:13px;color:#374151;margin-bottom:.35rem">
+          <strong>Desvincular WhatsApp</strong> — Emma sale del número
+          <span class="mono">${esc(business.whatsappNumber)}</span> y deja de responder de inmediato.
+        </p>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+          Cierra la sesión contra WhatsApp, quita el dispositivo de la lista del teléfono del cliente
+          y borra las credenciales guardadas. Para volver a usar este número hay que escanear un QR nuevo.
+        </p>
+        <form method="post" action="/admin/dashboard/${bid}/disconnect?secret=${se}" style="display:inline"
+          onsubmit="return confirm('¿Desvincular WhatsApp de ${esc(business.whatsappNumber)}?\\n\\nEmma deja de responder ya mismo y el dispositivo se quita del teléfono del cliente.\\n\\nEsto NO se puede deshacer: para volver hay que escanear un QR nuevo.')">
+          <input type="hidden" name="from" value="configure">
+          <button type="submit" class="btn btn-danger btn-sm">Desvincular WhatsApp</button>
+        </form>
+      </div>
+    </div>
+
     <script>
     let _svcCounter = ${initialServiceCount};
 
@@ -1397,9 +1492,13 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         '<input type="text" class="form-input" name="service_' + idx + '_name" data-field="name"' +
         ' placeholder="ej. Corte de cabello" style="flex:1" required>' +
         '<input type="number" class="form-input" name="service_' + idx + '_duration" data-field="duration"' +
-        ' min="5" max="480" value="30" placeholder="Min" style="width:80px">' +
-        '<input type="number" class="form-input" name="service_' + idx + '_price" data-field="price"' +
-        ' min="0" step="0.01" placeholder="S/" style="width:90px">' +
+        ' min="5" max="480" placeholder="Min" style="width:80px">' +
+        '<input type="number" class="form-input" name="service_' + idx + '_price_min" data-field="price_min"' +
+        ' min="0" step="0.01" placeholder="Precio mínimo (S/)" style="width:130px">' +
+        '<input type="number" class="form-input" name="service_' + idx + '_price_max" data-field="price_max"' +
+        ' min="0" step="0.01" placeholder="Precio máximo (S/)" style="width:130px">' +
+        '<label class="service-eval"><input type="checkbox" name="service_' + idx + '_requires_evaluation"' +
+        ' data-field="requires_evaluation"> Requiere evaluación previa</label>' +
         '<button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>';
       document.getElementById('services-container').appendChild(row);
       document.getElementById('service_count').value = _svcCounter;
@@ -1420,7 +1519,9 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       rows.forEach(function(row, i) {
         row.querySelector('[data-field="name"]').name = 'service_' + i + '_name';
         row.querySelector('[data-field="duration"]').name = 'service_' + i + '_duration';
-        row.querySelector('[data-field="price"]').name = 'service_' + i + '_price';
+        row.querySelector('[data-field="price_min"]').name = 'service_' + i + '_price_min';
+        row.querySelector('[data-field="price_max"]').name = 'service_' + i + '_price_max';
+        row.querySelector('[data-field="requires_evaluation"]').name = 'service_' + i + '_requires_evaluation';
       });
       _svcCounter = rows.length;
       document.getElementById('service_count').value = _svcCounter;
@@ -1643,7 +1744,10 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
   }
 
   const se = encodeURIComponent(secret)
-  return c.redirect(`/admin/whatsapp/pair?secret=${se}&businessId=${esc(businessId)}`, 302)
+  return c.redirect(
+    `/admin/whatsapp/qr?secret=${se}&businessId=${encodeURIComponent(businessId)}`,
+    302,
+  )
 })
 
 // ── POST /:id/google-disconnect — elimina credenciales de Google Calendar ────
@@ -1662,7 +1766,46 @@ dashboardRoutes.post('/admin/dashboard/:id/google-disconnect', async (c) => {
   )
 })
 
-// ── POST /:id/disconnect — borra sesión y marca como logged_out ───────────────
+// ── POST /:id/session/clear-guard — limpia el estado anti-ban del número ──────
+//
+// Separate from disconnect on purpose. Disconnect is offboarding (Emma leaves a
+// customer's number); this is the narrow escape hatch for a NEW business stuck
+// behind a previous tenant's throttling on a reused number. Keeping them apart
+// means "Desconectar" never doubles as a one-click bypass of the ban protection.
+
+dashboardRoutes.post('/admin/dashboard/:id/session/clear-guard', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404 — Not found</h1>', 404) as Response
+
+  // forceUnblock logs a loud warn with everything it cleared.
+  await sessionGuard.forceUnblock(business.whatsappNumber, business.id)
+
+  return c.redirect(
+    `/admin/dashboard/${encodeURIComponent(businessId)}?secret=${encodeURIComponent(secret)}`,
+    302,
+  )
+})
+
+// ── POST /:id/disconnect — Emma se va del número del cliente ──────────────────
+//
+// Offboarding: the customer stopped paying or is leaving, and Emma has to get
+// out of their WhatsApp. That means three things, in this order:
+//
+//   1. sock.logout() — tells WhatsApp to unlink the device. Without it the
+//      customer keeps seeing Emma listed under "Dispositivos vinculados" and
+//      has to remove it by hand.
+//   2. close() + unregisterClient — kills the live socket. Deleting credentials
+//      from disk does NOT close an open connection: Emma kept answering that
+//      business's customers until the next redeploy.
+//   3. rm -rf of the session dir — drops the stored credentials.
+//
+// Deliberately does NOT touch the session guard: the number is leaving, and
+// clearing its throttling state here would turn every "Desconectar" button in
+// the panel into a bypass of the ban protection.
 
 dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
   const secret = getSecret(c)
@@ -1672,6 +1815,24 @@ dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
   const business = await businessRepo.findById(businessId)
   if (!business) return c.html('<h1>404 — Not found</h1>', 404) as Response
 
+  // Best effort: if WhatsApp is unreachable we still tear down locally. The
+  // operator asked Emma to leave, and a failed remote logout must not trap her.
+  const client = getClient(businessId)
+  if (client) {
+    try {
+      await client.logout()
+    } catch (err) {
+      // logout() tears the socket down in a finally block, so the connection is
+      // dead either way. What is lost is the remote unlink: the device may stay
+      // listed on the customer's phone until they remove it by hand.
+      logger.error(
+        { err, businessId },
+        'dashboard: remote WhatsApp logout failed — socket closed locally, device may still be listed on the customer phone',
+      )
+    }
+  }
+  unregisterClient(businessId)
+
   const sessionDir = `${env.SESSIONS_DIR}/${businessId}`
   try {
     await rm(sessionDir, { recursive: true, force: true })
@@ -1680,10 +1841,19 @@ dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
   }
 
   setConnectionStatus(businessId, 'logged_out')
-  logger.info({ businessId }, 'dashboard: session disconnected by admin')
+  logger.warn(
+    { businessId, whatsappNumber: business.whatsappNumber },
+    'dashboard: WhatsApp unlinked by admin — Emma left this number',
+  )
+
+  const from = (await c.req.formData().catch(() => null))?.get('from')?.toString()
+  const target =
+    from === 'configure'
+      ? `/admin/dashboard/${encodeURIComponent(businessId)}/configure`
+      : `/admin/dashboard/${encodeURIComponent(businessId)}`
 
   return c.redirect(
-    `/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}`,
+    `${target}?secret=${encodeURIComponent(secret)}`,
     302,
   )
 })

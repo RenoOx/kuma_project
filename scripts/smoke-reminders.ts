@@ -47,6 +47,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     async close() {
       // noop
     },
+    async logout() {
+      // noop
+    },
   }
   return { client, sent }
 }
@@ -75,7 +78,9 @@ async function main(): Promise<void> {
         sunday: null,
       },
       slotDurationMinutes: 60,
-      services: [{ name: 'corte', durationMinutes: 30 }],
+      services: [
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+      ],
     })
     if (!settingsUpdate.ok) throw settingsUpdate.error
 

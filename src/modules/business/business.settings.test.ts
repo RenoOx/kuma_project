@@ -18,29 +18,60 @@ const BASE_SETTINGS: BusinessSettings = {
     sunday: null,
   },
   slotDurationMinutes: 60,
-  services: [{ name: 'corte', durationMinutes: 30 }],
+  services: [
+    { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+  ],
 }
 
 describe('business.settings — service price', () => {
-  it('accepts a service without a price (backwards compatible)', () => {
+  it('accepts a service with a fixed price', () => {
     const result = parseBusinessSettings('biz1', BASE_SETTINGS)
     assert(result.ok)
-    expect(result.data.services[0]?.price).toBeUndefined()
+    expect(result.data.services[0]?.priceMin).toBe(30)
+    expect(result.data.services[0]?.priceMax).toBe(30)
   })
 
-  it('accepts a service with a non-negative price', () => {
+  it('accepts a price range', () => {
     const result = parseBusinessSettings('biz1', {
       ...BASE_SETTINGS,
-      services: [{ name: 'corte', durationMinutes: 30, price: 30 }],
+      services: [{ name: 'tinte', durationMinutes: 45, priceMin: 60, priceMax: 90 }],
     })
     assert(result.ok)
-    expect(result.data.services[0]?.price).toBe(30)
+    expect(result.data.services[0]?.priceMin).toBe(60)
+    expect(result.data.services[0]?.priceMax).toBe(90)
+    expect(result.data.services[0]?.requiresEvaluation).toBe(false)
+  })
+
+  it('accepts an evaluation-first service with no prices', () => {
+    const result = parseBusinessSettings('biz1', {
+      ...BASE_SETTINGS,
+      services: [{ name: 'ondulación', durationMinutes: null, requiresEvaluation: true }],
+    })
+    assert(result.ok)
+    expect(result.data.services[0]?.priceMin).toBeNull()
+    expect(result.data.services[0]?.durationMinutes).toBeNull()
   })
 
   it('rejects a negative price', () => {
     const parsed = businessSettingsSchema.safeParse({
       ...BASE_SETTINGS,
-      services: [{ name: 'corte', durationMinutes: 30, price: -5 }],
+      services: [{ name: 'corte', durationMinutes: 30, priceMin: -5 }],
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('rejects a priced service without priceMin', () => {
+    const parsed = businessSettingsSchema.safeParse({
+      ...BASE_SETTINGS,
+      services: [{ name: 'corte', durationMinutes: 30, priceMax: 40 }],
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('rejects priceMax below priceMin', () => {
+    const parsed = businessSettingsSchema.safeParse({
+      ...BASE_SETTINGS,
+      services: [{ name: 'corte', durationMinutes: 30, priceMin: 90, priceMax: 60 }],
     })
     expect(parsed.success).toBe(false)
   })

@@ -1,4 +1,4 @@
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import type { BusinessSettings, Service } from '@/modules/business/business.settings.js'
 
 export interface DemoKbEntry {
   category: string
@@ -13,25 +13,38 @@ export interface DemoProfile {
 
 const CLOSED = null
 
+// Demo profiles carry no real prices — the actual rates of these businesses
+// live outside the repo. Evaluation-first is the honest mapping: with nothing
+// on file, Emma must ask instead of quoting a number it made up.
+function service(name: string, durationMinutes: number): Service {
+  return {
+    name,
+    durationMinutes,
+    priceMin: null,
+    priceMax: null,
+    requiresEvaluation: true,
+  }
+}
+
 const BARBERIA: DemoProfile = {
   name: 'Imperio Barber Studio',
   settings: {
     slotDurationMinutes: 15,
     services: [
-      { name: 'corte clásico', durationMinutes: 45 },
-      { name: 'corte degradado', durationMinutes: 60 },
-      { name: 'corte con tijera', durationMinutes: 50 },
-      { name: 'corte infantil', durationMinutes: 40 },
-      { name: 'corte con diseño', durationMinutes: 50 },
-      { name: 'mohicano', durationMinutes: 50 },
-      { name: 'arreglo de barba', durationMinutes: 30 },
-      { name: 'corte y barba', durationMinutes: 55 },
-      { name: 'afeitado a navaja', durationMinutes: 30 },
-      { name: 'perfilado de cejas', durationMinutes: 10 },
-      { name: 'mascarilla facial', durationMinutes: 20 },
-      { name: 'ondulación', durationMinutes: 90 },
-      { name: 'tinte', durationMinutes: 45 },
-      { name: 'tratamiento capilar', durationMinutes: 30 },
+      service('corte clásico', 45),
+      service('corte degradado', 60),
+      service('corte con tijera', 50),
+      service('corte infantil', 40),
+      service('corte con diseño', 50),
+      service('mohicano', 50),
+      service('arreglo de barba', 30),
+      service('corte y barba', 55),
+      service('afeitado a navaja', 30),
+      service('perfilado de cejas', 10),
+      service('mascarilla facial', 20),
+      service('ondulación', 90),
+      service('tinte', 45),
+      service('tratamiento capilar', 30),
     ],
     operatingHours: {
       monday:    { open: '09:30', close: '21:30' },
@@ -69,12 +82,12 @@ const CONSULTORIO: DemoProfile = {
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
-      { name: 'Consulta general', durationMinutes: 30 },
-      { name: 'Limpieza dental', durationMinutes: 60 },
-      { name: 'Blanqueamiento dental', durationMinutes: 90 },
-      { name: 'Extracción simple', durationMinutes: 45 },
-      { name: 'Curación / empaste', durationMinutes: 60 },
-      { name: 'Radiografía digital', durationMinutes: 15 },
+      service('Consulta general', 30),
+      service('Limpieza dental', 60),
+      service('Blanqueamiento dental', 90),
+      service('Extracción simple', 45),
+      service('Curación / empaste', 60),
+      service('Radiografía digital', 15),
     ],
     operatingHours: {
       monday:    { open: '08:00', close: '17:00', break: { start: '13:00', end: '14:00' } },
@@ -106,16 +119,16 @@ const SPA: DemoProfile = {
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
-      { name: 'Uñas acrílicas', durationMinutes: 90 },
-      { name: 'Gel semipermanente', durationMinutes: 60 },
-      { name: 'Lifting de pestañas', durationMinutes: 60 },
-      { name: 'Extensiones de pestañas', durationMinutes: 120 },
-      { name: 'Pestañas 1x1 anime', durationMinutes: 90 },
-      { name: 'Planchado de cejas con visajismo', durationMinutes: 30 },
-      { name: 'Limpieza facial', durationMinutes: 60 },
-      { name: 'Dermaplaning', durationMinutes: 30 },
-      { name: 'Pigmentación de cejas con visajismo', durationMinutes: 60 },
-      { name: 'Planchado de cabello', durationMinutes: 45 },
+      service('Uñas acrílicas', 90),
+      service('Gel semipermanente', 60),
+      service('Lifting de pestañas', 60),
+      service('Extensiones de pestañas', 120),
+      service('Pestañas 1x1 anime', 90),
+      service('Planchado de cejas con visajismo', 30),
+      service('Limpieza facial', 60),
+      service('Dermaplaning', 30),
+      service('Pigmentación de cejas con visajismo', 60),
+      service('Planchado de cabello', 45),
     ],
     operatingHours: {
       monday:    { open: '09:00', close: '20:00' },

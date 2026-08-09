@@ -5,6 +5,7 @@ import {
   dayKeyForJsDow,
   getMinBookingNoticeMinutes,
   resolveDayHours,
+  resolveServiceDurationMinutes,
   type BusinessSettings,
   type DayBreak,
   type DayHours,
@@ -213,7 +214,10 @@ export async function checkAvailability(
       dateISO,
       hours: dayHours,
       slotDurationMinutes: settings.slotDurationMinutes,
-      serviceDurationMinutes: knownService.durationMinutes,
+      serviceDurationMinutes: resolveServiceDurationMinutes(
+        knownService,
+        settings,
+      ),
       tzOffset,
     });
 
@@ -341,9 +345,16 @@ export async function bookAppointment(
         }),
       );
     }
+    // Resolved once here: the break check, the persisted appointment and the
+    // Google event must all agree on how long this booking lasts.
+    const serviceDurationMinutes = resolveServiceDurationMinutes(
+      knownService,
+      settings,
+    );
+
     if (
       dayHours.break &&
-      overlapsBreak(tzWallTimeMin, knownService.durationMinutes, dayHours.break)
+      overlapsBreak(tzWallTimeMin, serviceDurationMinutes, dayHours.break)
     ) {
       return err(
         new ValidationError({
@@ -354,7 +365,7 @@ export async function bookAppointment(
             businessId: params.businessId,
             datetimeISO: params.datetimeISO,
             break: dayHours.break,
-            serviceDurationMinutes: knownService.durationMinutes,
+            serviceDurationMinutes,
           },
         }),
       );
@@ -422,7 +433,7 @@ export async function bookAppointment(
       customerId: params.customerId,
       service: params.service,
       scheduledAt: datetime,
-      durationMinutes: knownService.durationMinutes,
+      durationMinutes: serviceDurationMinutes,
       status: "scheduled",
     });
 
@@ -446,7 +457,7 @@ export async function bookAppointment(
       summary,
       description,
       startDateTime: datetime,
-      durationMinutes: knownService.durationMinutes,
+      durationMinutes: serviceDurationMinutes,
       timezone: business.timezone,
     });
 

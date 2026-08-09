@@ -77,11 +77,29 @@ app.get('/admin/whatsapp/qr', async (c) => {
   // businessId provided → show QR for that business
   const state = getConnectionState(businessId)
 
-  if (!state || state.status === 'logged_out') {
+  // "No state" is now a normal condition: creating a business no longer boots a
+  // socket, so a business that has never been linked lands here. Point at the
+  // Connect button instead of the old "delete the session folder and restart the
+  // server" advice, which was destructive and wrong for this case.
+  if (!state) {
+    return c.html(
+      renderPage(
+        'Sin iniciar',
+        `<p>Este negocio todavía no inició sesión de WhatsApp.</p>
+         <p style="margin-top:1rem">Andá al panel y usá el botón <strong>Conectar</strong> del negocio para generar el QR.</p>
+         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? '')}">← Ir al panel</a></p>`,
+      ),
+      200,
+    )
+  }
+
+  if (state.status === 'logged_out') {
     return c.html(
       renderPage(
         'Sesión cerrada',
-        '<p>WhatsApp cerró sesión. Borrá la carpeta de sesión y reiniciá el servidor.</p>',
+        `<p>La sesión de WhatsApp está cerrada.</p>
+         <p style="margin-top:1rem">Usá el botón <strong>Conectar</strong> del panel para reintentar la vinculación.</p>
+         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? '')}">← Ir al panel</a></p>`,
       ),
       200,
     )
@@ -124,13 +142,11 @@ app.get('/admin/whatsapp/qr', async (c) => {
   }
 
   const dataUrl = await qrcode.toDataURL(state.qr, { width: 300, margin: 2 })
-  const pairHref = `/admin/whatsapp/pair?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
   return c.html(
     renderPage(
       'Escanear QR',
       `<p>Escaneá este código con WhatsApp en tu teléfono.</p>
        <img src="${dataUrl}" alt="WhatsApp QR" style="display:block;margin:1rem auto"/>
-       <p style="margin-top:1.5rem;font-size:0.9rem;color:#666">¿Problemas con el QR? <a href="${pairHref}">Usá código de texto</a></p>
        ${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
       nextUrl ? 10 : undefined,
       nextUrl ?? undefined,
@@ -191,17 +207,32 @@ app.get('/admin/whatsapp/pair', async (c) => {
   }
 
   const refreshUrl = `?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
-  const pairNextUrl = nextRefreshUrl(
-    `/admin/whatsapp/pair?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`,
-    refreshCycle(c),
-  )
 
-  // Use the code that was auto-generated at socket startup (best timing).
-  // Fall back to on-demand generation only when the user explicitly requests a new code.
+  // Requesting a pairing code is an EXPLICIT act, never a side effect of loading
+  // this page. It used to fire whenever no code was cached — and since booting a
+  // socket resets the cached code, and this page auto-refreshed on a timer, the
+  // page asked WhatsApp for a new code roughly every 90s on its own. Five of
+  // those trip the circuit breaker: six hours blocked without anyone clicking
+  // anything. The QR flow is the supported path now; this one waits for a click.
   const forceNew = c.req.query('new') === '1'
   let code = state?.pairingCode ?? null
 
-  if (!code || forceNew) {
+  if (!code && !forceNew) {
+    return c.html(
+      renderPage(
+        'Código de vinculación',
+        `<p>Generá un código para vincular este número.</p>
+         <p style="font-size:.85rem;color:#888;margin:1rem 0">
+           Cada código pedido cuenta contra el límite de WhatsApp para el número.
+           Pedí uno solo cuando tengas el teléfono en la mano.
+         </p>
+         <p><a href="${refreshUrl}&new=1" class="btn">Generar código de vinculación</a></p>`,
+      ),
+      200,
+    )
+  }
+
+  if (forceNew || !code) {
     const business = await businessRepo.findById(businessId)
     if (!business) {
       return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
@@ -242,7 +273,10 @@ app.get('/admin/whatsapp/pair', async (c) => {
 
   if (!code) {
     return c.html(
-      renderPage('Generando...', `<p>Generando código de vinculación…</p><p><a href="${refreshUrl}">Recargar</a></p>`, 3),
+      renderPage(
+        'Sin código',
+        `<p>No se pudo obtener un código.</p><p><a href="${refreshUrl}&new=1">Generar código nuevo</a></p>`,
+      ),
       200,
     )
   }
@@ -250,6 +284,9 @@ app.get('/admin/whatsapp/pair', async (c) => {
   // Format as XXXX-XXXX
   const formatted = code.replace(/[^A-Z0-9]/gi, '').toUpperCase().replace(/^(.{4})(.{4})$/, '$1-$2')
 
+  // No auto-refresh here. This page used to reload every 60s, and a reload with
+  // no cached code meant another request to WhatsApp. Expiry is handled by the
+  // operator pressing the button below.
   const body = `
     <p style="margin-bottom:0.5rem">Abrí WhatsApp en el teléfono y seguí estos pasos:</p>
     <ol style="text-align:left;display:inline-block;margin:0.5rem auto 1.5rem">
@@ -259,44 +296,14 @@ app.get('/admin/whatsapp/pair', async (c) => {
       <li>Ingresá este código:</li>
     </ol>
     <div style="font-size:2.5rem;font-weight:bold;letter-spacing:0.2rem;margin:1rem auto;font-family:monospace;background:#f4f4f4;padding:1rem 2rem;border-radius:8px;display:inline-block">${formatted}</div>
-    <p style="color:#888;font-size:0.85rem;margin-top:1rem">El código expira en ~60 segundos.</p>
-    <p>
-      <a id="new-code-link" href="${refreshUrl}&new=1"
-         style="color:#059669;font-size:0.9rem"
-         onclick="handleNewCode(event)">Pedir código nuevo</a>
-      <span id="new-code-wait" style="display:none;color:#b45309;font-size:0.9rem">
-        Podés pedir uno nuevo en <strong id="new-code-cd"></strong>s
-      </span>
+    <p style="color:#888;font-size:0.85rem;margin-top:1rem">
+      El código expira en ~60 segundos. Si venció, generá uno nuevo — no recargues la página en bucle.
     </p>
-    <script>
-    (function(){
-      var KEY='kuma_pair_ts_${businessId}';
-      var COOLDOWN=90000;
-      function updateUI(){
-        var ts=parseInt(localStorage.getItem(KEY)||'0',10);
-        var rem=COOLDOWN-(Date.now()-ts);
-        if(rem>0){
-          document.getElementById('new-code-link').style.display='none';
-          document.getElementById('new-code-wait').style.display='';
-          document.getElementById('new-code-cd').textContent=Math.ceil(rem/1000);
-          setTimeout(updateUI,1000);
-        } else {
-          document.getElementById('new-code-link').style.display='';
-          document.getElementById('new-code-wait').style.display='none';
-        }
-      }
-      window.handleNewCode=function(e){
-        localStorage.setItem(KEY,Date.now().toString());
-      };
-      updateUI();
-    })();
-    </script>
-    ${pairNextUrl ? '' : REFRESH_STOPPED_NOTE}`
+    <p style="margin-top:1.5rem">
+      <a href="${refreshUrl}&new=1" style="color:#059669;font-size:0.9rem">Generar nuevo código</a>
+    </p>`
 
-  return c.html(
-    renderPage('Código de vinculación', body, pairNextUrl ? 60 : undefined, pairNextUrl ?? undefined),
-    200,
-  )
+  return c.html(renderPage('Código de vinculación', body), 200)
 })
 
 function renderPage(
@@ -343,16 +350,16 @@ function renderGuardBlocked(c: Context, err: SessionGuardError, backUrl: string)
   const secs = Math.ceil(err.retryAfterMs / 1000)
 
   if (err.reason === 'cooldown') {
+    // Static countdown, no timer. This page used to redirect itself back to the
+    // pairing page when the countdown hit zero — and that page then asked
+    // WhatsApp for another code, which bounced back here. The loop drove roughly
+    // one real pairing request every 90s until the breaker tripped at five.
     return c.html(
       renderPage(
         'Espera un momento',
-        `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong id="cd">${secs}</strong> segundos.</p>
+        `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong>${secs}</strong> segundos.</p>
          <p style="font-size:.85rem;color:#888">WhatsApp bloquea los números que piden códigos muy seguido.</p>
-         <p><a href="${backUrl}">← Volver</a></p>
-         <script>
-           var s=${secs};
-           var t=setInterval(function(){s--;document.getElementById('cd').textContent=s;if(s<=0){clearInterval(t);location.href='${backUrl}';}},1000);
-         </script>`,
+         <p style="margin-top:1.5rem"><a href="${backUrl}">← Volver</a></p>`,
       ),
       429,
     ) as Response

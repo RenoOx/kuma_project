@@ -206,9 +206,13 @@ export async function recordSessionStopped(
  * `loggedOut` (401) is the same status code whether WhatsApp revoked our
  * credentials for abuse or the owner simply tapped "log out" on their phone.
  * The two are indistinguishable at the protocol level but opposite in risk, so
- * the attempt counter breaks the tie: a number that made zero linking attempts
- * in the current window is not being punished for anything, and blocking it for
- * six hours only locks the owner out of their own bot.
+ * the attempt counter breaks the tie.
+ *
+ * The threshold is "more than one prior attempt", not "any". Linking legitimately
+ * costs one attempt — the operator presses Connect once — so treating a single
+ * attempt as evidence of hammering blocked people for six hours on their first
+ * honest try. One failure is a failure; two in the same window is a pattern.
+ * The 5-attempts-per-hour circuit breaker still backstops this independently.
  */
 export async function recordHalt(
   whatsappNumber: string,
@@ -221,7 +225,7 @@ export async function recordHalt(
   // nextAttemptWindow folds in a hypothetical new attempt, so the count of
   // attempts that actually happened is one less.
   const priorAttempts = window.attemptCount - 1
-  const wasHammering = priorAttempts > 0
+  const wasHammering = priorAttempts > 1
 
   const blockedUntil = wasHammering ? new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS) : null
   await safeUpsert({ whatsappNumber, businessId, blockedUntil, haltReason: reason })

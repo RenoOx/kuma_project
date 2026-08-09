@@ -322,3 +322,19 @@ Implementa todas las tareas de la sesión primero.
 Corre `npm run check` UNA SOLA VEZ al final, cuando yo diga "corre los tests".
 Si una tarea rompe algo evidente en compilación, avísame — pero no pares a testear.
 El ciclo es: planea → apruebo → implementas → siguiente tarea → al final testeas todo.
+
+## Autorización de ejecución
+
+Cuando te doy OK a un plan, ese OK cubre TODA la ejecución de ese plan.
+No pidas permiso archivo por archivo ni paso por paso.
+Ejecuta el plan completo hasta terminarlo.
+Solo detente si:
+- Descubres algo que cambia sustancialmente el plan original
+- Vas a hacer una operación destructiva no contemplada (drop, rename, delete masivo)
+- Encuentras un error de multi-tenancy o seguridad no anticipado
+
+Al terminar la ejecución, reporta:
+- Qué archivos tocaste
+- Qué cambios aplicaste
+- Qué queda pendiente si algo
+- Sin correr tests salvo que yo lo pida

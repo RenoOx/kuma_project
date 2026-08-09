@@ -50,13 +50,45 @@ const specialDaySchema = z.object({
   label: z.string().optional(),
 })
 
-const serviceSchema = z.object({
-  name: z.string().min(1),
-  durationMinutes: z.number().int().positive(),
-  // Optional — services without a set price fall back to the free-text
-  // knowledge_base "pricing" entries when Emma answers.
-  price: z.number().nonnegative().optional(),
-})
+// A service is priced in one of three ways, and Emma answers differently for
+// each (see formatServicePrice):
+//   - fixed      → priceMin === priceMax
+//   - range      → priceMin < priceMax, or priceMax null for open-ended
+//   - evaluation → requiresEvaluation, real price known only after seeing the
+//                  case; priceMin may still act as a floor ("desde S/ X")
+//
+// durationMinutes is null when the service has no fixed length. Slot math and
+// calendar events then fall back to slotDurationMinutes — see
+// resolveServiceDurationMinutes, which is the only supported way to read it.
+const serviceSchema = z
+  .object({
+    name: z.string().min(1),
+    durationMinutes: z
+      .number()
+      .int()
+      .positive()
+      .nullish()
+      .transform((v) => v ?? null),
+    priceMin: z
+      .number()
+      .nonnegative()
+      .nullish()
+      .transform((v) => v ?? null),
+    priceMax: z
+      .number()
+      .nonnegative()
+      .nullish()
+      .transform((v) => v ?? null),
+    requiresEvaluation: z.boolean().default(false),
+  })
+  .refine((s) => s.requiresEvaluation || s.priceMin !== null, {
+    message: 'priceMin is required unless the service requires evaluation',
+    path: ['priceMin'],
+  })
+  .refine((s) => s.priceMin === null || s.priceMax === null || s.priceMax >= s.priceMin, {
+    message: 'priceMax must be greater than or equal to priceMin',
+    path: ['priceMax'],
+  })
 
 // Pause state for the customer-facing bot. The owner toggles this via the
 // ownerAssistant `pause_bot` / `resume_bot` tools.
@@ -101,6 +133,36 @@ export const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 30
 // to be acceptable. Used by checkAvailability and bookAppointment.
 export function getMinBookingNoticeMinutes(settings: BusinessSettings): number {
   return settings.minBookingNoticeMinutes ?? DEFAULT_MIN_BOOKING_NOTICE_MINUTES
+}
+
+// Effective length of a service. `durationMinutes: null` means the business
+// never set one (typically an evaluation-first service), so we fall back to the
+// slot grid: appointments.duration_minutes is NOT NULL and a calendar event
+// needs an end time, so a number has to come out of here either way.
+// Read service duration through this — never `service.durationMinutes` directly.
+export function resolveServiceDurationMinutes(
+  service: Service,
+  settings: BusinessSettings,
+): number {
+  return service.durationMinutes ?? settings.slotDurationMinutes
+}
+
+// Pure render of a service's price, in the three shapes Emma has to answer.
+// Shared by the system prompt and the admin panel so both read the same way.
+export function formatServicePrice(service: Service): string {
+  const { priceMin, priceMax, requiresEvaluation } = service
+
+  if (requiresEvaluation) {
+    return priceMin === null
+      ? 'requiere evaluación previa'
+      : `desde S/ ${priceMin} (requiere evaluación previa)`
+  }
+  // Unreachable through the schema (the refine above demands a priceMin when
+  // requiresEvaluation is false), kept so this stays total.
+  if (priceMin === null) return 'precio no configurado'
+  if (priceMax === null) return `desde S/ ${priceMin}`
+  if (priceMin === priceMax) return `S/ ${priceMin}`
+  return `S/ ${priceMin} a S/ ${priceMax}`
 }
 
 // Pure check: given a settings object (or null when business is unconfigured),
