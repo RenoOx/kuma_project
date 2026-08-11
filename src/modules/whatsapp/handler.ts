@@ -105,6 +105,45 @@ function sanitizeForWhatsApp(text: string): string {
     .replace(/^- /gm, '· ')
 }
 
+// Drops repeat deliveries of a message we already accepted.
+//
+// The sender lock below serialises work but does NOT deduplicate it: a second
+// `messages.upsert` carrying the same key.id chains onto the lock and runs the
+// whole pipeline again, which reached the customer as two identical replies a
+// few seconds apart. Baileys re-delivers on reconnects and on the first message
+// of a new chat, so identity has to be checked before any work is queued.
+//
+// Keyed by businessId + message id: ids come from WhatsApp and two tenants must
+// never be able to silence each other's messages.
+//
+// A Map rather than a Set because entries need to expire — an unbounded set of
+// every id ever seen is a leak in a long-lived process. In-memory on purpose:
+// after a deploy the window resets, and the cost is one possible duplicate.
+const PROCESSED_MESSAGE_TTL_MS = 60 * 1000;
+const PROCESSED_IDS_PRUNE_THRESHOLD = 1000;
+const processedMessageIds = new Map<string, number>();
+
+/**
+ * Marks a message id as seen and reports whether it is a repeat.
+ *
+ * Must be called from synchronous code (it is, in handleIncomingMessage): with
+ * no await between the read and the write, check-and-set is atomic against the
+ * event loop, so two upserts in the same tick cannot both pass.
+ */
+function claimMessageId(key: string, now: number = Date.now()): boolean {
+  const seenAt = processedMessageIds.get(key);
+  if (seenAt !== undefined && now - seenAt < PROCESSED_MESSAGE_TTL_MS) return false;
+
+  if (processedMessageIds.size > PROCESSED_IDS_PRUNE_THRESHOLD) {
+    for (const [k, t] of processedMessageIds) {
+      if (now - t >= PROCESSED_MESSAGE_TTL_MS) processedMessageIds.delete(k);
+    }
+  }
+
+  processedMessageIds.set(key, now);
+  return true;
+}
+
 // Serialises message processing per (businessId, sender-phone) so that two
 // rapid messages from the same number never run their LLM calls concurrently,
 // which would interleave messages in the conversation history.
@@ -666,6 +705,15 @@ export function handleIncomingMessage(
   }
   if (jid.endsWith("@g.us") || jid === "status@broadcast") {
     log.info({ jid }, "handler skip: group or status");
+    return Promise.resolve();
+  }
+
+  // Before the lock on purpose: the lock serialises duplicates, it does not
+  // drop them, so a repeat that gets past here is answered a second time.
+  // A message with no id cannot be identified — process it rather than guess.
+  const messageId = raw.key.id;
+  if (messageId && !claimMessageId(`${businessId}:${messageId}`)) {
+    log.info({ jid, messageId }, "handler skip: duplicate messages.upsert for this message id");
     return Promise.resolve();
   }
 
