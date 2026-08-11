@@ -1,13 +1,4 @@
-import {
-  boolean,
-  index,
-  integer,
-  jsonb,
-  pgEnum,
-  pgTable,
-  text,
-  timestamp,
-} from 'drizzle-orm/pg-core'
+import { boolean, index, jsonb, pgEnum, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 import { nanoid } from 'nanoid'
 import { businesses } from './businesses.js'
 
@@ -47,7 +38,6 @@ export const knowledgeBase = pgTable(
     sendMode: kbSendModeEnum('send_mode').notNull().default('on_request'),
     // Only meaningful when sendMode = 'trigger_based'.
     triggerKeywords: text('trigger_keywords').array(),
-    priority: integer('priority').notNull().default(0),
     active: boolean('active').notNull().default(true),
     // Placeholder for the future RAG migration. Stored as jsonb (a plain number
     // array) so the schema needs no pgvector extension today. When semantic
@@ -59,7 +49,7 @@ export const knowledgeBase = pgTable(
   },
   (t) => [
     index('knowledge_base_business_id_idx').on(t.businessId),
-    index('knowledge_base_business_category_idx').on(t.businessId, t.category, t.priority),
+    index('knowledge_base_business_category_idx').on(t.businessId, t.category),
   ],
 )
 

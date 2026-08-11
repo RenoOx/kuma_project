@@ -148,6 +148,21 @@ export function pickUnsupportedReply(randomFn: () => number = Math.random): stri
   return variant
 }
 
+// Photos are the one unreadable format that is usually the point of the
+// message, not an aside: a reference for a nail design or a hair colour. The
+// generic "I only read text" answer reads as a dead end right where the
+// customer expects a quote, so images get their own acknowledgement. Every
+// other format still falls back to the variants above.
+export const IMAGE_RECEIVED_REPLY =
+  '¡Recibí tu foto! Ya la comparto para que te confirmen el precio 😊'
+
+export function replyForFormat(
+  format: UnsupportedFormat,
+  randomFn: () => number = Math.random,
+): string {
+  return format === 'image' ? IMAGE_RECEIVED_REPLY : pickUnsupportedReply(randomFn)
+}
+
 export const CALL_REJECTED_VARIANTS: ReadonlyArray<string> = [
   'Hola 😊 No puedo atender llamadas, pero por acá te ayudo al toque. ¿Me escribes tu consulta?',
   '¡Hola! Por este número la atención es solo por chat escrito 😊 Cuéntame en qué te puedo ayudar.',

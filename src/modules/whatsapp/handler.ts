@@ -12,7 +12,7 @@ import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
 import {
   classifyIncoming,
   describeFormat,
-  pickUnsupportedReply,
+  replyForFormat,
   type UnsupportedFormat,
 } from "@/modules/whatsapp/messageKind.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
@@ -24,6 +24,8 @@ const PAUSED_REPLY =
   "En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.";
 
 const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, prueba de nuevo.";
+
+const ESCALATED_REPLY = "Ya avisé al encargado, te escribirá en breve 😊";
 
 export type SendFn = (jid: string, text: string) => Promise<void>
 
@@ -74,6 +76,22 @@ function shouldSendUnsupportedNotice(conversationId: string): boolean {
   return true;
 }
 
+// Once a conversation is escalated a human owes it an answer, so the bot goes
+// quiet instead of talking over them. The customer still gets one "someone is
+// coming" line per hour — silence after every message would read as a hang.
+// In-memory like the notice cooldown above: a deploy costs one extra polite
+// message, which is cheaper than a table.
+const ESCALATED_NOTICE_COOLDOWN_MS = 60 * 60 * 1000;
+const escalatedNoticeSentAt = new Map<string, number>();
+
+function shouldSendEscalatedNotice(conversationId: string): boolean {
+  const last = escalatedNoticeSentAt.get(conversationId);
+  const now = Date.now();
+  if (last !== undefined && now - last < ESCALATED_NOTICE_COOLDOWN_MS) return false;
+  escalatedNoticeSentAt.set(conversationId, now);
+  return true;
+}
+
 // Recorded for every unreadable message, including while the bot is paused, so
 // the frequency of these is measurable regardless of whether we replied.
 async function recordUnsupportedEvent(
@@ -95,7 +113,8 @@ async function recordUnsupportedEvent(
   }
 }
 
-// Sends the "text only" notice, subject to the per-conversation cooldown.
+// Acknowledges an unreadable message — the "text only" notice for most
+// formats, a photo-specific line for images — subject to the cooldown.
 async function respondUnsupportedFormat(params: {
   businessId: string;
   conversationId: string;
@@ -111,7 +130,7 @@ async function respondUnsupportedFormat(params: {
     return;
   }
 
-  const reply = pickUnsupportedReply();
+  const reply = replyForFormat(format);
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -442,6 +461,57 @@ async function processMessage(
       send,
       log,
     });
+
+    // A photo is almost always a quote request, and the reply we just sent
+    // promises the owner will see it ("Ya la comparto..."). Nothing else in the
+    // codebase forwards it, so this push is what makes that promise true.
+    //
+    // Deliberately NOT gated on the notice cooldown above: that cooldown exists
+    // to avoid repeating the same line at the CUSTOMER, while a second photo is
+    // still a second thing the owner has to look at. Fire-and-forget so the
+    // customer's reply is never blocked by an outbound send.
+    if (payload.format === "image") {
+      const who = customer.name?.trim() || "(sin nombre)";
+      const photoText = [
+        "📸 *Foto recibida*",
+        `Cliente: ${who} (${phone})`,
+        "Te mandó una foto para cotización.",
+        "Revisá WhatsApp para verla y confirmarle el precio.",
+      ].join("\n");
+      ownerNotifier.notifyOwner(businessId, photoText).catch((err) => {
+        log.warn({ err }, "notifyOwner for received photo rejected unexpectedly");
+      });
+    }
+    return;
+  }
+
+  // ESCALATED — a human owes this thread an answer. Replying with the LLM here
+  // talks over them and makes the escalation we just promised look like it
+  // never happened. Placed after the unsupported branch on purpose: a photo
+  // sent mid-escalation must still reach the owner.
+  if (conversation.status === "escalated") {
+    if (shouldSendEscalatedNotice(conversation.id)) {
+      const persisted = await messageService.append({
+        businessId,
+        conversationId: conversation.id,
+        role: "assistant",
+        content: ESCALATED_REPLY,
+      });
+      if (!persisted.ok) {
+        log.error({ code: persisted.error.code }, "append escalated canned reply failed");
+      }
+      try {
+        await send(jid, ESCALATED_REPLY);
+        log.info({ conversationId: conversation.id }, "escalated: canned reply sent, LLM skipped");
+      } catch (err) {
+        log.error({ err, jid }, "failed to send escalated canned reply");
+      }
+    } else {
+      log.info(
+        { conversationId: conversation.id },
+        "escalated: within notice cooldown, staying silent",
+      );
+    }
     return;
   }
 

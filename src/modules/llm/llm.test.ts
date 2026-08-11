@@ -361,7 +361,7 @@ describe('llm.service.generateReply', () => {
     assert(result.ok)
     expect(result.data.maxIterationsHit).toBe(true)
     expect(result.data.escalated).toBe(true)
-    expect(result.data.content).toContain('humano')
+    expect(result.data.content).toContain('encargado')
     expect(mockCreate).toHaveBeenCalledTimes(5)
     expect(mockExecuteTool).toHaveBeenCalledTimes(5)
 

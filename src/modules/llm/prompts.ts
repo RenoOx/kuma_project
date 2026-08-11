@@ -52,6 +52,22 @@ function todayInTimezone(timezone: string): string {
   }
 }
 
+// Current wall-clock time as HH:mm in the business's timezone. Feeds the
+// variable tail only: without it the model knows the date but not the hour, so
+// "¿están abiertos ahora?" can only be guessed at.
+function timeInTimezone(timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hourCycle: 'h23',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date())
+  } catch {
+    return ''
+  }
+}
+
 function dayOfWeekInTimezone(timezone: string): string {
   try {
     return new Intl.DateTimeFormat('es-PE', {
@@ -406,7 +422,8 @@ function buildStaticBody(
     '',
     '# Consultas de horario y disponibilidad',
     '- SIEMPRE llamá check_availability para obtener los slots concretos del día pedido. Nunca respondas solo con el rango general de apertura ("abrimos de 9:00 a 20:00").',
-    '- Presentá los resultados como horas puntuales: "Tengo libre a las 9:00, 10:30, 11:00 y 14:00. ¿Cuál te viene mejor?" y esperá su elección antes de agendar.',
+    '- Cuando tengas horarios disponibles, propone SIEMPRE exactamente dos opciones concretas con hora específica. Nunca listes más de dos. Nunca uses rangos. Ejemplo: "¿Te va mejor a las 10:00am o a las 3:00pm?"',
+    '- Presentá los resultados como horas puntuales y esperá su elección antes de agendar.',
     '- Si el cliente ya preguntó una vez y solo recibió el rango general, al repreguntar llamá check_availability sin volver a repetir el rango.',
     '- Si no especificó fecha o servicio, preguntá eso primero y después llamá check_availability.',
   ]
@@ -416,12 +433,13 @@ function buildVariableTail(
   business: Business,
   todayISO: string,
   dayOfWeek: string,
+  nowHHMM: string,
   greeting: string,
   cta: CallToActionDecision,
 ): string[] {
   const lines = [
     '# Contexto actual',
-    `Fecha de hoy: ${dayOfWeek} ${todayISO} (${business.timezone}). Usala como base para resolver "hoy", "mañana", "el sábado", etc.`,
+    `Fecha y hora actual: ${dayOfWeek} ${todayISO} ${nowHHMM} (${business.timezone}). Usala como base para resolver "hoy", "mañana", "el sábado", etc., y para saber si el negocio está abierto en este momento comparando la hora contra los horarios de arriba.`,
     '',
     '# Saludo',
     `- Si es el primer mensaje de la conversación (sin historial previo), abrí SIEMPRE con este saludo exacto, sin modificarlo ni parafrasearlo: "${greeting}"`,
@@ -457,12 +475,13 @@ export function buildSystemPrompt(
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
+  const nowHHMM = timeInTimezone(business.timezone)
   const greeting = pickGreeting(business.name)
   const cta = decideCallToAction(history)
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today),
     '',
-    ...buildVariableTail(business, today, dayOfWeek, greeting, cta),
+    ...buildVariableTail(business, today, dayOfWeek, nowHHMM, greeting, cta),
   ].join('\n')
 }

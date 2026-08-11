@@ -11,6 +11,7 @@ import * as businessService from '@/modules/business/business.service.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
+import { MAX_ENTRIES_PER_QUERY } from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import {
   KB_ATTACHMENT_TYPE_LABELS,
   KB_ATTACHMENT_TYPES,
@@ -1925,12 +1926,6 @@ function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEnt
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label" for="priority">Prioridad</label>
-          <input id="priority" name="priority" type="number" class="form-input"
-            min="-100" max="100" value="${entry?.priority ?? 0}">
-          <p class="form-hint">Mayor número = se carga antes dentro de su categoría.</p>
-        </div>
-        <div class="form-group">
           <label class="form-label" for="active">Estado</label>
           <select id="active" name="active" class="form-input form-select">
             <option value="1" ${entry?.active !== false ? 'selected' : ''}>Activa</option>
@@ -1980,7 +1975,6 @@ function kbEntryRow(businessId: string, secret: string, e: KnowledgeBaseEntry): 
       ${attachment}
     </td>
     <td>${kbSendModeBadge(e.sendMode)}${keywords}</td>
-    <td class="mono">${e.priority}</td>
     <td>
       <div class="actions">
         <a href="/admin/dashboard/${bid}/kb/${esc(e.id)}/edit?secret=${se}" class="btn btn-ghost btn-sm">Editar</a>
@@ -2039,12 +2033,27 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
     const entries = visible.filter((e) => e.category === cat)
     if (entries.length === 0) return ''
     const rows = entries.map((e) => kbEntryRow(businessId, secret, e)).join('')
+
+    // Entries load oldest-first and the lookup is capped, so anything past the
+    // cap in one category never reaches Emma. Say so where the operator can see
+    // it — there is no ordering lever left to work around it.
+    const activeCount = result.data.filter((e) => e.category === cat && e.active).length
+    const overflow =
+      activeCount > MAX_ENTRIES_PER_QUERY
+        ? `<div class="alert alert-warning" style="margin:0 1rem 1rem">
+             Esta categoría tiene ${activeCount} entradas activas y Emma solo carga las
+             ${MAX_ENTRIES_PER_QUERY} más antiguas. Las ${activeCount - MAX_ENTRIES_PER_QUERY}
+             más nuevas no le llegan — desactivá las que ya no apliquen o juntá varias en una sola entrada.
+           </div>`
+        : ''
+
     return `
       <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">${esc(KB_CATEGORY_LABELS[cat])}</span></div>
+        ${overflow}
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Entrada</th><th>Envío</th><th>Prioridad</th><th></th></tr></thead>
+            <thead><tr><th>Entrada</th><th>Envío</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -2073,6 +2082,17 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
       <h1 class="page-title">Base de conocimiento</h1>
       <div class="actions">
         <a href="/admin/dashboard/${bid}/kb?secret=${se}&new=1" class="btn btn-primary">Nueva entrada</a>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-body">
+        <p style="font-size:13px;color:#6b7280;margin:0">
+          <strong>Base de conocimiento:</strong> información complementaria a los datos generales
+          del negocio. Los datos básicos (dirección, horarios, servicios y precios) ya están en
+          <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>.
+          Acá agregás información adicional que querés que Emma comparta bajo pedido o en
+          contextos específicos (portafolios, PDFs, políticas especiales, promociones).
+        </p>
       </div>
     </div>
     ${saved ? '<div class="alert alert-success">✓ Cambios guardados correctamente.</div>' : ''}
@@ -2125,7 +2145,6 @@ interface ParsedKbForm {
   attachmentUrl: string | null
   sendMode: KbSendMode
   triggerKeywords: string[]
-  priority: number
   active: boolean
 }
 
@@ -2165,9 +2184,6 @@ function parseKbForm(
     }
   }
 
-  const rawPriority = Number.parseInt(formData.get('priority')?.toString() ?? '0', 10)
-  const priority = Number.isFinite(rawPriority) ? Math.min(100, Math.max(-100, rawPriority)) : 0
-
   return {
     ok: true,
     data: {
@@ -2180,7 +2196,6 @@ function parseKbForm(
       attachmentUrl: attachmentType === 'none' ? null : attachmentUrl,
       sendMode,
       triggerKeywords,
-      priority,
       active: formData.get('active')?.toString() !== '0',
     },
   }

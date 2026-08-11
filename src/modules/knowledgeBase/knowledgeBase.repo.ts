@@ -5,7 +5,7 @@ import {
   type KnowledgeBaseEntry,
   type NewKnowledgeBaseEntry,
 } from '@/db/schema/index.js'
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, or } from 'drizzle-orm'
 
 export async function deleteByBusiness(
   businessId: string,
@@ -30,12 +30,12 @@ export async function findByBusiness(
     .select()
     .from(knowledgeBase)
     .where(eq(knowledgeBase.businessId, businessId))
-    .orderBy(asc(knowledgeBase.category), desc(knowledgeBase.priority), asc(knowledgeBase.createdAt))
+    .orderBy(asc(knowledgeBase.category), asc(knowledgeBase.createdAt))
 }
 
-// Active entries of the given categories, most relevant first. `limit` caps the
-// result for a single lookup — the caller decides how many categories it asks
-// for.
+// Active entries of the given categories, oldest first — the long-standing
+// entries are the established ones. `limit` caps the result for a single lookup;
+// the caller decides how many categories it asks for.
 export async function findActiveByCategories(
   businessId: string,
   categories: KbCategory[],
@@ -53,7 +53,7 @@ export async function findActiveByCategories(
         inArray(knowledgeBase.category, categories),
       ),
     )
-    .orderBy(desc(knowledgeBase.priority), asc(knowledgeBase.createdAt))
+    .orderBy(asc(knowledgeBase.createdAt))
     .limit(limit)
 }
 
@@ -74,11 +74,11 @@ export async function findAlwaysAndTriggerBased(
         or(eq(knowledgeBase.sendMode, 'always'), eq(knowledgeBase.sendMode, 'trigger_based')),
       ),
     )
-    .orderBy(desc(knowledgeBase.priority), asc(knowledgeBase.createdAt))
+    .orderBy(asc(knowledgeBase.createdAt))
 }
 
-// Fallback when the detector matches no category: the highest-priority active
-// entries regardless of category.
+// Fallback when the detector matches no category: the oldest active entries
+// regardless of category.
 export async function findTopActive(
   businessId: string,
   limit: number,
@@ -88,7 +88,7 @@ export async function findTopActive(
     .select()
     .from(knowledgeBase)
     .where(and(eq(knowledgeBase.businessId, businessId), eq(knowledgeBase.active, true)))
-    .orderBy(desc(knowledgeBase.priority), asc(knowledgeBase.createdAt))
+    .orderBy(asc(knowledgeBase.createdAt))
     .limit(limit)
 }
 

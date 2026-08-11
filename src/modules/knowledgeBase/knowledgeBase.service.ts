@@ -40,7 +40,6 @@ export interface CreateEntryInput {
   attachmentUrl?: string | null
   sendMode?: 'always' | 'on_request' | 'trigger_based'
   triggerKeywords?: string[] | null
-  priority?: number
   active?: boolean
 }
 

@@ -5,8 +5,11 @@ import {
   type Appointment,
   type NewAppointment,
 } from '@/db/schema/index.js'
-import { and, asc, count, eq, gte, isNull, lt, lte } from 'drizzle-orm'
+import { and, asc, count, eq, gte, isNull, lt, lte, ne } from 'drizzle-orm'
 
+// Appointments occupying [start, end). Cancelled ones are excluded: they no
+// longer hold their slot, and counting them kept the slot blocked forever —
+// Emma told customers a freed-up time was taken.
 export async function findByBusinessAndDateRange(
   businessId: string,
   start: Date,
@@ -19,6 +22,7 @@ export async function findByBusinessAndDateRange(
     .where(
       and(
         eq(appointments.businessId, businessId),
+        ne(appointments.status, 'cancelled'),
         gte(appointments.scheduledAt, start),
         lt(appointments.scheduledAt, end),
       ),
@@ -26,6 +30,8 @@ export async function findByBusinessAndDateRange(
     .orderBy(asc(appointments.scheduledAt))
 }
 
+// Backs the slot-conflict check in bookAppointment. Same rule as above: a
+// cancelled appointment does not conflict with a new booking on its slot.
 export async function findByDateTime(
   businessId: string,
   datetime: Date,
@@ -34,7 +40,13 @@ export async function findByDateTime(
   const [row] = await exec
     .select()
     .from(appointments)
-    .where(and(eq(appointments.businessId, businessId), eq(appointments.scheduledAt, datetime)))
+    .where(
+      and(
+        eq(appointments.businessId, businessId),
+        ne(appointments.status, 'cancelled'),
+        eq(appointments.scheduledAt, datetime),
+      ),
+    )
     .limit(1)
   return row ?? null
 }

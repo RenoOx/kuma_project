@@ -11,7 +11,7 @@
  * business set-settings <id> <settings.json>   ← full replacement, not merge
  *
  * kb list <businessId>
- * kb add <businessId> --category=X --content=X [--title=X] [--priority=N] ...
+ * kb add <businessId> --category=X --content=X [--title=X] [--send-mode=X] ...
  * kb update <businessId> <id> [--category=X] [--content=X] ...
  * kb delete <businessId> <id>
  */
@@ -205,7 +205,6 @@ async function kbList(businessId: string): Promise<void> {
     const flags = [
       row.active ? null : 'INACTIVE',
       row.sendMode,
-      `priority=${row.priority}`,
       row.attachmentType !== 'none' ? `${row.attachmentType}=${row.attachmentUrl ?? '?'}` : null,
       row.triggerKeywords?.length ? `keywords=${row.triggerKeywords.join('|')}` : null,
     ]
@@ -233,7 +232,6 @@ async function kbAdd(businessId: string, flags: Record<string, string>): Promise
     ...(flags['attachment-url'] ? { attachmentUrl: flags['attachment-url'] } : {}),
     ...(flags['send-mode'] ? { sendMode: parseSendMode(flags['send-mode']) } : {}),
     ...(flags.keywords ? { triggerKeywords: flags.keywords.split(',').map((k) => k.trim()) } : {}),
-    ...(flags.priority ? { priority: Number.parseInt(flags.priority, 10) } : {}),
     ...(flags.active ? { active: flags.active !== 'false' } : {}),
   })
 
@@ -254,11 +252,10 @@ async function kbUpdate(
   if (flags['attachment-url']) patch.attachmentUrl = flags['attachment-url']
   if (flags['send-mode']) patch.sendMode = parseSendMode(flags['send-mode'])
   if (flags.keywords) patch.triggerKeywords = flags.keywords.split(',').map((k) => k.trim())
-  if (flags.priority) patch.priority = Number.parseInt(flags.priority, 10)
   if (flags.active) patch.active = flags.active !== 'false'
 
   if (Object.keys(patch).length === 0) {
-    die('nothing to update — pass at least one of --category --content --title --priority ...', 2)
+    die('nothing to update — pass at least one of --category --content --title --send-mode ...', 2)
   }
 
   const result = await knowledgeBaseService.update(businessId, id, patch)
@@ -300,7 +297,6 @@ KNOWLEDGE BASE
     --keywords=a,b,c     trigger words (only with --send-mode=trigger_based)
     --attachment-type=X  one of: ${KB_ATTACHMENT_TYPES.join(' | ')}
     --attachment-url=X   URL of the attachment
-    --priority=N         higher loads first within its category (default 0)
     --active=false       hide from the prompt without deleting
 
 EXAMPLES

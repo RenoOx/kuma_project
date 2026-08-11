@@ -6,7 +6,7 @@ import {
   type ConversationStatus,
   type NewConversation,
 } from '@/db/schema/index.js'
-import { and, count, desc, eq, gte } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
 
 export async function findOpenByCustomer(
   businessId: string,
@@ -23,6 +23,43 @@ export async function findOpenByCustomer(
         eq(conversations.status, 'open'),
       ),
     )
+    .limit(1)
+  return row ?? null
+}
+
+// Most recent escalated conversation of a customer that was still active at or
+// after `since`. Activity is the last message, falling back to the creation
+// time for a thread that never got one.
+//
+// Recency is measured by activity rather than by creation on purpose: a thread
+// opened last week and escalated this morning is exactly the one the customer
+// is still in, and keying on created_at would skip it.
+export async function findRecentEscalatedByCustomer(
+  businessId: string,
+  customerId: string,
+  since: Date,
+  exec: Executor = db,
+): Promise<Conversation | null> {
+  // The comparison is spelled out with typed operators rather than a raw
+  // COALESCE: values interpolated into a raw sql`` fragment skip the column's
+  // driver encoder, so the Date would reach postgres-js unserialized. Ordering
+  // takes no parameters, so COALESCE is safe there.
+  const lastActivity = sql`COALESCE(${conversations.lastMessageAt}, ${conversations.createdAt})`
+  const [row] = await exec
+    .select()
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.businessId, businessId),
+        eq(conversations.customerId, customerId),
+        eq(conversations.status, 'escalated'),
+        or(
+          gte(conversations.lastMessageAt, since),
+          and(isNull(conversations.lastMessageAt), gte(conversations.createdAt, since)),
+        ),
+      ),
+    )
+    .orderBy(desc(lastActivity))
     .limit(1)
   return row ?? null
 }

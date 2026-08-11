@@ -5,8 +5,9 @@ import type { KbCategory } from '@/db/schema/index.js'
 // the whole table. Pure and synchronous on purpose — no extra LLM round trip
 // before every reply, and trivially testable.
 //
-// Misses are cheap: llm.service falls back to the top entries by priority when
-// this returns nothing, so Emma never ends up with an empty knowledge block.
+// Misses are cheap: the search service falls back to the oldest active entries
+// when this returns nothing, so Emma is never left with an empty knowledge block
+// just because the wording was unusual.
 
 const KEYWORDS: Record<KbCategory, readonly string[]> = {
   ubicacion: [

@@ -64,6 +64,13 @@
       "when": 1786314299529,
       "tag": "0008_flawless_speedball",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786320530388,
+      "tag": "0009_big_nemesis",
+      "breakpoints": true
     }
   ]
 }

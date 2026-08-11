@@ -17,14 +17,18 @@ export const MAX_ENTRIES_PER_QUERY = 5
 export interface SearchResult {
   entries: KnowledgeBaseEntry[]
   // Which categories drove the lookup. Empty means the detector found nothing
-  // and the priority fallback was used. Logged, not shown to the customer.
+  // and the oldest-first fallback was used. Logged, not shown to the customer.
   matchedCategories: KbCategory[]
 }
 
 // Current implementation. Loads the detected category (capped at
-// MAX_ENTRIES_PER_QUERY, priority DESC) plus everything that is not gated on
+// MAX_ENTRIES_PER_QUERY, oldest first) plus everything that is not gated on
 // category: `always` entries always, `trigger_based` entries whose keywords hit
 // the message.
+//
+// Note the consequence of the cap: past MAX_ENTRIES_PER_QUERY active entries in
+// one category, the newest ones never reach the prompt. The admin panel warns
+// the operator when a category crosses that line.
 export async function searchByCategory(
   businessId: string,
   message: string,
@@ -50,7 +54,7 @@ export async function searchByCategory(
     for (const entry of [...ungated, ...gated]) byId.set(entry.id, entry)
 
     const entries = [...byId.values()].sort(
-      (a, b) => b.priority - a.priority || a.createdAt.getTime() - b.createdAt.getTime(),
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
     )
 
     return ok({ entries, matchedCategories: categories })

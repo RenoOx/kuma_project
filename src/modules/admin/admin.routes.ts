@@ -102,7 +102,6 @@ const kbFields = {
   attachmentUrl: z.string().url().nullable().optional(),
   sendMode: kbSendModeSchema.optional(),
   triggerKeywords: z.array(z.string().min(1)).nullable().optional(),
-  priority: z.number().int().min(-100).max(100).optional(),
   active: z.boolean().optional(),
 }
 

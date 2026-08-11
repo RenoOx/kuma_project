@@ -37,18 +37,38 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     expect(result.data.entries.map((e) => e.title)).toEqual(['Dirección'])
   })
 
-  it('orders by priority descending', async () => {
+  it('orders by created_at ascending — oldest entries first', async () => {
+    // Explicit timestamps: rows inserted in one statement share defaultNow(),
+    // which would make the assertion depend on tie-breaking that does not exist.
     await seedEntries([
-      { businessId: businessAId, title: 'Baja', category: 'precios', content: 'c', priority: 1 },
-      { businessId: businessAId, title: 'Alta', category: 'precios', content: 'a', priority: 10 },
-      { businessId: businessAId, title: 'Media', category: 'precios', content: 'b', priority: 5 },
+      {
+        businessId: businessAId,
+        title: 'Nueva',
+        category: 'precios',
+        content: 'c',
+        createdAt: new Date('2026-03-01T10:00:00Z'),
+      },
+      {
+        businessId: businessAId,
+        title: 'Vieja',
+        category: 'precios',
+        content: 'a',
+        createdAt: new Date('2026-01-01T10:00:00Z'),
+      },
+      {
+        businessId: businessAId,
+        title: 'Intermedia',
+        category: 'precios',
+        content: 'b',
+        createdAt: new Date('2026-02-01T10:00:00Z'),
+      },
     ])
 
     const result = await searchByCategory(businessAId, 'cuánto cuesta')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.data.entries.map((e) => e.title)).toEqual(['Alta', 'Media', 'Baja'])
+    expect(result.data.entries.map((e) => e.title)).toEqual(['Vieja', 'Intermedia', 'Nueva'])
   })
 
   it('excludes inactive entries', async () => {
@@ -70,14 +90,16 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     expect(result.data.entries.map((e) => e.title)).toEqual(['Vigente'])
   })
 
-  it('caps the detected category at the limit', async () => {
+  it('caps the detected category at the limit, keeping the oldest', async () => {
+    // The newest three are unreachable by design once a category crosses the
+    // cap — the admin panel warns the operator about exactly this.
     await seedEntries(
       Array.from({ length: 8 }, (_, i) => ({
         businessId: businessAId,
         title: `Precio ${i}`,
         category: 'precios' as const,
         content: `S/${i}`,
-        priority: 8 - i,
+        createdAt: new Date(Date.UTC(2026, 0, i + 1, 10)),
       })),
     )
 
@@ -137,10 +159,22 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     if (miss.ok) expect(miss.data.entries).toEqual([])
   })
 
-  it('falls back to top entries by priority when no category is detected', async () => {
+  it('falls back to the oldest entries when no category is detected', async () => {
     await seedEntries([
-      { businessId: businessAId, title: 'Alta', category: 'precios', content: 'a', priority: 9 },
-      { businessId: businessAId, title: 'Baja', category: 'ubicacion', content: 'b', priority: 1 },
+      {
+        businessId: businessAId,
+        title: 'Vieja',
+        category: 'precios',
+        content: 'a',
+        createdAt: new Date('2026-01-01T10:00:00Z'),
+      },
+      {
+        businessId: businessAId,
+        title: 'Nueva',
+        category: 'ubicacion',
+        content: 'b',
+        createdAt: new Date('2026-02-01T10:00:00Z'),
+      },
     ])
 
     const result = await searchByCategory(businessAId, 'hola buenas tardes')
@@ -148,7 +182,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     if (!result.ok) return
 
     expect(result.data.matchedCategories).toEqual([])
-    expect(result.data.entries.map((e) => e.title)).toEqual(['Alta', 'Baja'])
+    expect(result.data.entries.map((e) => e.title)).toEqual(['Vieja', 'Nueva'])
   })
 
   it('never returns entries belonging to another business', async () => {

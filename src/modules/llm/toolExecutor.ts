@@ -56,6 +56,15 @@ const NOT_CONFIGURED_BOOK_INSTRUCTION =
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
 
+// The model must offer exactly two concrete times (see "Consultas de horario y
+// disponibilidad" in the system prompt), and an open Saturday can return 20+
+// slots. Handing it the full list invites either a wall of hours or a reply
+// truncated by max_tokens, so only two ever cross the boundary.
+//
+// The cap lives here and NOT in appointment.service: the domain result stays
+// truthful about the schedule: this is a presentation rule for the LLM.
+const MAX_SLOTS_OFFERED = 2
+
 export async function executeTool(
   name: string,
   args: unknown,
@@ -96,7 +105,20 @@ export async function executeTool(
           error: r.error.code,
         }
       }
-      return { result: JSON.stringify(r.data) }
+
+      // Spread first so `closedReason` (set when the day is closed) survives.
+      const allSlots = r.data.availableSlots
+      const offered = allSlots.slice(0, MAX_SLOTS_OFFERED)
+      const remaining = allSlots.length - offered.length
+      return {
+        result: JSON.stringify({
+          ...r.data,
+          availableSlots: offered,
+          ...(remaining > 0
+            ? { moreSlots: `y ${remaining} horarios más disponibles ese día` }
+            : {}),
+        }),
+      }
     }
 
     if (name === 'book_appointment') {
