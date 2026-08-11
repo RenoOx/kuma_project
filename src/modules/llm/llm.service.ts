@@ -21,7 +21,11 @@ import { kumaTools } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
 const TEMPERATURE = 0.4
-const MAX_TOKENS = 300
+// Raised from 300: a catalogue answer that lists up to 8 services with names
+// and prices does not fit in 300, and the reply reached the customer cut off
+// mid-item. Only the customer flow needs the extra room — ownerAssistant keeps
+// its own budget.
+const MAX_TOKENS = 600
 const HISTORY_LIMIT = 20
 const MAX_TOOL_ITERATIONS = 5
 const OPENAI_TIMEOUT_MS = 30_000
