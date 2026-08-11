@@ -60,6 +60,12 @@ const specialDaySchema = z.object({
 // durationMinutes is null when the service has no fixed length. Slot math and
 // calendar events then fall back to slotDurationMinutes — see
 // resolveServiceDurationMinutes, which is the only supported way to read it.
+//
+// referenceUrl points at whatever the business already uses to show the work
+// (Canva deck, Drive folder, portfolio). It only makes sense for
+// evaluation-first services, where the customer needs to see examples before
+// any price can be quoted, so the admin form only offers it there. We validate
+// the URL shape and nothing else — the destination is the owner's business.
 const serviceSchema = z
   .object({
     name: z.string().min(1),
@@ -80,6 +86,7 @@ const serviceSchema = z
       .nullish()
       .transform((v) => v ?? null),
     requiresEvaluation: z.boolean().default(false),
+    referenceUrl: z.string().url().optional(),
   })
   .refine((s) => s.requiresEvaluation || s.priceMin !== null, {
     message: 'priceMin is required unless the service requires evaluation',
@@ -102,10 +109,19 @@ const botPausedSchema = z.object({
   reason: z.string().optional(),
 })
 
+// How the business receives customers, which decides whether Emma treats a
+// booking as the only way in or as one of two options:
+//   - appointments_only → by appointment only. Emma's original behaviour.
+//   - hybrid            → walk-ins by arrival order AND optional appointments.
+// Defaults to appointments_only so businesses configured before this field
+// existed keep their exact behaviour without a data migration.
+const appointmentModeSchema = z.enum(['appointments_only', 'hybrid']).default('appointments_only')
+
 export const businessSettingsSchema = z.object({
   operatingHours: operatingHoursSchema,
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
+  appointmentMode: appointmentModeSchema,
   // Optional + nullable so the owner can both leave it unset and explicitly
   // clear it back to null via `resume_bot`.
   botPaused: botPausedSchema.nullable().optional(),
@@ -124,6 +140,7 @@ export type DayBreak = z.infer<typeof breakSchema>
 export type Service = z.infer<typeof serviceSchema>
 export type BotPausedState = z.infer<typeof botPausedSchema>
 export type SpecialDay = z.infer<typeof specialDaySchema>
+export type AppointmentMode = z.infer<typeof appointmentModeSchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
 
 // Default lead time when the business hasn't set its own value.

@@ -8,6 +8,7 @@ import { NotConfiguredError } from '@/shared/errors.js'
 import { assert, describe, expect, it } from 'vitest'
 
 const BASE_SETTINGS: BusinessSettings = {
+  appointmentMode: 'appointments_only',
   operatingHours: {
     monday: { open: '09:00', close: '19:00' },
     tuesday: { open: '09:00', close: '19:00' },

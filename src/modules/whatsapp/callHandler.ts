@@ -5,6 +5,7 @@ import * as customerService from '@/modules/customer/customer.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 import type { IncomingCall } from './baileys.client.js'
+import { sendWithPresence } from './handler.js'
 import { pickCallRejectedReply } from './messageKind.js'
 
 export interface CallDeps {
@@ -122,8 +123,11 @@ export async function handleIncomingCall(
     }
   }
 
+  // Anti-ban timing applies here too: the follow-up reaches a customer exactly
+  // like every reply in handler.ts does. The call was already rejected above, so
+  // nobody is left ringing while this waits.
   try {
-    await deps.send(call.from, reply)
+    await sendWithPresence({ businessId, jid: call.from, text: reply, send: deps.send })
     log.info({ phone }, 'post-call follow-up sent')
   } catch (err) {
     log.error({ err, phone }, 'failed to send post-call follow-up')

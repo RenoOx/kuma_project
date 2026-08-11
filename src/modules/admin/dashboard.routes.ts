@@ -263,39 +263,38 @@ function renderDayRow(key: DayKey, label: string, hours: DayHours): string {
   </tr>`
 }
 
-function renderServiceRows(services: Service[]): string {
-  if (services.length === 0) {
-    return `<div class="service-row" id="service-row-0">
-      <input type="text" class="form-input" name="service_0_name" data-field="name"
-        placeholder="ej. Corte de cabello" style="flex:1">
-      <input type="number" class="form-input" name="service_0_duration" data-field="duration"
-        min="5" max="480" placeholder="Min" style="width:80px">
-      <input type="number" class="form-input" name="service_0_price_min" data-field="price_min"
-        min="0" step="0.01" placeholder="Precio mínimo (S/)" style="width:130px">
-      <input type="number" class="form-input" name="service_0_price_max" data-field="price_max"
-        min="0" step="0.01" placeholder="Precio máximo (S/)" style="width:130px">
-      <label class="service-eval"><input type="checkbox" name="service_0_requires_evaluation"
-        data-field="requires_evaluation"> Requiere evaluación previa</label>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
-    </div>`
-  }
-  return services
-    .map(
-      (s, i) => `<div class="service-row" id="service-row-${i}">
+// The reference-link row only makes sense for evaluation-first services, so it
+// starts hidden and toggleServiceRef shows it with the checkbox. It keeps its
+// value while hidden on purpose: unchecking by accident must not silently drop
+// a link the owner already saved.
+function renderServiceRow(i: number, s?: Service): string {
+  const requiresEvaluation = s?.requiresEvaluation ?? false
+  const refHidden = requiresEvaluation ? '' : 'display:none;'
+
+  return `<div class="service-row" id="service-row-${i}">
       <input type="text" class="form-input" name="service_${i}_name" data-field="name"
-        value="${esc(s.name)}" placeholder="ej. Corte de cabello" style="flex:1" required>
+        value="${esc(s?.name ?? '')}" placeholder="ej. Corte de cabello" style="flex:1"${s ? ' required' : ''}>
       <input type="number" class="form-input" name="service_${i}_duration" data-field="duration"
-        min="5" max="480" value="${s.durationMinutes ?? ''}" placeholder="Min" style="width:80px">
+        min="5" max="480" value="${s?.durationMinutes ?? ''}" placeholder="ej. 45" style="width:90px">
       <input type="number" class="form-input" name="service_${i}_price_min" data-field="price_min"
-        min="0" step="0.01" value="${s.priceMin ?? ''}" placeholder="Precio mínimo (S/)" style="width:130px">
+        min="0" step="0.01" value="${s?.priceMin ?? ''}" placeholder="Precio mínimo (S/)" style="width:130px">
       <input type="number" class="form-input" name="service_${i}_price_max" data-field="price_max"
-        min="0" step="0.01" value="${s.priceMax ?? ''}" placeholder="Precio máximo (S/)" style="width:130px">
+        min="0" step="0.01" value="${s?.priceMax ?? ''}" placeholder="Precio máximo (S/)" style="width:130px">
       <label class="service-eval"><input type="checkbox" name="service_${i}_requires_evaluation"
-        data-field="requires_evaluation"${s.requiresEvaluation ? ' checked' : ''}> Requiere evaluación previa</label>
+        data-field="requires_evaluation"${requiresEvaluation ? ' checked' : ''}
+        onchange="toggleServiceRef(this)"> Requiere evaluación previa</label>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
-    </div>`,
-    )
-    .join('')
+      <div class="service-ref" data-ref-row style="${refHidden}">
+        <input type="url" class="form-input" name="service_${i}_reference_url" data-field="reference_url"
+          value="${esc(s?.referenceUrl ?? '')}"
+          placeholder="Link de referencia (Canva, Drive, portafolio...)">
+      </div>
+    </div>`
+}
+
+function renderServiceRows(services: Service[]): string {
+  if (services.length === 0) return renderServiceRow(0)
+  return services.map((s, i) => renderServiceRow(i, s)).join('')
 }
 
 type SpecialDayRow = { date: string; label?: string; hours: DayHours }
@@ -339,6 +338,35 @@ function optionalNumberField(formData: FormData, key: string): number | null {
   return Number.isNaN(parsed) ? null : parsed
 }
 
+// referenceUrl is `.optional()` (not nullable) in the schema, so an empty input
+// has to disappear from the object entirely rather than become null.
+function optionalStringField(formData: FormData, key: string): string | undefined {
+  return formData.get(key)?.toString().trim() || undefined
+}
+
+// Zod issue → something the business owner can act on. Only the cases an owner
+// actually hits are translated; anything else falls back to the raw path so a
+// new validation rule never renders as an empty message.
+function humanizeSettingsIssue(path: string, message: string): string {
+  const service = /^services\.(\d+)\.(\w+)$/.exec(path)
+  if (service) {
+    const label = `Servicio ${Number(service[1]) + 1}`
+    switch (service[2]) {
+      case 'priceMin':
+        return `${label}: falta el precio mínimo. Si el precio depende del caso, marcá "Requiere evaluación previa".`
+      case 'priceMax':
+        return `${label}: el precio máximo no puede ser menor que el mínimo.`
+      case 'referenceUrl':
+        return `${label}: el link de referencia debe ser una URL completa (empezando con https://).`
+      case 'name':
+        return `${label}: falta el nombre.`
+      default:
+        return `${label}: ${message}`
+    }
+  }
+  return path === '' ? message : `${path}: ${message}`
+}
+
 async function parseSettingsFromForm(
   formData: FormData,
 ): Promise<{ ok: true; data: BusinessSettings } | { ok: false; errors: string[] }> {
@@ -371,12 +399,14 @@ async function parseSettingsFromForm(
   for (let i = 0; i < serviceCount; i++) {
     const name = formData.get(`service_${i}_name`)?.toString().trim() ?? ''
     if (!name) continue
+    const referenceUrl = optionalStringField(formData, `service_${i}_reference_url`)
     services.push({
       name,
       durationMinutes: optionalNumberField(formData, `service_${i}_duration`),
       priceMin: optionalNumberField(formData, `service_${i}_price_min`),
       priceMax: optionalNumberField(formData, `service_${i}_price_max`),
       requiresEvaluation: formData.get(`service_${i}_requires_evaluation`) === 'on',
+      ...(referenceUrl ? { referenceUrl } : {}),
     })
   }
 
@@ -401,10 +431,16 @@ async function parseSettingsFromForm(
     })
   }
 
+  // Anything other than the explicit 'hybrid' radio falls back to the schema
+  // default, so a malformed post can never silently flip a business to walk-ins.
+  const appointmentMode =
+    formData.get('appointmentMode')?.toString() === 'hybrid' ? 'hybrid' : 'appointments_only'
+
   const raw = {
     operatingHours,
     slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
     services,
+    appointmentMode,
     ...(minNotice !== undefined && !isNaN(minNotice) ? { minBookingNoticeMinutes: minNotice } : {}),
     ...(specialDays.length > 0 ? { specialDays } : {}),
   }
@@ -413,9 +449,7 @@ async function parseSettingsFromForm(
   if (!parsed.success) {
     return {
       ok: false,
-      errors: parsed.error.issues.map((i) =>
-        i.path.length === 0 ? i.message : `${i.path.join('.')}: ${i.message}`,
-      ),
+      errors: parsed.error.issues.map((i) => humanizeSettingsIssue(i.path.join('.'), i.message)),
     }
   }
   return { ok: true, data: parsed.data }
@@ -513,6 +547,14 @@ tr:hover td{background:#fafaf8}
 .service-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap}
 .service-eval{display:flex;align-items:center;gap:.35rem;font-size:12px;color:#6b7280;white-space:nowrap}
 .service-eval input{margin:0}
+.service-ref{flex-basis:100%;margin:-.15rem 0 .35rem}
+.service-ref .form-input{font-size:13px}
+.mode-options{display:flex;flex-direction:column;gap:.6rem}
+.mode-option{display:flex;gap:.6rem;align-items:flex-start;padding:.75rem .9rem;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer}
+.mode-option:hover{background:#fafaf8}
+.mode-option input{margin-top:.2rem;flex-shrink:0}
+.mode-option-title{font-size:13px;font-weight:600;color:#0a0f0d}
+.mode-option-desc{font-size:12px;color:#6b7280;margin-top:.1rem}
 .form-actions{display:flex;gap:.75rem;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid #f3f4f6}
 `
 
@@ -1184,6 +1226,9 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
 
   const slotDuration = raw?.slotDurationMinutes ?? 30
   const minNotice = raw?.minBookingNoticeMinutes ?? 30
+  // Unvalidated jsonb: a business saved before this field existed has no mode,
+  // and the visual default has to match the schema default.
+  const isHybrid = raw?.appointmentMode === 'hybrid'
   const initialServiceCount = Math.max(services.length, 1)
   const initialSpecialDayCount = specialDays.length
 
@@ -1303,6 +1348,34 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       </div>
 
       <div class="card" style="margin-bottom:1rem">
+        <div class="card-header"><span class="card-title">Modo de atención</span></div>
+        <div class="card-body">
+          <div class="mode-options">
+            <label class="mode-option">
+              <input type="radio" name="appointmentMode" value="appointments_only"
+                ${isHybrid ? '' : 'checked'}>
+              <span>
+                <span class="mode-option-title">Solo con cita previa</span>
+                <span class="mode-option-desc" style="display:block">
+                  Emma siempre ofrece agendar. Es el modo por defecto.
+                </span>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="appointmentMode" value="hybrid" ${isHybrid ? 'checked' : ''}>
+              <span>
+                <span class="mode-option-title">Presencial + citas opcionales</span>
+                <span class="mode-option-desc" style="display:block">
+                  Atienden por orden de llegada y además aceptan reservas. Emma pregunta
+                  al cliente qué prefiere en vez de asumir que quiere cita.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">Días especiales</span></div>
         <div class="card-body">
           <p class="form-hint" style="margin-bottom:.75rem">Feriados u horarios puntuales que reemplazan el horario semanal para una fecha específica.</p>
@@ -1319,9 +1392,13 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">Servicios</span></div>
         <div class="card-body">
+          <p class="form-hint" style="margin-bottom:.75rem">
+            La duración es opcional: si la dejás vacía, ese servicio no tiene duración propia.
+            El precio mínimo es obligatorio salvo que marques "Requiere evaluación previa".
+          </p>
           <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
             <span style="flex:1;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Servicio</span>
-            <span style="width:80px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Duración (min)</span>
+            <span style="width:90px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Duración (minutos)</span>
             <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio mín. (S/)</span>
             <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio máx. (S/)</span>
             <span style="width:32px"></span>
@@ -1462,16 +1539,28 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         '<input type="text" class="form-input" name="service_' + idx + '_name" data-field="name"' +
         ' placeholder="ej. Corte de cabello" style="flex:1" required>' +
         '<input type="number" class="form-input" name="service_' + idx + '_duration" data-field="duration"' +
-        ' min="5" max="480" placeholder="Min" style="width:80px">' +
+        ' min="5" max="480" placeholder="ej. 45" style="width:90px">' +
         '<input type="number" class="form-input" name="service_' + idx + '_price_min" data-field="price_min"' +
         ' min="0" step="0.01" placeholder="Precio mínimo (S/)" style="width:130px">' +
         '<input type="number" class="form-input" name="service_' + idx + '_price_max" data-field="price_max"' +
         ' min="0" step="0.01" placeholder="Precio máximo (S/)" style="width:130px">' +
         '<label class="service-eval"><input type="checkbox" name="service_' + idx + '_requires_evaluation"' +
-        ' data-field="requires_evaluation"> Requiere evaluación previa</label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>';
+        ' data-field="requires_evaluation" onchange="toggleServiceRef(this)"> Requiere evaluación previa</label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>' +
+        '<div class="service-ref" data-ref-row style="display:none">' +
+        '<input type="url" class="form-input" name="service_' + idx + '_reference_url"' +
+        ' data-field="reference_url" placeholder="Link de referencia (Canva, Drive, portafolio...)">' +
+        '</div>';
       document.getElementById('services-container').appendChild(row);
       document.getElementById('service_count').value = _svcCounter;
+    }
+
+    // The reference link is only meaningful for evaluation-first services.
+    // Hiding keeps the value: unchecking by accident must not drop a saved link.
+    function toggleServiceRef(checkbox) {
+      const row = checkbox.closest('.service-row');
+      const ref = row.querySelector('[data-ref-row]');
+      if (ref) ref.style.display = checkbox.checked ? '' : 'none';
     }
 
     function removeService(btn) {
@@ -1492,6 +1581,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         row.querySelector('[data-field="price_min"]').name = 'service_' + i + '_price_min';
         row.querySelector('[data-field="price_max"]').name = 'service_' + i + '_price_max';
         row.querySelector('[data-field="requires_evaluation"]').name = 'service_' + i + '_requires_evaluation';
+        row.querySelector('[data-field="reference_url"]').name = 'service_' + i + '_reference_url';
       });
       _svcCounter = rows.length;
       document.getElementById('service_count').value = _svcCounter;

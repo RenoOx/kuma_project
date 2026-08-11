@@ -9,12 +9,14 @@ import * as llmService from "@/modules/llm/llm.service.js";
 import * as messageService from "@/modules/message/message.service.js";
 import * as ownerAssistantService from "@/modules/ownerAssistant/ownerAssistant.service.js";
 import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
+import * as clientRegistry from "@/modules/whatsapp/clientRegistry.js";
 import {
   classifyIncoming,
   describeFormat,
   replyForFormat,
   type UnsupportedFormat,
 } from "@/modules/whatsapp/messageKind.js";
+import { humanDelay } from "@/shared/humanDelay.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
@@ -32,6 +34,63 @@ export type SendFn = (jid: string, text: string) => Promise<void>
 // Structural subset of the Pino logger, so helpers accept a child logger
 // without fighting Pino's generics over custom-level type parameters.
 type HandlerLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
+
+// ── Anti-ban layer ───────────────────────────────
+// Este número pertenece al cliente. Un baneo de
+// Meta durante el trial destruye la confianza y
+// el contrato. Tres reglas no negociables:
+// 1. humanDelay() antes de toda respuesta al cliente
+// 2. sendPresenceUpdate composing → paused siempre
+// 3. NUNCA usar este número para mensajes masivos,
+//    campañas, broadcasts ni listas de difusión.
+//    500 mensajes en un minuto = baneo inmediato.
+// ────────────────────────────────────────────────
+
+// How long the "typing…" indicator stays up before the text lands. Stacks on
+// top of humanDelay, so the customer perceives 3–4.5s total.
+const COMPOSING_HOLD_MS = 1500
+
+/**
+ * Sends a CUSTOMER-facing message with human-looking timing.
+ *
+ * Exported because callHandler.ts sends the post-call follow-up, which reaches
+ * a customer just like anything in this file does.
+ *
+ * The socket is reached through the registry rather than passed in: `send` is a
+ * bound `(jid, text)` closure with no presence capability, and `WhatsappClient`
+ * exposes the raw `sock`. A missing client (not yet connected, or mid-reconnect)
+ * degrades to no presence rather than blocking the message.
+ *
+ * Presence failures are swallowed on purpose — "typing…" is cosmetic, and losing
+ * the actual reply over it would be a far worse bug than looking robotic.
+ */
+export async function sendWithPresence(params: {
+  businessId: string;
+  jid: string;
+  text: string;
+  send: SendFn;
+}): Promise<void> {
+  const { businessId, jid, text, send } = params;
+
+  await humanDelay();
+
+  const sock = clientRegistry.getClient(businessId)?.sock;
+  try {
+    await sock?.sendPresenceUpdate("composing", jid);
+    await new Promise((resolve) => setTimeout(resolve, COMPOSING_HOLD_MS));
+  } catch {
+    // Silent by contract: never block the message over a presence hiccup.
+  }
+
+  // Deliberately NOT wrapped: callers already handle send failures and log them.
+  await send(jid, text);
+
+  try {
+    await sock?.sendPresenceUpdate("paused", jid);
+  } catch {
+    // Silent by contract.
+  }
+}
 
 // Converts any stray Markdown that GPT produces into WhatsApp-native formatting.
 // Acts as a hard backstop so the prompt rules never reach the customer as
@@ -115,6 +174,10 @@ async function recordUnsupportedEvent(
 
 // Acknowledges an unreadable message — the "text only" notice for most
 // formats, a photo-specific line for images — subject to the cooldown.
+//
+// `humanize` carries the anti-ban timing and MUST be true for customers and
+// false for the owner: this helper serves both flows, and the owner poking their
+// own bot should not sit through a fake 4.5s of typing.
 async function respondUnsupportedFormat(params: {
   businessId: string;
   conversationId: string;
@@ -122,8 +185,9 @@ async function respondUnsupportedFormat(params: {
   jid: string;
   send: SendFn;
   log: HandlerLogger;
+  humanize: boolean;
 }): Promise<void> {
-  const { businessId, conversationId, format, jid, send, log } = params;
+  const { businessId, conversationId, format, jid, send, log, humanize } = params;
 
   if (!shouldSendUnsupportedNotice(conversationId)) {
     log.info({ conversationId, format }, "unsupported format within cooldown; event only");
@@ -142,7 +206,11 @@ async function respondUnsupportedFormat(params: {
   }
 
   try {
-    await send(jid, reply);
+    if (humanize) {
+      await sendWithPresence({ businessId, jid, text: reply, send });
+    } else {
+      await send(jid, reply);
+    }
     log.info({ conversationId, format }, "unsupported format notice sent");
   } catch (err) {
     log.error({ err, jid, format }, "failed to send unsupported format notice");
@@ -279,6 +347,8 @@ async function processMessage(
         jid,
         send,
         log,
+        // Owner flow: no anti-ban timing, this is an internal conversation.
+        humanize: false,
       });
       return;
     }
@@ -343,7 +413,9 @@ async function processMessage(
       { err: customerResult.error.logContext, code: customerResult.error.code },
       "getOrCreate customer failed",
     );
-    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
+    try {
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send });
+    } catch {}
     return;
   }
   const customer = customerResult.data;
@@ -360,7 +432,9 @@ async function processMessage(
       },
       "getOrCreateOpen conversation failed",
     );
-    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
+    try {
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send });
+    } catch {}
     return;
   }
   const conversation = conversationResult.data;
@@ -376,7 +450,9 @@ async function processMessage(
       { err: userMsgResult.error.logContext, code: userMsgResult.error.code },
       "append user message failed",
     );
-    try { await send(jid, LLM_FALLBACK_REPLY) } catch {}
+    try {
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send });
+    } catch {}
     return;
   }
 
@@ -444,7 +520,7 @@ async function processMessage(
     });
 
     try {
-      await send(jid, PAUSED_REPLY);
+      await sendWithPresence({ businessId, jid, text: PAUSED_REPLY, send });
     } catch (err) {
       log.error({ err, jid }, "failed to send paused canned reply");
     }
@@ -460,6 +536,7 @@ async function processMessage(
       jid,
       send,
       log,
+      humanize: true,
     });
 
     // A photo is almost always a quote request, and the reply we just sent
@@ -501,7 +578,7 @@ async function processMessage(
         log.error({ code: persisted.error.code }, "append escalated canned reply failed");
       }
       try {
-        await send(jid, ESCALATED_REPLY);
+        await sendWithPresence({ businessId, jid, text: ESCALATED_REPLY, send });
         log.info({ conversationId: conversation.id }, "escalated: canned reply sent, LLM skipped");
       } catch (err) {
         log.error({ err, jid }, "failed to send escalated canned reply");
@@ -564,7 +641,7 @@ async function processMessage(
     "about to send reply over whatsapp",
   );
   try {
-    await send(jid, replyText);
+    await sendWithPresence({ businessId, jid, text: replyText, send });
     log.info({ jid }, "reply sent successfully");
   } catch (err) {
     log.error({ err, jid }, "failed to send reply over whatsapp");

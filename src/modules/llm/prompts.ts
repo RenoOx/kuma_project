@@ -1,6 +1,6 @@
 import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
 import { formatServicePrice } from '@/modules/business/business.settings.js'
-import type { BusinessSettings, DayKey } from '@/modules/business/business.settings.js'
+import type { AppointmentMode, BusinessSettings, DayKey } from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(
@@ -102,11 +102,27 @@ export const CTA_VARIANTS: ReadonlyArray<string> = [
   '¿Agendamos?',
 ]
 
+// A hybrid business takes walk-ins, so every invitation has to leave both doors
+// open. The appointments_only set assumes booking is the only way in, which in
+// hybrid mode contradicts the flow block ("nunca asumas que quiere cita").
+export const HYBRID_CTA_VARIANTS: ReadonlyArray<string> = [
+  '¿Te agendo una cita o prefieres venir directo? 😊',
+  '¿Vienes hoy o te reservo un horario? 😊',
+]
+
+function ctaVariantsFor(mode: AppointmentMode): ReadonlyArray<string> {
+  return mode === 'hybrid' ? HYBRID_CTA_VARIANTS : CTA_VARIANTS
+}
+
 // randomFn es inyectable para tests deterministas; en producción usa Math.random.
-export function pickCallToAction(randomFn: () => number = Math.random): string {
-  const index = Math.floor(randomFn() * CTA_VARIANTS.length)
-  const variant = CTA_VARIANTS[index] ?? CTA_VARIANTS[0]
-  if (!variant) throw new Error('CTA_VARIANTS must not be empty')
+export function pickCallToAction(
+  mode: AppointmentMode = 'appointments_only',
+  randomFn: () => number = Math.random,
+): string {
+  const variants = ctaVariantsFor(mode)
+  const index = Math.floor(randomFn() * variants.length)
+  const variant = variants[index] ?? variants[0]
+  if (!variant) throw new Error('CTA variants must not be empty')
   return variant
 }
 
@@ -150,8 +166,11 @@ function isBookingFlowActive(history: Message[]): boolean {
   )
 }
 
+// Checks both sets regardless of the current mode: a business that switched
+// modes mid-conversation still has its older invitations in the history, and
+// missing them would restart the quiet-turn count and invite twice in a row.
 function containsCallToAction(text: string): boolean {
-  return CTA_VARIANTS.some((variant) => text.includes(variant))
+  return [...CTA_VARIANTS, ...HYBRID_CTA_VARIANTS].some((variant) => text.includes(variant))
 }
 
 export type CallToActionDecision =
@@ -166,6 +185,7 @@ export type CallToActionDecision =
  */
 export function decideCallToAction(
   history: Message[],
+  mode: AppointmentMode = 'appointments_only',
   randomFn: () => number = Math.random,
 ): CallToActionDecision {
   const assistantTurns = history.filter(
@@ -174,7 +194,7 @@ export function decideCallToAction(
 
   // Nothing said yet → this is the welcome message, which always invites.
   if (assistantTurns.length === 0) {
-    return { include: true, text: pickCallToAction(randomFn), reason: 'welcome' }
+    return { include: true, text: pickCallToAction(mode, randomFn), reason: 'welcome' }
   }
 
   if (isBookingFlowActive(history)) {
@@ -191,7 +211,7 @@ export function decideCallToAction(
   }
 
   if (quietTurns >= CTA_QUIET_TURNS) {
-    return { include: true, text: pickCallToAction(randomFn), reason: 'stalled' }
+    return { include: true, text: pickCallToAction(mode, randomFn), reason: 'stalled' }
   }
   return { include: false, reason: 'just_answered' }
 }
@@ -252,7 +272,8 @@ function renderServices(services: BusinessSettings['services']): string {
   return services
     .map((s) => {
       const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
-      return `- ${s.name}${duration} — ${formatServicePrice(s)}`
+      const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
+      return `- ${s.name}${duration} — ${formatServicePrice(s)}${reference}`
     })
     .join('\n')
 }
@@ -291,6 +312,38 @@ function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): st
   ].join('\n')
 }
 
+// ── Availability block, one per appointment mode ─────────────────────────────
+//
+// These are mutually exclusive: exactly one reaches the model. In
+// appointments_only a booking is the only way in, so every availability
+// question funnels into check_availability. In hybrid the customer can simply
+// show up, so the model must ask which one they want instead of assuming.
+
+const APPOINTMENTS_ONLY_AVAILABILITY_BLOCK = [
+  '# Consultas de horario y disponibilidad',
+  '- SIEMPRE llamá check_availability para obtener los slots concretos del día pedido. Nunca respondas solo con el rango general de apertura ("abrimos de 9:00 a 20:00").',
+  '- Cuando tengas horarios disponibles, propone SIEMPRE exactamente dos opciones concretas con hora específica. Nunca listes más de dos. Nunca uses rangos. Ejemplo: "¿Te va mejor a las 10:00am o a las 3:00pm?"',
+  '- Presentá los resultados como horas puntuales y esperá su elección antes de agendar.',
+  '- Si el cliente ya preguntó una vez y solo recibió el rango general, al repreguntar llamá check_availability sin volver a repetir el rango.',
+  '- Si no especificó fecha o servicio, preguntá eso primero y después llamá check_availability.',
+]
+
+const HYBRID_AVAILABILITY_BLOCK = [
+  '# Consultas de horario y disponibilidad',
+  'Modo de atención: este negocio atiende de forma presencial por orden de llegada Y también acepta citas opcionales.',
+  '',
+  'Cuando un cliente pregunte por disponibilidad o quiera venir, seguí este flujo exacto:',
+  '',
+  '1. Primero informá el horario de atención.',
+  '2. Luego preguntá: "¿Prefieres venir directamente o te agendo una cita para asegurar tu horario?"',
+  '3. Si el cliente elige venir directo: confirmá el horario y despedite cálidamente. NO llames check_availability ni book_appointment.',
+  '4. Si el cliente quiere cita: usá el flujo normal de check_availability y book_appointment, con las mismas reglas de siempre (dos opciones concretas de hora, confirmar fecha + hora + servicio antes de agendar).',
+  '5. Si el cliente no sabe o no responde claro: repetí la pregunta de forma más simple: "¿Te agendo o vienes directo? 😊"',
+  '',
+  'NUNCA asumas que el cliente quiere cita sin que lo diga explícitamente.',
+  'NUNCA digas que no hay disponibilidad: aunque no queden turnos libres, el cliente siempre puede venir directo por orden de llegada. Si check_availability no devuelve slots, ofrecé venir presencial en lugar de cerrar la puerta.',
+]
+
 const NOT_CONFIGURED_BLOCK = [
   '# ATENCIÓN — negocio sin configuración operativa',
   'Este negocio aún no completó su configuración (horarios, servicios, precios específicos).',
@@ -313,9 +366,12 @@ function buildStaticBody(
   settings: BusinessSettings | null,
   todayISO: string,
 ): string[] {
+  const mode: AppointmentMode = settings?.appointmentMode ?? 'appointments_only'
+
   return [
     '# Identidad',
     `Eres el asistente de ${business.name}. Respondes por WhatsApp.`,
+    ...(mode === 'hybrid' ? ['Modalidad: atención presencial y con cita previa'] : []),
     '',
     '# Tono',
     'Habla en español peruano neutro, tutea, sé breve (1-3 frases por respuesta), cálido pero profesional.',
@@ -391,6 +447,11 @@ function buildStaticBody(
     '',
     'Si un servicio dice "requiere evaluación previa" y el cliente insiste en un número, sostené la respuesta: no tenés ese dato hasta ver el caso. Inventar un precio es peor que no darlo.',
     '',
+    'Si el servicio tiene link de referencia, compartilo cuando el cliente pregunte por ese servicio o su precio:',
+    '  "Aquí puedes ver más: [url] 😊"',
+    'Compartí el link ANTES de pedir foto o cotizar — es la primera respuesta visual que el cliente recibe.',
+    'Pegá la URL exactamente como está en la lista de arriba, sin acortarla ni modificarla. Si el servicio no tiene link, no inventes uno ni ofrezcas mandar fotos que no tenés.',
+    '',
     '# Reglas generales',
     '1. Solo respondés con información que está en tu conocimiento o en la configuración operativa de arriba. Nunca inventes precios, horarios ni servicios.',
     '2. Si te preguntan algo que no está ahí (método de pago, estacionamiento, servicio a domicilio, o cualquier dato operativo no listado), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo no confirmado (no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés el dato: eso es inventar tanto como dar un dato falso).',
@@ -420,12 +481,7 @@ function buildStaticBody(
     '- Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado: cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
     '- Si ninguno se parece, no asumas: "Cuéntame un poco más sobre lo que buscas para poder ayudarte mejor."',
     '',
-    '# Consultas de horario y disponibilidad',
-    '- SIEMPRE llamá check_availability para obtener los slots concretos del día pedido. Nunca respondas solo con el rango general de apertura ("abrimos de 9:00 a 20:00").',
-    '- Cuando tengas horarios disponibles, propone SIEMPRE exactamente dos opciones concretas con hora específica. Nunca listes más de dos. Nunca uses rangos. Ejemplo: "¿Te va mejor a las 10:00am o a las 3:00pm?"',
-    '- Presentá los resultados como horas puntuales y esperá su elección antes de agendar.',
-    '- Si el cliente ya preguntó una vez y solo recibió el rango general, al repreguntar llamá check_availability sin volver a repetir el rango.',
-    '- Si no especificó fecha o servicio, preguntá eso primero y después llamá check_availability.',
+    ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
   ]
 }
 
@@ -449,10 +505,15 @@ function buildVariableTail(
   ]
 
   if (cta.include) {
+    // The hybrid invitations already carry their own 😊. Telling the model to
+    // add one on top produced "¿…vienes directo? 😊 😊".
+    const carriesEmoji = cta.text.includes('😊')
     lines.push(
       `Terminá tu respuesta con esta invitación exacta, sin modificarla ni parafrasearla: "${cta.text}"`,
-      'Separala del resto con una línea en blanco. Podés acompañarla con 😊.',
-      `  Ejemplo: "Los tratamientos faciales cuestan de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación.\\n\\n${cta.text} 😊"`,
+      carriesEmoji
+        ? 'Separala del resto con una línea en blanco. Ya trae su emoji: no le agregues otro.'
+        : 'Separala del resto con una línea en blanco. Podés acompañarla con 😊.',
+      `  Ejemplo: "Los tratamientos faciales cuestan de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación.\\n\\n${cta.text}${carriesEmoji ? '' : ' 😊'}"`,
     )
   } else {
     lines.push(
@@ -477,7 +538,7 @@ export function buildSystemPrompt(
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
   const nowHHMM = timeInTimezone(business.timezone)
   const greeting = pickGreeting(business.name)
-  const cta = decideCallToAction(history)
+  const cta = decideCallToAction(history, settings?.appointmentMode ?? 'appointments_only')
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today),

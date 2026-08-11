@@ -33,6 +33,7 @@ function service(name: string, durationMinutes: number): Service {
 const BARBERIA: DemoProfile = {
   name: 'Imperio Barber Studio',
   settings: {
+    appointmentMode: 'appointments_only',
     slotDurationMinutes: 15,
     services: [
       service('corte clásico', 45),
@@ -83,6 +84,7 @@ const BARBERIA: DemoProfile = {
 const CONSULTORIO: DemoProfile = {
   name: 'Dental Smile',
   settings: {
+    appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
@@ -120,6 +122,7 @@ const CONSULTORIO: DemoProfile = {
 const SPA: DemoProfile = {
   name: 'Bella Vida Salón & Spa',
   settings: {
+    appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
