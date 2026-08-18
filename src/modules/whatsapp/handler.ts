@@ -17,6 +17,7 @@ import {
   type UnsupportedFormat,
 } from "@/modules/whatsapp/messageKind.js";
 import { humanDelay } from "@/shared/humanDelay.js";
+import { samePhone } from "@/shared/phone.js";
 import type { WAMessage } from "@whiskeysockets/baileys";
 
 const LLM_FALLBACK_REPLY =
@@ -357,7 +358,11 @@ async function processMessage(
   }
 
   // OWNER FLOW — bypass customer lookup, talk to the personal assistant.
-  if (business.ownerWhatsappNumber && business.ownerWhatsappNumber === phone) {
+  //
+  // Compared through samePhone, never with `===`: `phone` always carries a "+"
+  // and the stored number usually does not, so a raw comparison sent the owner
+  // down the customer path and Emma answered her own boss as a patient.
+  if (samePhone(business.ownerWhatsappNumber, phone)) {
     const ownerThread =
       await conversationService.findOrCreateOwnerThread(businessId);
     if (!ownerThread.ok) {

@@ -29,6 +29,7 @@ import {
   KB_CATEGORIES,
   KB_SEND_MODES,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
+import { normalizePhone } from '@/shared/phone.js'
 import { asc } from 'drizzle-orm'
 
 // ── Arg parser ────────────────────────────────────────────────────────────────
@@ -104,7 +105,7 @@ async function businessCreate(flags: Record<string, string>): Promise<void> {
   const result = await businessService.register({
     name: flags.name,
     whatsappNumber: flags.whatsapp,
-    ownerWhatsappNumber: flags.owner ?? null,
+    ownerWhatsappNumber: normalizePhone(flags.owner),
     ownerName: flags['owner-name'] ?? null,
     timezone: flags.timezone,
   })
@@ -120,7 +121,7 @@ async function businessUpdate(id: string, flags: Record<string, string>): Promis
 
   if (flags.name !== undefined) patch.name = flags.name
   if (flags.whatsapp !== undefined) patch.whatsappNumber = flags.whatsapp
-  if (flags.owner !== undefined) patch.ownerWhatsappNumber = flags.owner || null
+  if (flags.owner !== undefined) patch.ownerWhatsappNumber = normalizePhone(flags.owner)
   if (flags['owner-name'] !== undefined) patch.ownerName = flags['owner-name'] || null
 
   if (Object.keys(patch).length === 0) {

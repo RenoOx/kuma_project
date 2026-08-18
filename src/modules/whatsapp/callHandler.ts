@@ -4,6 +4,7 @@ import * as conversationService from '@/modules/conversation/conversation.servic
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
+import { samePhone } from '@/shared/phone.js'
 import type { IncomingCall } from './baileys.client.js'
 import { sendWithPresence } from './handler.js'
 import { pickCallRejectedReply } from './messageKind.js'
@@ -75,7 +76,8 @@ export async function handleIncomingCall(
   const business = businessResult.data
 
   // The owner calling their own bot doesn't need a sales line back.
-  const isOwner = business.ownerWhatsappNumber === phone
+  // samePhone, not `===`: same format mismatch that broke the message routing.
+  const isOwner = samePhone(business.ownerWhatsappNumber, phone)
 
   const customerResult = await customerService.getOrCreate(businessId, phone)
   if (!customerResult.ok) {

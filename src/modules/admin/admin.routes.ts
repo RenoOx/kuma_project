@@ -13,6 +13,7 @@ import {
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
+import { normalizePhone, samePhone } from '@/shared/phone.js'
 import { asc } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
@@ -37,14 +38,21 @@ const createBusinessBody = z
   .object({
     name: z.string().min(1),
     whatsappNumber: z.string().min(1),
-    ownerWhatsappNumber: z.string().min(1).nullable().optional(),
+    // Normalized on the way in so the routing comparison in whatsapp/handler
+    // always has a canonical "+digits" value to match an inbound phone against.
+    ownerWhatsappNumber: z
+      .string()
+      .min(1)
+      .transform((v) => normalizePhone(v) ?? v)
+      .nullable()
+      .optional(),
     ownerName: z.string().min(1).nullable().optional(),
     timezone: z.string().optional(),
     address: z.string().min(1).nullable().optional(),
     googleMapsUrl: z.string().url().nullable().optional(),
   })
   .refine(
-    (v) => !v.ownerWhatsappNumber || v.ownerWhatsappNumber !== v.whatsappNumber,
+    (v) => !samePhone(v.ownerWhatsappNumber, v.whatsappNumber),
     {
       message:
         'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant. Use a separate personal number for the owner.',
@@ -62,7 +70,14 @@ const patchBusinessBody = z
   .object({
     name: z.string().min(1).optional(),
     whatsappNumber: z.string().min(1).optional(),
-    ownerWhatsappNumber: z.string().min(1).nullable().optional(),
+    // Normalized on the way in so the routing comparison in whatsapp/handler
+    // always has a canonical "+digits" value to match an inbound phone against.
+    ownerWhatsappNumber: z
+      .string()
+      .min(1)
+      .transform((v) => normalizePhone(v) ?? v)
+      .nullable()
+      .optional(),
     ownerName: z.string().min(1).nullable().optional(),
     timezone: z.string().optional(),
     address: z.string().min(1).nullable().optional(),
@@ -70,7 +85,7 @@ const patchBusinessBody = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
   .refine(
-    (v) => !v.ownerWhatsappNumber || !v.whatsappNumber || v.ownerWhatsappNumber !== v.whatsappNumber,
+    (v) => !v.whatsappNumber || !samePhone(v.ownerWhatsappNumber, v.whatsappNumber),
     {
       message:
         'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant.',
@@ -190,7 +205,7 @@ adminRoutes.patch('/admin/businesses/:id', async (c) => {
   // ownerWhatsappNumber can still collide with the existing bot number.
   const effectiveOwner = body.data.ownerWhatsappNumber ?? existing.ownerWhatsappNumber
   const effectiveBot = nextNumber ?? existing.whatsappNumber
-  if (effectiveOwner && effectiveOwner === effectiveBot) {
+  if (samePhone(effectiveOwner, effectiveBot)) {
     return c.json(
       {
         error: 'validation_error',

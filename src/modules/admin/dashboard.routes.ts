@@ -39,6 +39,7 @@ import {
 } from '@/modules/whatsapp/clientRegistry.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
+import { normalizePhone, samePhone } from '@/shared/phone.js'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { rm } from 'node:fs/promises'
@@ -742,13 +743,13 @@ dashboardRoutes.get('/admin/dashboard/new', (c) => {
             <div class="form-group">
               <label class="form-label" for="whatsappNumber">Número WhatsApp del bot *</label>
               <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
-                placeholder="51XXXXXXXXX (sin + ni espacios)" required>
+                placeholder="+51987654321" required>
               <p class="form-hint">Número que usará el bot para atender clientes</p>
             </div>
             <div class="form-group">
               <label class="form-label" for="ownerWhatsappNumber">WhatsApp del dueño</label>
               <input id="ownerWhatsappNumber" name="ownerWhatsappNumber" type="text"
-                class="form-input" placeholder="51XXXXXXXXX (diferente al del bot)">
+                class="form-input" placeholder="+51987654321 (diferente al del bot)">
               <p class="form-hint">Número personal del dueño para recibir notificaciones</p>
             </div>
           </div>
@@ -789,7 +790,9 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
 
   const name = formData.get('name')?.toString().trim() ?? ''
   const whatsappNumber = formData.get('whatsappNumber')?.toString().trim() ?? ''
-  const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
+  // Stored normalized so the routing comparison in whatsapp/handler has a
+  // canonical value to match against, whatever shape the operator typed.
+  const ownerWhatsappNumber = normalizePhone(formData.get('ownerWhatsappNumber')?.toString())
   const ownerName = formData.get('ownerName')?.toString().trim() || null
   const timezone = formData.get('timezone')?.toString().trim() || 'America/Lima'
   const address = formData.get('address')?.toString().trim() || null
@@ -797,6 +800,16 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
 
   if (!name || !whatsappNumber) {
     const errMsg = encodeURIComponent('Nombre y número WhatsApp son obligatorios.')
+    return c.redirect(`/admin/dashboard/new?secret=${se}&error=${errMsg}`, 302)
+  }
+
+  // The API enforces this on its own path; the form used to let it through, and
+  // an owner sharing the bot's number never reaches the owner assistant at all
+  // (their messages come back as fromMe).
+  if (samePhone(ownerWhatsappNumber, whatsappNumber)) {
+    const errMsg = encodeURIComponent(
+      'El WhatsApp del dueño debe ser distinto al número del bot. Usá un número personal aparte.',
+    )
     return c.redirect(`/admin/dashboard/new?secret=${se}&error=${errMsg}`, 302)
   }
 
@@ -1335,7 +1348,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
             <div class="form-group">
               <label class="form-label" for="whatsappNumber">Número de WhatsApp del bot</label>
               <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
-                value="${esc(business.whatsappNumber)}" placeholder="51XXXXXXXXX" required
+                value="${esc(business.whatsappNumber)}" placeholder="+51987654321" required
                 data-original="${esc(business.whatsappNumber)}">
               <p class="form-hint" style="color:#b45309">
                 ⚠️ Cambiar este número desconecta la sesión actual y hay que escanear un QR nuevo
@@ -1353,7 +1366,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <label class="form-label" for="ownerWhatsappNumber">WhatsApp del dueño</label>
               <input id="ownerWhatsappNumber" name="ownerWhatsappNumber" type="text"
                 class="form-input" value="${esc(business.ownerWhatsappNumber ?? '')}"
-                placeholder="51XXXXXXXXX">
+                placeholder="+51987654321">
               <p class="form-hint">Diferente al número del bot</p>
             </div>
           </div>
@@ -1709,7 +1722,9 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
   const name = formData.get('name')?.toString().trim() ?? ''
   const timezone = formData.get('timezone')?.toString().trim() ?? business.timezone
   const ownerName = formData.get('ownerName')?.toString().trim() || null
-  const ownerWhatsappNumber = formData.get('ownerWhatsappNumber')?.toString().trim() || null
+  // Stored normalized so the routing comparison in whatsapp/handler has a
+  // canonical value to match against, whatever shape the operator typed.
+  const ownerWhatsappNumber = normalizePhone(formData.get('ownerWhatsappNumber')?.toString())
   const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
   const address = formData.get('address')?.toString().trim() || null
   const whatsappNumber = formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
@@ -1722,7 +1737,9 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
 
   // The bot number is logged in as `whatsappNumber`, so messages from it are
   // treated as fromMe and would never reach the owner assistant.
-  if (ownerWhatsappNumber && ownerWhatsappNumber === whatsappNumber) {
+  // samePhone, not `===`: "51999..." and "+51999..." are the same line, and
+  // letting that pass would log the bot in as its own owner.
+  if (samePhone(ownerWhatsappNumber, whatsappNumber)) {
     return configureError(
       'El WhatsApp del dueño debe ser distinto al número del bot. Usá un número personal aparte.',
     )
