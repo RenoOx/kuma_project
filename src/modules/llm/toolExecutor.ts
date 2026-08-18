@@ -77,6 +77,11 @@ interface AvailabilityBlock {
   slots: string[]
 }
 
+const AVAILABILITY_INSTRUCTION =
+  'NO listes los horarios de `slots` todavía. Respondé con los `range` de cada tramo en lenguaje natural ("Tengo disponible de 8:00am a 12:30pm y de 2:00pm a 5:00pm") y preguntá cuál le acomoda. ' +
+  'Listá los horarios exactos de un tramo SOLO cuando el cliente ya eligió ese tramo o dio una preferencia ("en la mañana", "después de las 3"). ' +
+  'Si el cliente pidió una hora puntual ("¿tienes a las 4?"), NO listes nada ni repitas la lista: fijate si esa hora está en `slots`, decile sí o no, y si está, confirmá y agendá.'
+
 // checkAvailability builds each slot with the business's UTC offset already
 // baked in, so the wall-clock time is a plain substring — no timezone math.
 function wallClock(iso: string): string {
@@ -202,6 +207,11 @@ export async function executeTool(
         result: JSON.stringify({
           ...(r.data.closedReason ? { closedReason: r.data.closedReason } : {}),
           availableBlocks: blocks,
+          // Carried WITH the data on purpose. The two-step rule also lives in the
+          // system prompt, but that sits thousands of tokens earlier while this
+          // is the last thing read before composing the reply — and handed a bare
+          // array of times, the model just lists them.
+          instruction: AVAILABILITY_INSTRUCTION,
         }),
       }
     }

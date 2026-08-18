@@ -26,7 +26,7 @@ export const ownerTools: ChatCompletionTool[] = [
     function: {
       name: 'get_appointments',
       description:
-        'Lista citas agendadas en el rango (incluyendo cliente, servicio, fecha y hora). Usar cuando el dueño pregunta "¿qué tengo mañana?", "agenda de la semana", etc.',
+        'LA AGENDA. Lista las citas ya agendadas de cualquier día o rango de días, con cliente, servicio, fecha y hora. Es la tool por defecto para CUALQUIER pregunta del dueño sobre su agenda: "¿qué citas tengo hoy?", "¿qué tengo mañana?", "agenda de la semana", "¿a quién atiendo el viernes?". Para consultar HOY, pasá la fecha de hoy en date_from y date_to. NO la confundas con list_pending_appointments: esa es solo para solicitudes sin aprobar.',
       parameters: {
         type: 'object',
         properties: {
@@ -100,7 +100,7 @@ export const ownerTools: ChatCompletionTool[] = [
     function: {
       name: 'list_pending_appointments',
       description:
-        'Lista las solicitudes de cita que están esperando la aprobación del dueño (status pendiente). Usar cuando el dueño pregunta "¿qué solicitudes tengo?", "¿hay pendientes?", o ANTES de confirmar/rechazar cuando no está claro a cuál cita se refiere.',
+        'SOLO las solicitudes sin aprobar (status pendiente), no la agenda. Usar únicamente cuando el dueño habla explícitamente de SOLICITUDES o PENDIENTES ("¿hay solicitudes?", "¿qué está pendiente de aprobar?"), o antes de confirmar/rechazar cuando no está claro a cuál se refiere. Si el dueño pregunta por sus CITAS o su AGENDA de un día, usá get_appointments, no esta.',
       parameters: {
         type: 'object',
         properties: {},
