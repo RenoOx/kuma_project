@@ -28,6 +28,12 @@ const envSchema = z.object({
     .url()
     .default("http://localhost:3000/auth/google/callback"),
   SESSIONS_DIR: z.string().default("./sessions"),
+  // How long to wait for more messages from the same sender before treating the
+  // burst as a single turn. WhatsApp users type in fragments ("te dije que
+  // todavía" / "reagendala") and the right pause is a product call that needs
+  // tuning against real conversations — hence an env var rather than a constant,
+  // so it can be changed on the platform without a redeploy. 0 disables it.
+  MESSAGE_DEBOUNCE_MS: z.coerce.number().int().min(0).max(30_000).default(4000),
   // Admin endpoints (QR page, etc.). If unset the endpoints return 501.
   ADMIN_SECRET: z.preprocess(
     (v) => (typeof v === "string" && v.length === 0 ? undefined : v),

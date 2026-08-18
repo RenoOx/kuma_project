@@ -10,6 +10,7 @@ import * as messageService from "@/modules/message/message.service.js";
 import * as ownerAssistantService from "@/modules/ownerAssistant/ownerAssistant.service.js";
 import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
 import * as clientRegistry from "@/modules/whatsapp/clientRegistry.js";
+import { bufferMessage } from "@/modules/whatsapp/messageBuffer.js";
 import {
   classifyIncoming,
   describeFormat,
@@ -756,18 +757,44 @@ export function handleIncomingMessage(
     return Promise.resolve();
   }
 
-  const payload: Payload =
-    incoming.kind === "text"
-      ? { kind: "text", text: incoming.text }
-      : { kind: "unsupported", format: incoming.format };
-
   log.info(
     incoming.kind === "text"
       ? { phone, textPreview: incoming.text.slice(0, 60) }
       : { phone, format: incoming.format },
     "handler accepted incoming message",
   );
-  return withSenderLock(`${businessId}:${phone}`, () =>
-    processMessage(raw, businessId, send, jid, phone, payload),
-  );
+
+  const senderKey = `${businessId}:${phone}`;
+
+  // Media and everything else bypasses the buffer: only text can be joined into
+  // a sentence, and holding a photo back would delay the owner's notification
+  // for no gain. A photo arriving mid-burst is therefore answered on its own,
+  // possibly before the text it came with — accepted trade-off.
+  if (incoming.kind !== "text") {
+    return withSenderLock(senderKey, () =>
+      processMessage(raw, businessId, send, jid, phone, {
+        kind: "unsupported",
+        format: incoming.format,
+      }),
+    );
+  }
+
+  // Debounce sits AFTER dedup (so repeats never enter a burst) and BEFORE the
+  // lock (holding the lock while waiting would serialise the very messages we
+  // are trying to group).
+  return bufferMessage(senderKey, incoming.text).then((joined) => {
+    if (joined === null) {
+      log.info(
+        { phone },
+        "handler: message folded into a later burst from the same sender",
+      );
+      return;
+    }
+    return withSenderLock(senderKey, () =>
+      processMessage(raw, businessId, send, jid, phone, {
+        kind: "text",
+        text: joined,
+      }),
+    );
+  });
 }
