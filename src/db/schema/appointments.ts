@@ -3,7 +3,16 @@ import { nanoid } from 'nanoid'
 import { businesses } from './businesses.js'
 import { customers } from './customers.js'
 
-export const appointmentStatuses = ['scheduled', 'confirmed', 'cancelled', 'completed'] as const
+// 'pending' is the entry point for businesses running bookingMode
+// 'requires_approval': Emma files the request and a human promotes it. Plain
+// text column, so widening this tuple needs no migration.
+export const appointmentStatuses = [
+  'pending',
+  'scheduled',
+  'confirmed',
+  'cancelled',
+  'completed',
+] as const
 export type AppointmentStatus = (typeof appointmentStatuses)[number]
 
 export const appointments = pgTable(

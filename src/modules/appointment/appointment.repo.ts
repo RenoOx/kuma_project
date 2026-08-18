@@ -5,7 +5,7 @@ import {
   type Appointment,
   type NewAppointment,
 } from '@/db/schema/index.js'
-import { and, asc, count, eq, gte, isNull, lt, lte, ne } from 'drizzle-orm'
+import { and, asc, count, eq, gte, isNull, lt, lte, ne, sql } from 'drizzle-orm'
 
 // Appointments occupying [start, end). Cancelled ones are excluded: they no
 // longer hold their slot, and counting them kept the slot blocked forever —
@@ -30,11 +30,19 @@ export async function findByBusinessAndDateRange(
     .orderBy(asc(appointments.scheduledAt))
 }
 
-// Backs the slot-conflict check in bookAppointment. Same rule as above: a
-// cancelled appointment does not conflict with a new booking on its slot.
-export async function findByDateTime(
+// First non-cancelled appointment whose own interval
+// [scheduled_at, scheduled_at + duration_minutes) overlaps [start, end).
+//
+// This is the authoritative conflict check. Matching on the start instant
+// alone — what this replaced — let a 60-min appointment at 10:00 coexist with
+// anything booked at 10:30, because only 10:00 was ever considered occupied.
+//
+// Touching boundaries do NOT overlap: an appointment ending exactly at 10:00
+// leaves 10:00 bookable, matching the semantics of overlapsBreak in the service.
+export async function findOverlapping(
   businessId: string,
-  datetime: Date,
+  start: Date,
+  end: Date,
   exec: Executor = db,
 ): Promise<Appointment | null> {
   const [row] = await exec
@@ -44,9 +52,15 @@ export async function findByDateTime(
       and(
         eq(appointments.businessId, businessId),
         ne(appointments.status, 'cancelled'),
-        eq(appointments.scheduledAt, datetime),
+        lt(appointments.scheduledAt, end),
+        // `start` is serialized by hand: inside a raw sql template drizzle has
+        // no column type to encode against and would hand postgres-js the Date
+        // object itself, which it refuses. The ISO string carries its UTC
+        // offset, so the cast is unambiguous.
+        sql`${appointments.scheduledAt} + (${appointments.durationMinutes} * interval '1 minute') > ${start.toISOString()}::timestamptz`,
       ),
     )
+    .orderBy(asc(appointments.scheduledAt))
     .limit(1)
   return row ?? null
 }

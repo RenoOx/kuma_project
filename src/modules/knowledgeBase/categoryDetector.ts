@@ -1,4 +1,5 @@
 import type { KbCategory } from '@/db/schema/index.js'
+import type { Niche } from '@/modules/business/business.settings.js'
 
 // Deterministic keyword routing: given a customer message, guess which KB
 // categories are relevant so the prompt loads a handful of entries instead of
@@ -8,8 +9,13 @@ import type { KbCategory } from '@/db/schema/index.js'
 // Misses are cheap: the search service falls back to the oldest active entries
 // when this returns nothing, so Emma is never left with an empty knowledge block
 // just because the wording was unusual.
+//
+// Keywords are niche-aware for servicios/precios/informacion_general — a
+// dental clinic and a barbershop don't share a vocabulary for what they sell.
+// ubicacion/politicas/contacto stay identical across niches: "dónde quedan" or
+// "aceptan tarjeta" means the same thing regardless of business type.
 
-const KEYWORDS: Record<KbCategory, readonly string[]> = {
+const COMMON_KEYWORDS: Record<'ubicacion' | 'politicas' | 'contacto', readonly string[]> = {
   ubicacion: [
     'donde',
     'ubicacion',
@@ -31,47 +37,6 @@ const KEYWORDS: Record<KbCategory, readonly string[]> = {
     'estacionamiento',
     'parqueo',
     'como llego',
-  ],
-  servicios: [
-    'servicio',
-    'servicios',
-    'hacen',
-    'haces',
-    'ofrecen',
-    'trabajan',
-    'atienden',
-    'corte',
-    'tratamiento',
-    'portafolio',
-    'catalogo',
-    'fotos',
-    'ejemplos',
-    'modelos',
-    'disenos',
-    'trabajos',
-  ],
-  precios: [
-    'precio',
-    'precios',
-    'cuesta',
-    'cuestan',
-    'cuanto',
-    'vale',
-    'valen',
-    'tarifa',
-    'tarifas',
-    'costo',
-    'promocion',
-    'promociones',
-    'promo',
-    'oferta',
-    'ofertas',
-    'descuento',
-    'combo',
-    'combos',
-    'paquete',
-    'economico',
-    'barato',
   ],
   politicas: [
     'politica',
@@ -114,23 +79,161 @@ const KEYWORDS: Record<KbCategory, readonly string[]> = {
     'pagina',
     'whatsapp',
   ],
-  informacion_general: [
-    'quien',
-    'quienes',
-    'historia',
-    'sobre ustedes',
-    'sobre el negocio',
-    'duena',
-    'dueno',
-    'propietaria',
-    'propietario',
-    'fundado',
-    'experiencia',
-    'anos',
-    'confianza',
-    'certificado',
-    'certificacion',
-  ],
+}
+
+// Shared base for the three specializable categories. Every niche gets these
+// PLUS its own vocabulary — specialization adds words, it never drops the
+// generic ones. A dental patient still says "ofrecen" and "cuesta" same as
+// anyone else; only the noun changes ("muela" vs "corte").
+const BASE_SERVICIOS: readonly string[] = [
+  'servicio',
+  'servicios',
+  'hacen',
+  'haces',
+  'ofrecen',
+  'trabajan',
+  'atienden',
+  'tratamiento',
+  'portafolio',
+  'catalogo',
+  'fotos',
+  'ejemplos',
+  'modelos',
+  'disenos',
+  'trabajos',
+]
+
+const BASE_PRECIOS: readonly string[] = [
+  'precio',
+  'precios',
+  'cuesta',
+  'cuestan',
+  'cuanto',
+  'vale',
+  'valen',
+  'tarifa',
+  'tarifas',
+  'costo',
+  'promocion',
+  'promociones',
+  'promo',
+  'oferta',
+  'ofertas',
+  'descuento',
+  'combo',
+  'combos',
+  'paquete',
+  'economico',
+  'barato',
+]
+
+const BASE_INFORMACION_GENERAL: readonly string[] = [
+  'quien',
+  'quienes',
+  'historia',
+  'sobre ustedes',
+  'sobre el negocio',
+  'duena',
+  'dueno',
+  'propietaria',
+  'propietario',
+  'fundado',
+  'experiencia',
+  'anos',
+  'confianza',
+  'certificado',
+  'certificacion',
+]
+
+type SpecializableCategory = 'servicios' | 'precios' | 'informacion_general'
+
+// Niche-specific additions layered on top of the BASE_* lists above. A niche
+// that omits a category here just gets the base vocabulary for it.
+const NICHE_KEYWORDS: Record<Niche, Partial<Record<SpecializableCategory, readonly string[]>>> = {
+  barberia: {
+    servicios: ['corte', 'barba', 'tinte', 'alisado', 'keratina', 'trenza', 'rasura', 'fade', 'degradado'],
+    precios: ['cobran'],
+  },
+  estetica: {
+    servicios: [
+      'unas',
+      'pestanas',
+      'cejas',
+      'facial',
+      'limpieza facial',
+      'masaje',
+      'depilacion',
+      'maquillaje',
+      'peeling',
+      'microblading',
+      'manicure',
+      'pedicure',
+    ],
+    precios: ['cobran'],
+  },
+  dental: {
+    servicios: [
+      'limpieza',
+      'blanqueamiento',
+      'extraccion',
+      'curacion',
+      'ortodoncia',
+      'brackets',
+      'implante',
+      'corona',
+      'puente',
+      'endodoncia',
+      'radiografia',
+      'profilaxis',
+      'resina',
+      'carilla',
+      'protesis',
+    ],
+    precios: ['cobran', 'cobertura', 'seguro', 'presupuesto'],
+    informacion_general: [
+      'dolor',
+      'muela',
+      'diente',
+      'encia',
+      'caries',
+      'sangra',
+      'hinchazon',
+      'sensibilidad',
+      'urgencia',
+      'emergencia',
+    ],
+  },
+  salud: {
+    servicios: ['consulta', 'sesion', 'terapia', 'evaluacion', 'control', 'cita', 'diagnostico'],
+    precios: ['cobran', 'cobertura', 'seguro'],
+    informacion_general: ['sintoma', 'dolor', 'malestar', 'ayuda', 'urgente', 'emergencia'],
+  },
+  general: {
+    servicios: ['atencion', 'sesion', 'consulta'],
+    precios: ['cobran'],
+  },
+}
+
+// Builds the full 6-category keyword map for a niche: shared categories as-is,
+// specializable ones as BASE + niche-specific additions.
+function keywordsForNiche(niche: Niche): Record<KbCategory, readonly string[]> {
+  const overrides = NICHE_KEYWORDS[niche]
+  return {
+    ...COMMON_KEYWORDS,
+    servicios: [...BASE_SERVICIOS, ...(overrides.servicios ?? [])],
+    precios: [...BASE_PRECIOS, ...(overrides.precios ?? [])],
+    informacion_general: [...BASE_INFORMACION_GENERAL, ...(overrides.informacion_general ?? [])],
+  }
+}
+
+// Precomputed once per niche at module load — the lists are small and static,
+// no reason to rebuild them on every detectCategories call.
+const KEYWORDS_BY_NICHE: Record<Niche, Record<KbCategory, readonly string[]>> = {
+  dental: keywordsForNiche('dental'),
+  barberia: keywordsForNiche('barberia'),
+  estetica: keywordsForNiche('estetica'),
+  salud: keywordsForNiche('salud'),
+  general: keywordsForNiche('general'),
 }
 
 // Strips accents and punctuation so "ubicación" and "ubicacion" both match, and
@@ -154,12 +257,17 @@ function containsKeyword(haystack: string, keyword: string): boolean {
 
 // Returns the matching categories ordered by how many keywords each one hit,
 // strongest first. Empty when nothing matches — the caller decides the fallback.
-export function detectCategories(message: string): KbCategory[] {
+//
+// `niche` is required, not defaulted: every caller has a business in hand and
+// should pass its actual niche (falling back to 'general' explicitly at the
+// call site when the business is unconfigured), rather than this function
+// silently guessing.
+export function detectCategories(message: string, niche: Niche): KbCategory[] {
   const normalized = normalize(message)
   if (normalized.length === 0) return []
 
   const scored: Array<{ category: KbCategory; score: number }> = []
-  for (const [category, keywords] of Object.entries(KEYWORDS) as Array<
+  for (const [category, keywords] of Object.entries(KEYWORDS_BY_NICHE[niche]) as Array<
     [KbCategory, readonly string[]]
   >) {
     let score = 0

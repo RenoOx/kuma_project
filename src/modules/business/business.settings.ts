@@ -117,7 +117,39 @@ const botPausedSchema = z.object({
 // existed keep their exact behaviour without a data migration.
 const appointmentModeSchema = z.enum(['appointments_only', 'hybrid']).default('appointments_only')
 
+// Business category. Will condition prompt behaviour, KB keyword detection and
+// niche-specific rules (not yet wired — this is the structural field only).
+// Defaults to 'general' so businesses configured before this field existed
+// keep working without a data migration.
+const nicheSchema = z
+  .enum(['dental', 'barberia', 'estetica', 'salud', 'general'])
+  .default('general')
+
+export const NICHE_LABELS: Record<z.infer<typeof nicheSchema>, string> = {
+  dental: 'Clínica Dental',
+  barberia: 'Barbería',
+  estetica: 'Centro Estético / Spa',
+  salud: 'Salud y Bienestar',
+  general: 'Otro',
+}
+
+// Whether Emma closes a booking on her own or only files a request:
+//   - direct            → books straight away, status 'scheduled'. Current
+//                         behaviour, right for barbershops and salons.
+//   - requires_approval → books as 'pending' and pushes the request to the
+//                         owner, who confirms outside Emma. Right for clinics.
+// Defaults to direct so businesses configured before this field existed keep
+// their exact behaviour without a data migration.
+const bookingModeSchema = z.enum(['direct', 'requires_approval']).default('direct')
+
+export const BOOKING_MODE_LABELS: Record<z.infer<typeof bookingModeSchema>, string> = {
+  direct: 'Agenda directa',
+  requires_approval: 'Requiere aprobación',
+}
+
 export const businessSettingsSchema = z.object({
+  niche: nicheSchema,
+  bookingMode: bookingModeSchema,
   operatingHours: operatingHoursSchema,
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
@@ -141,6 +173,8 @@ export type Service = z.infer<typeof serviceSchema>
 export type BotPausedState = z.infer<typeof botPausedSchema>
 export type SpecialDay = z.infer<typeof specialDaySchema>
 export type AppointmentMode = z.infer<typeof appointmentModeSchema>
+export type Niche = z.infer<typeof nicheSchema>
+export type BookingMode = z.infer<typeof bookingModeSchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
 
 // Default lead time when the business hasn't set its own value.

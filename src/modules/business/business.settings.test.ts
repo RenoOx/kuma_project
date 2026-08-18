@@ -8,6 +8,8 @@ import { NotConfiguredError } from '@/shared/errors.js'
 import { assert, describe, expect, it } from 'vitest'
 
 const BASE_SETTINGS: BusinessSettings = {
+  niche: 'general',
+  bookingMode: 'direct',
   appointmentMode: 'appointments_only',
   operatingHours: {
     monday: { open: '09:00', close: '19:00' },

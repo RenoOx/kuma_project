@@ -44,6 +44,8 @@ export interface TwoBusinessesSeed {
 // and barba (20 min). Most tests pile on top of this; the few that exercise
 // the "no settings" path pass { withSettings: false }.
 export const DEFAULT_TEST_SETTINGS: BusinessSettings = {
+  niche: 'general',
+  bookingMode: 'direct',
   appointmentMode: 'appointments_only',
   operatingHours: {
     monday: { open: '09:00', close: '19:00', break: { start: '13:00', end: '14:00' } },

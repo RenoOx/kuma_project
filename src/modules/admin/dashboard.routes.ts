@@ -1,9 +1,13 @@
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import {
+  BOOKING_MODE_LABELS,
   businessSettingsSchema,
+  NICHE_LABELS,
+  type BookingMode,
   type BusinessSettings,
   type DayKey,
+  type Niche,
   type Service,
 } from '@/modules/business/business.settings.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
@@ -110,14 +114,25 @@ function statusBadge(status: WaStatus | null | undefined): string {
   return `<span class="badge ${c.badge}"><span class="dot ${c.dot}"></span>${c.label}</span>`
 }
 
+// Spanish labels so the panel doesn't leak raw column values at the operator.
+const APPT_STATUS_LABELS: Record<string, string> = {
+  pending: 'Por aprobar',
+  scheduled: 'Agendada',
+  confirmed: 'Confirmada',
+  cancelled: 'Cancelada',
+  completed: 'Completada',
+}
+
 function apptStatusBadge(status: string): string {
   const cfg: Record<string, string> = {
+    pending: 'badge-yellow',
     scheduled: 'badge-yellow',
     confirmed: 'badge-green',
     cancelled: 'badge-red',
     completed: 'badge-gray',
   }
-  return `<span class="badge ${cfg[status] ?? 'badge-gray'}">${esc(status)}</span>`
+  const label = APPT_STATUS_LABELS[status] ?? status
+  return `<span class="badge ${cfg[status] ?? 'badge-gray'}">${esc(label)}</span>`
 }
 
 /** Formats a millisecond wait as "6h 12min" / "45 min" / "30 s" for operators. */
@@ -436,7 +451,20 @@ async function parseSettingsFromForm(
   const appointmentMode =
     formData.get('appointmentMode')?.toString() === 'hybrid' ? 'hybrid' : 'appointments_only'
 
+  // Same defensive pattern as appointmentMode: anything outside the known set
+  // falls back to the schema default instead of failing the whole form.
+  const nicheRaw = formData.get('niche')?.toString()
+  const niche: Niche = nicheRaw && nicheRaw in NICHE_LABELS ? (nicheRaw as Niche) : 'general'
+
+  const bookingModeRaw = formData.get('bookingMode')?.toString()
+  const bookingMode: BookingMode =
+    bookingModeRaw && bookingModeRaw in BOOKING_MODE_LABELS
+      ? (bookingModeRaw as BookingMode)
+      : 'direct'
+
   const raw = {
+    niche,
+    bookingMode,
     operatingHours,
     slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
     services,
@@ -1229,6 +1257,8 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   // Unvalidated jsonb: a business saved before this field existed has no mode,
   // and the visual default has to match the schema default.
   const isHybrid = raw?.appointmentMode === 'hybrid'
+  const niche: Niche = raw?.niche ?? 'general'
+  const bookingMode: BookingMode = raw?.bookingMode ?? 'direct'
   const initialServiceCount = Math.max(services.length, 1)
   const initialSpecialDayCount = specialDays.length
 
@@ -1255,6 +1285,28 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       <div class="card" style="margin-bottom:1rem">
         <div class="card-header"><span class="card-title">Información del negocio</span></div>
         <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="niche">Tipo de negocio</label>
+              <select id="niche" name="niche" class="form-input form-select">
+                ${Object.entries(NICHE_LABELS)
+                  .map(([v, l]) => `<option value="${v}" ${niche === v ? 'selected' : ''}>${esc(l)}</option>`)
+                  .join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="bookingMode">Modo de reserva</label>
+              <select id="bookingMode" name="bookingMode" class="form-input form-select">
+                ${Object.entries(BOOKING_MODE_LABELS)
+                  .map(([v, l]) => `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`)
+                  .join('')}
+              </select>
+              <p class="form-hint">
+                Con "Requiere aprobación" Emma no confirma la cita: la deja por aprobar
+                y te manda la solicitud por WhatsApp.
+              </p>
+            </div>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="name">Nombre</label>

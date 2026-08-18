@@ -29,7 +29,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       { businessId: businessAId, title: 'Corte', category: 'precios', content: 'S/30' },
     ])
 
-    const result = await searchByCategory(businessAId, '¿dónde quedan?')
+    const result = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -64,7 +64,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta')
+    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -83,7 +83,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta')
+    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -103,7 +103,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       })),
     )
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta')
+    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -129,7 +129,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const result = await searchByCategory(businessAId, '¿dónde quedan?')
+    const result = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -148,13 +148,13 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const hit = await searchByCategory(businessAId, '¿tienen estacionamiento?')
+    const hit = await searchByCategory(businessAId, '¿tienen estacionamiento?', 'general')
     expect(hit.ok).toBe(true)
     if (hit.ok) expect(hit.data.entries.map((e) => e.title)).toEqual(['Estacionamiento'])
 
     // "dónde quedan" routes to `ubicacion`, but a trigger_based entry must stay
     // out until one of its own keywords appears.
-    const miss = await searchByCategory(businessAId, '¿dónde quedan?')
+    const miss = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
     expect(miss.ok).toBe(true)
     if (miss.ok) expect(miss.data.entries).toEqual([])
   })
@@ -177,7 +177,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const result = await searchByCategory(businessAId, 'hola buenas tardes')
+    const result = await searchByCategory(businessAId, 'hola buenas tardes', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -198,7 +198,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const resultA = await searchByCategory(businessAId, 'cuánto cuesta')
+    const resultA = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
     expect(resultA.ok).toBe(true)
     if (!resultA.ok) return
     expect(resultA.data.entries.map((e) => e.title)).toEqual(['Precio A'])
@@ -206,7 +206,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       expect(entry.businessId).toBe(businessAId)
     }
 
-    const resultB = await searchByCategory(businessBId, 'cuánto cuesta')
+    const resultB = await searchByCategory(businessBId, 'cuánto cuesta', 'general')
     expect(resultB.ok).toBe(true)
     if (!resultB.ok) return
     expect(resultB.data.entries.map((e) => e.title).sort()).toEqual(['Precio B', 'Siempre B'])
@@ -216,7 +216,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
   })
 
   it('returns an empty list for a business with no entries', async () => {
-    const result = await searchByCategory(businessAId, 'cuánto cuesta')
+    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.entries).toEqual([])
   })

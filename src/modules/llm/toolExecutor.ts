@@ -53,6 +53,9 @@ const NOT_CONFIGURED_CHECK_INSTRUCTION =
 const NOT_CONFIGURED_BOOK_INSTRUCTION =
   'No se puede agendar: el negocio aún no terminó la configuración. Llamá escalate_to_human porque es una acción que no podés completar.'
 
+const PENDING_APPROVAL_INSTRUCTION =
+  'La solicitud quedó registrada y ya se le envió al encargado. NO le digas al cliente que su cita está agendada, confirmada ni reservada: decile que su SOLICITUD fue enviada y que le van a confirmar en breve.'
+
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
 
@@ -173,6 +176,11 @@ export async function executeTool(
           error: r.error.code,
         }
       }
+      // A business on bookingMode 'requires_approval' gets a `pending` row and
+      // an owner push instead of a confirmed booking (both handled inside the
+      // service). All this layer does is stop the model from announcing a
+      // confirmation that nobody has given yet.
+      const pendingApproval = r.data.status === 'pending'
       return {
         result: JSON.stringify({
           appointment_id: r.data.id,
@@ -180,6 +188,7 @@ export async function executeTool(
           service: r.data.service,
           status: r.data.status,
           duration_minutes: r.data.durationMinutes,
+          ...(pendingApproval ? { instruction: PENDING_APPROVAL_INSTRUCTION } : {}),
         }),
       }
     }

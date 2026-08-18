@@ -9,6 +9,7 @@ import {
   type BusinessSettings,
   type DayBreak,
   type DayHours,
+  type Niche,
   type Service,
 } from "@/modules/business/business.settings.js";
 import * as conversationRepo from "@/modules/conversation/conversation.repo.js";
@@ -98,6 +99,47 @@ function overlapsBreak(
   if (Number.isNaN(bStart) || Number.isNaN(bEnd)) return false;
   const slotEnd = slotStartMinutes + serviceDurationMinutes;
   return slotStartMinutes < bEnd && slotEnd > bStart;
+}
+
+// True iff the half-open intervals [aStart, aEnd) and [bStart, bEnd) overlap.
+// Touching boundaries do NOT overlap: an appointment ending exactly at 10:00
+// leaves 10:00 free. Same rule as overlapsBreak, over instants instead of
+// minutes-since-midnight.
+function intervalsOverlap(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+): boolean {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+// Time an existing appointment actually occupies, in epoch millis.
+//
+// Reading only `scheduledAt` is what caused the double-booking bug: a 60-min
+// appointment on a 30-min grid marked ONE instant as taken, so the slot it ran
+// through stayed on offer. `duration_minutes` is NOT NULL in the schema, so
+// every row carries a real length.
+interface BusyInterval {
+  startMs: number;
+  endMs: number;
+}
+
+function toBusyIntervals(rows: Appointment[]): BusyInterval[] {
+  return rows.map((a) => {
+    const startMs = a.scheduledAt.getTime();
+    return { startMs, endMs: startMs + a.durationMinutes * 60_000 };
+  });
+}
+
+// Longest appointment this business is able to create. Used only to widen the
+// lookback window when loading the day's appointments, so one that started
+// before midnight and runs into this day still blocks the slots it covers.
+function maxAppointmentMinutes(settings: BusinessSettings): number {
+  return settings.services.reduce(
+    (max, s) => Math.max(max, resolveServiceDurationMinutes(s, settings)),
+    settings.slotDurationMinutes,
+  );
 }
 
 interface BuildSlotsParams {
@@ -210,28 +252,39 @@ export async function checkAvailability(
       );
     }
 
+    // Resolved once: the candidate grid and the conflict check must agree on
+    // how long the requested service lasts.
+    const serviceDurationMinutes = resolveServiceDurationMinutes(
+      knownService,
+      settings,
+    );
+
     const candidates = buildSlots({
       dateISO,
       hours: dayHours,
       slotDurationMinutes: settings.slotDurationMinutes,
-      serviceDurationMinutes: resolveServiceDurationMinutes(
-        knownService,
-        settings,
-      ),
+      serviceDurationMinutes,
       tzOffset,
     });
 
     const dayStart = new Date(`${dateISO}T00:00:00${tzOffset}`);
     const dayEnd = new Date(`${dateISO}T23:59:59${tzOffset}`);
+    // Look back by the longest appointment this business can create: one that
+    // started before midnight and runs into this day still occupies its slots,
+    // and filtering on `scheduled_at >= dayStart` alone would never load it.
+    const lookbackStart = new Date(
+      dayStart.getTime() - maxAppointmentMinutes(settings) * 60_000,
+    );
     const taken = await appointmentRepo.findByBusinessAndDateRange(
       businessId,
-      dayStart,
+      lookbackStart,
       dayEnd,
     );
-    // V1: exact-instant comparison. Long services that span multiple slot
-    // grid units can leave gaps marked "available" when the slot before is
-    // actually occupied. See "deuda técnica" notes in the Día 7 report.
-    const takenInstants = new Set(taken.map((a) => a.scheduledAt.getTime()));
+    // Each existing appointment blocks its WHOLE range, not just its start
+    // instant. Comparing starts alone left every slot a long service ran
+    // through on offer, which is a double booking waiting to happen.
+    const busy = toBusyIntervals(taken);
+    const serviceDurationMs = serviceDurationMinutes * 60_000;
 
     // Drop slots whose start is in the past OR closer to now than the
     // business's required lead time. Reads `Date.now()` so vitest's fake
@@ -240,7 +293,13 @@ export async function checkAvailability(
     const earliestAcceptable = Date.now() + minNoticeMinutes * 60_000;
 
     const availableSlots = candidates
-      .filter((iso) => !takenInstants.has(new Date(iso).getTime()))
+      .filter((iso) => {
+        const startMs = new Date(iso).getTime();
+        const endMs = startMs + serviceDurationMs;
+        return !busy.some((b) =>
+          intervalsOverlap(startMs, endMs, b.startMs, b.endMs),
+        );
+      })
       .filter((iso) => new Date(iso).getTime() >= earliestAcceptable);
     return ok({ availableSlots });
   } catch (cause) {
@@ -395,6 +454,10 @@ export async function bookAppointment(
     }
 
     // Idempotency: same (customer, slot, service) booked in last 30s wins.
+    //
+    // MUST stay ahead of the overlap check below: a retry of a booking we
+    // already persisted overlaps its own appointment, so checking conflicts
+    // first would turn every duplicate delivery into a ConflictError.
     const recent = await appointmentRepo.findRecentByCustomerSlot(
       params.businessId,
       params.customerId,
@@ -410,23 +473,40 @@ export async function bookAppointment(
       return ok(recent);
     }
 
-    const existing = await appointmentRepo.findByDateTime(
+    // The whole span the new appointment would occupy has to be free, not just
+    // its starting instant: booking a 60-min service at 10:00 must fail when
+    // something already sits at 10:30.
+    const requestedEnd = new Date(
+      datetime.getTime() + serviceDurationMinutes * 60_000,
+    );
+    const existing = await appointmentRepo.findOverlapping(
       params.businessId,
       datetime,
+      requestedEnd,
     );
     if (existing) {
       return err(
         new ConflictError({
-          message: "slot already booked",
-          userMessage: "Ese horario ya está reservado, elegí otro.",
+          message: "requested interval overlaps an existing appointment",
+          userMessage:
+            "Ese horario se cruza con otra cita ya reservada, elegí otro.",
           logContext: {
             businessId: params.businessId,
             datetimeISO: params.datetimeISO,
+            requestedEndISO: requestedEnd.toISOString(),
+            serviceDurationMinutes,
             existingAppointmentId: existing.id,
+            existingScheduledAtISO: existing.scheduledAt.toISOString(),
+            existingDurationMinutes: existing.durationMinutes,
           },
         }),
       );
     }
+
+    // Businesses on `requires_approval` never get a confirmed booking out of
+    // Emma: the row lands as `pending` and a human promotes it. Decided here,
+    // at the insert, so the appointment is never briefly visible as scheduled.
+    const requiresApproval = settings.bookingMode === "requires_approval";
 
     const created = await appointmentRepo.create({
       businessId: params.businessId,
@@ -434,7 +514,7 @@ export async function bookAppointment(
       service: params.service,
       scheduledAt: datetime,
       durationMinutes: serviceDurationMinutes,
-      status: "scheduled",
+      status: requiresApproval ? "pending" : "scheduled",
     });
 
     // Best-effort Google Calendar sync. By contract this NEVER fails the book:
@@ -447,6 +527,25 @@ export async function bookAppointment(
       params.businessId,
       params.customerId,
     );
+
+    // Fire-and-forget, and ahead of the Google round trip on purpose: the owner
+    // is the one who has to act on this, and the customer is still waiting on
+    // Emma's reply. Failures are warn-logged inside the helper.
+    if (requiresApproval) {
+      notifyOwnerOfPendingRequest({
+        businessId: params.businessId,
+        niche: settings.niche,
+        service: params.service,
+        scheduledAt: datetime,
+        timezone: business.timezone,
+        customer,
+      }).catch((err) => {
+        logger.warn(
+          { err, businessId: params.businessId, appointmentId: created.id },
+          "notifyOwnerOfPendingRequest rejected unexpectedly",
+        );
+      });
+    }
     const customerLabel =
       customer?.name?.trim() || customer?.phone || params.customerId;
     const summary = `Cita: ${params.service} - ${customerLabel}`;
@@ -553,6 +652,68 @@ function wallClockMinutesInTimezone(
     return (h === 24 ? 0 : h) * 60 + m;
   } catch {
     return null;
+  }
+}
+
+// Only the service line changes across verticals — the rest of the card reads
+// the same everywhere. A dental request marked with 💈 would look careless to
+// the one person who reads these.
+const NICHE_SERVICE_EMOJI: Record<Niche, string> = {
+  dental: "🦷",
+  barberia: "💈",
+  estetica: "💅",
+  salud: "🩺",
+  general: "💼",
+};
+
+function formatRequestDateTime(instant: Date, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat("es-PE", {
+      timeZone: timezone,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(instant);
+  } catch {
+    return instant.toISOString();
+  }
+}
+
+// Push the owner gets when a booking lands as `pending` and needs their call.
+// Best-effort by the same rule as the escalation push: the appointment is
+// already persisted, and the customer waiting on a reply must not be held up by
+// an outbound send.
+async function notifyOwnerOfPendingRequest(params: {
+  businessId: string;
+  niche: Niche;
+  service: string;
+  scheduledAt: Date;
+  timezone: string;
+  customer: { name: string | null; phone: string } | null;
+}): Promise<void> {
+  const who = params.customer?.name?.trim() || "(sin nombre)";
+  const phone = params.customer?.phone ?? "(sin teléfono)";
+
+  const text = [
+    "📋 *Nueva solicitud de cita*",
+    "",
+    `👤 ${who}`,
+    `📱 ${phone}`,
+    `${NICHE_SERVICE_EMOJI[params.niche]} ${params.service}`,
+    `📅 ${formatRequestDateTime(params.scheduledAt, params.timezone)}`,
+    "",
+    "Responde para confirmar o gestionar.",
+  ].join("\n");
+
+  const sent = await ownerNotifier.notifyOwner(params.businessId, text);
+  if (!sent.ok) {
+    logger.warn(
+      { businessId: params.businessId, code: sent.error.code },
+      "owner notification of pending booking request failed (silenced) — the request is persisted but nobody was told",
+    );
   }
 }
 

@@ -17,10 +17,28 @@ export interface DemoProfile {
 
 const CLOSED = null
 
-// Demo profiles carry no real prices — the actual rates of these businesses
-// live outside the repo. Evaluation-first is the honest mapping: with nothing
-// on file, Emma must ask instead of quoting a number it made up.
-function service(name: string, durationMinutes: number): Service {
+// Demo profiles carry no real prices by default — the actual rates of these
+// businesses live outside the repo. Evaluation-first is the honest mapping:
+// with nothing on file, Emma must ask instead of quoting a number it made up.
+//
+// `price` is opt-in: pass it for services whose demo range is worth showing
+// (most of a dental catalogue quotes a range), omit it for anything that
+// genuinely depends on a case-by-case look (a complex extraction, a root
+// canal) — same behaviour as before this parameter existed.
+function service(
+  name: string,
+  durationMinutes: number,
+  price?: { min: number; max: number },
+): Service {
+  if (price) {
+    return {
+      name,
+      durationMinutes,
+      priceMin: price.min,
+      priceMax: price.max,
+      requiresEvaluation: false,
+    }
+  }
   return {
     name,
     durationMinutes,
@@ -33,6 +51,8 @@ function service(name: string, durationMinutes: number): Service {
 const BARBERIA: DemoProfile = {
   name: 'Imperio Barber Studio',
   settings: {
+    niche: 'barberia',
+    bookingMode: 'direct',
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 15,
     services: [
@@ -84,16 +104,24 @@ const BARBERIA: DemoProfile = {
 const CONSULTORIO: DemoProfile = {
   name: 'Dental Smile',
   settings: {
+    niche: 'dental',
+    bookingMode: 'requires_approval',
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
-      service('Consulta general', 30),
-      service('Limpieza dental', 60),
-      service('Blanqueamiento dental', 90),
-      service('Extracción simple', 45),
-      service('Curación / empaste', 60),
-      service('Radiografía digital', 15),
+      service('Consulta general', 30, { min: 30, max: 50 }),
+      service('Limpieza dental (profilaxis)', 45, { min: 80, max: 120 }),
+      service('Blanqueamiento dental', 60, { min: 250, max: 400 }),
+      service('Curación simple (resina)', 30, { min: 60, max: 100 }),
+      service('Curación compuesta', 45, { min: 100, max: 180 }),
+      service('Extracción simple', 30, { min: 80, max: 150 }),
+      service('Extracción compleja', 60),
+      service('Endodoncia (tratamiento de conducto)', 90),
+      service('Corona dental', 60),
+      service('Ortodoncia (brackets)', 45),
+      service('Radiografía dental', 15, { min: 30, max: 50 }),
+      service('Urgencia dental', 30, { min: 50, max: 80 }),
     ],
     operatingHours: {
       monday:    { open: '08:00', close: '17:00', break: { start: '13:00', end: '14:00' } },
@@ -106,22 +134,74 @@ const CONSULTORIO: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'precios', content: 'Consulta general: S/ 60' },
-    { category: 'precios', content: 'Limpieza dental: S/ 120' },
-    { category: 'precios', content: 'Blanqueamiento dental: S/ 350' },
-    { category: 'precios', content: 'Extracción simple: desde S/ 80' },
-    { category: 'precios', content: 'Curación / empaste: desde S/ 100' },
-    { category: 'precios', content: 'Radiografía digital: S/ 40' },
-    { category: 'informacion_general', content: 'Somos Dental Smile, clínica odontológica ubicada en Santiago de Surco, Lima.' },
-    { category: 'informacion_general', content: 'Todos los procedimientos tienen garantía por escrito.' },
-    { category: 'informacion_general', content: 'Aceptamos efectivo, tarjeta y transferencias.' },
-    { category: 'informacion_general', content: 'Trabajamos con seguros de salud (consultar cobertura).' },
+    {
+      category: 'servicios',
+      title: 'Tratamientos disponibles',
+      content:
+        'Trabajamos preventivos (consulta general, limpieza dental), restaurativos (curaciones, coronas), estéticos (blanqueamiento dental), ortodoncia (brackets) y cirugía menor (extracciones). El doctor evalúa cada caso en consulta y recomienda el tratamiento más adecuado.',
+    },
+    {
+      category: 'precios',
+      title: 'Precios y formas de pago',
+      content:
+        'Los precios varían según el caso y el tratamiento. La consulta general es desde S/ 30. Aceptamos pagos en efectivo, transferencia, Yape y Plin. Para tratamientos largos (ortodoncia, coronas, endodoncia) ofrecemos facilidades de pago — consulta por un presupuesto personalizado.',
+    },
+    {
+      category: 'precios',
+      title: 'Presupuesto y evaluación',
+      content:
+        'Para tratamientos como ortodoncia, endodoncia o coronas el doctor necesita evaluar primero el caso. La consulta de evaluación tiene un costo que se descuenta del tratamiento si decides continuar con nosotros.',
+    },
+    {
+      category: 'politicas',
+      title: 'Política de citas',
+      content:
+        'Las citas se confirman con el consultorio. Pedimos llegar 10 minutos antes de tu hora agendada. Las cancelaciones se aceptan con al menos 24 horas de anticipación. Si avisas a tiempo, la reprogramación no tiene costo.',
+    },
+    {
+      category: 'politicas',
+      title: 'Primera visita',
+      content:
+        'En tu primera cita el doctor hace una evaluación general, que puede incluir una radiografía si es necesario. Trae tu DNI. Si tomas algún medicamento o tienes alguna condición de salud, avísanos antes del tratamiento.',
+    },
+    {
+      category: 'informacion_general',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Duele la limpieza dental? No, es un procedimiento indoloro. ¿Cada cuánto debo hacerme limpieza? Idealmente cada 6 meses. ¿El blanqueamiento daña los dientes? No, es un procedimiento seguro y supervisado por el doctor. ¿Atienden niños? Sí, desde los 3 años con enfoque pediátrico.',
+    },
+    {
+      category: 'informacion_general',
+      title: 'Preparación para tu cita',
+      content:
+        'Cepíllate los dientes antes de venir. Si tu procedimiento es largo, come algo ligero previamente. Si sientes miedo o ansiedad ante el tratamiento dental, avísanos para que el doctor tome las precauciones necesarias.',
+    },
+    {
+      category: 'informacion_general',
+      title: 'Urgencias dentales',
+      content:
+        'Si tienes dolor severo, un diente roto, un golpe en la boca o sangrado que no para, comunícate con nosotros de inmediato. Atendemos urgencias dentro de nuestro horario de atención.',
+    },
+    {
+      category: 'ubicacion',
+      title: 'Ubicación',
+      content:
+        'Consultorio Dental Smile — Av. Caminos del Inca 1234, Santiago de Surco, Lima (dirección de referencia para esta demo). Frente al parque, con fácil acceso y estacionamiento disponible en la cuadra.',
+    },
+    {
+      category: 'contacto',
+      title: 'Contacto y horarios',
+      content:
+        'Atendemos de lunes a viernes de 8:00 a. m. a 5:00 p. m. (descanso de 1:00 a 2:00 p. m.) y sábados de 8:00 a. m. a 1:00 p. m. Domingos cerrado. También puedes escribirnos por este mismo WhatsApp.',
+    },
   ],
 }
 
 const SPA: DemoProfile = {
   name: 'Bella Vida Salón & Spa',
   settings: {
+    niche: 'estetica',
+    bookingMode: 'direct',
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,

@@ -137,6 +137,7 @@ export async function generateReply(
   const kbResult = await knowledgeBaseSearch.searchByCategory(
     params.businessId,
     params.userMessage,
+    settings?.niche ?? 'general',
   )
   if (!kbResult.ok) return kbResult
   log.debug(

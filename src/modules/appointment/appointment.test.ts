@@ -265,6 +265,147 @@ describe('appointment module', () => {
     expect(result.data.availableSlots).toContain(`${MONDAY_ISO}T14:00:00-05:00`)
   })
 
+  // ── Solapamiento por duración ───────────────────────────────────────────────
+  //
+  // Con una grilla de 30 min y servicios más largos que un slot, una cita ocupa
+  // varios slots consecutivos. Comparar solo el instante de inicio marcaba UNO
+  // como ocupado y dejaba los siguientes en oferta — doble booking.
+  //
+  // Fixture común de este bloque: grilla 30 min, corte 30, limpieza 60,
+  // tratamiento 90. Horario y break salen de DEFAULT_TEST_SETTINGS
+  // (09:00–19:00, break 13:00–14:00), así que la franja 09:00–12:00 que usan
+  // estos tests está libre de interferencias.
+  const applyOverlapSettings = async (businessId: string): Promise<void> => {
+    const updateResult = await businessService.updateSettings(businessId, {
+      slotDurationMinutes: 30,
+      services: [
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+        { name: 'limpieza', durationMinutes: 60, priceMin: 60, priceMax: 60, requiresEvaluation: false },
+        { name: 'tratamiento', durationMinutes: 90, priceMin: 90, priceMax: 90, requiresEvaluation: false },
+      ],
+    })
+    assert(updateResult.ok)
+  }
+
+  it('checkAvailability: una cita de 60 min bloquea los DOS slots de 30 min que ocupa', async () => {
+    await applyOverlapSettings(seed.businessA.id)
+    await db.insert(appointments).values({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'limpieza',
+      scheduledAt: new Date(`${MONDAY_ISO}T10:00:00-05:00`),
+      durationMinutes: 60,
+    })
+
+    const result = await appointmentService.checkAvailability(
+      seed.businessA.id,
+      MONDAY_ISO,
+      'corte',
+    )
+    assert(result.ok)
+    // [10:00, 11:00) ocupado → ambos slots de la grilla caen dentro.
+    expect(result.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:00:00-05:00`)
+    expect(result.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:30:00-05:00`)
+    // Bordes que se tocan no se solapan: 09:30 + 30 min termina justo a las 10:00.
+    expect(result.data.availableSlots).toContain(`${MONDAY_ISO}T09:30:00-05:00`)
+    expect(result.data.availableSlots).toContain(`${MONDAY_ISO}T11:00:00-05:00`)
+  })
+
+  it('checkAvailability: una cita de 90 min bloquea los TRES slots de 30 min que ocupa', async () => {
+    await applyOverlapSettings(seed.businessA.id)
+    await db.insert(appointments).values({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'tratamiento',
+      scheduledAt: new Date(`${MONDAY_ISO}T10:00:00-05:00`),
+      durationMinutes: 90,
+    })
+
+    const result = await appointmentService.checkAvailability(
+      seed.businessA.id,
+      MONDAY_ISO,
+      'corte',
+    )
+    assert(result.ok)
+    // [10:00, 11:30) ocupado.
+    expect(result.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:00:00-05:00`)
+    expect(result.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:30:00-05:00`)
+    expect(result.data.availableSlots).not.toContain(`${MONDAY_ISO}T11:00:00-05:00`)
+    expect(result.data.availableSlots).toContain(`${MONDAY_ISO}T09:30:00-05:00`)
+    expect(result.data.availableSlots).toContain(`${MONDAY_ISO}T11:30:00-05:00`)
+  })
+
+  it('bookAppointment: rechaza un servicio de 60 min cuando el slot +30 ya está ocupado', async () => {
+    await applyOverlapSettings(seed.businessA.id)
+    // El inicio pedido (10:00) está libre; lo que choca es la segunda mitad.
+    await db.insert(appointments).values({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      scheduledAt: new Date(`${MONDAY_ISO}T10:30:00-05:00`),
+      durationMinutes: 30,
+    })
+
+    const otherCustomer = await customerRepo.create({
+      businessId: seed.businessA.id,
+      phone: '+51900009000',
+      name: 'Paciente Dos',
+    })
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: otherCustomer.id,
+      service: 'limpieza',
+      datetimeISO: `${MONDAY_ISO}T10:00:00-05:00`,
+    })
+    assert(!result.ok)
+    expect(result.error).toBeInstanceOf(ConflictError)
+
+    // Solo sobrevive la cita preexistente: la nueva nunca se persistió.
+    const rows = await db.select().from(appointments)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.service).toBe('corte')
+  })
+
+  it('bookAppointment: dos servicios de 30 min consecutivos NO se solapan (caso base)', async () => {
+    await applyOverlapSettings(seed.businessA.id)
+
+    const first = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T10:00:00-05:00`,
+    })
+    assert(first.ok)
+
+    const otherCustomer = await customerRepo.create({
+      businessId: seed.businessA.id,
+      phone: '+51900009001',
+      name: 'Paciente Tres',
+    })
+    const second = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: otherCustomer.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T10:30:00-05:00`,
+    })
+    assert(second.ok)
+    expect(second.data.id).not.toBe(first.data.id)
+
+    const rows = await db.select().from(appointments)
+    expect(rows).toHaveLength(2)
+
+    // Y disponibilidad coincide: los dos slots vendidos salen, el siguiente no.
+    const availability = await appointmentService.checkAvailability(
+      seed.businessA.id,
+      MONDAY_ISO,
+      'corte',
+    )
+    assert(availability.ok)
+    expect(availability.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:00:00-05:00`)
+    expect(availability.data.availableSlots).not.toContain(`${MONDAY_ISO}T10:30:00-05:00`)
+    expect(availability.data.availableSlots).toContain(`${MONDAY_ISO}T11:00:00-05:00`)
+  })
+
   it('bookAppointment creates the appointment with durationMinutes from settings.services', async () => {
     // Default fixture: corte → 30 min.
     const result = await appointmentService.bookAppointment({

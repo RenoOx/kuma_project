@@ -1,5 +1,6 @@
 import { logger } from '@/config/logger.js'
 import type { KbCategory, KnowledgeBaseEntry } from '@/db/schema/index.js'
+import type { Niche } from '@/modules/business/business.settings.js'
 import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { detectCategories, matchesTriggerKeywords } from './categoryDetector.js'
@@ -32,10 +33,11 @@ export interface SearchResult {
 export async function searchByCategory(
   businessId: string,
   message: string,
+  niche: Niche,
   limit: number = MAX_ENTRIES_PER_QUERY,
 ): Promise<Result<SearchResult>> {
   try {
-    const categories = detectCategories(message)
+    const categories = detectCategories(message, niche)
 
     const [categoryEntries, ungatedEntries] = await Promise.all([
       categories.length > 0

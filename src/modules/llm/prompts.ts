@@ -1,6 +1,6 @@
 import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
 import { formatServicePrice } from '@/modules/business/business.settings.js'
-import type { AppointmentMode, BusinessSettings, DayKey } from '@/modules/business/business.settings.js'
+import type { AppointmentMode, BusinessSettings, DayKey, Niche } from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(
@@ -20,7 +20,17 @@ function renderEntry(entry: KnowledgeBaseEntry): string {
     entry.attachmentType !== 'none' && entry.attachmentUrl
       ? ` (adjunto: ${entry.attachmentUrl})`
       : ''
-  return `- ${entry.title}: ${entry.content}${attachment}`
+
+  // When the operator doesn't type a title, deriveTitle just truncates the
+  // content to 50 chars — so every entry shorter than that ends up with a title
+  // identical to its body, and printing both sent the model the same sentence
+  // twice ("- Corte clásico: S/ 25: Corte clásico: S/ 25"). Drop the title when
+  // it adds nothing; keep it when the operator wrote a real one.
+  const title = entry.title.trim()
+  const content = entry.content.trim()
+  if (title === '' || content.startsWith(title)) return `- ${content}${attachment}`
+
+  return `- ${title}: ${content}${attachment}`
 }
 
 function renderKnowledgeBase(entries: KnowledgeBaseEntry[]): string {
@@ -344,6 +354,88 @@ const HYBRID_AVAILABILITY_BLOCK = [
   'NUNCA digas que no hay disponibilidad: aunque no queden turnos libres, el cliente siempre puede venir directo por orden de llegada. Si check_availability no devuelve slots, ofrecé venir presencial en lugar de cerrar la puerta.',
 ]
 
+// Only reaches the model when bookingMode is 'requires_approval'. It sits after
+// every other instruction block on purpose: the sections above tell Emma to
+// confirm the final date after booking and even show a "✅ ¡Cita confirmada!"
+// example, so this has to arrive after them and override them explicitly.
+const REQUIRES_APPROVAL_BLOCK = [
+  '# Reserva sujeta a aprobación — ESTA REGLA PISA A CUALQUIER OTRA DE ARRIBA',
+  'Este negocio NO confirma citas en el momento: cada pedido lo revisa y aprueba un encargado después.',
+  '- Recogé servicio, fecha y hora preferida como siempre, y llamá book_appointment igual que en cualquier otro negocio.',
+  '- Después de llamar la tool, informale al cliente que su SOLICITUD fue enviada al encargado y que le van a confirmar en breve.',
+  '- NUNCA digas que la cita está agendada, confirmada, reservada ni separada. Cualquier ejemplo de confirmación de arriba (incluido "✅ ¡Cita confirmada!") NO aplica en este negocio.',
+  '  ✅ "Listo, envié tu solicitud para el *martes 12 a las 10:00am*. El encargado te confirma en breve."',
+  '  ❌ "✅ ¡Cita confirmada! *limpieza dental* el *martes 12 a las 10:00am*."',
+  '- Si el cliente pregunta por el estado de su solicitud, decile que espere la confirmación o que se comunique directamente con el negocio. No tenés forma de consultar en qué quedó.',
+]
+
+// ── Bloques por nicho ────────────────────────────────────────────────────────
+//
+// Refinamientos sobre el prompt compartido, NO un reemplazo. Solo los nichos
+// clínicos suman bloques hoy: barbería, estética y general reciben el prompt
+// base sin un byte de diferencia, que es lo que hace seguro agregar esto.
+
+const NICHE_TONE: Partial<Record<Niche, string>> = {
+  dental:
+    'Mantén un tono profesional y cálido. Usa lenguaje claro y accesible, evita jerga médica innecesaria. Transmite confianza y tranquilidad.',
+  salud:
+    'Mantén un tono profesional, empático y respetuoso. Trata cada consulta con sensibilidad. Transmite calma y confianza.',
+}
+
+// Nichos donde Emma le habla a un paciente, no a un cliente: nunca interpreta
+// un síntoma, y una emergencia tiene que llegar a un humano de inmediato.
+type ClinicalNiche = 'dental' | 'salud'
+
+function isClinicalNiche(niche: Niche): niche is ClinicalNiche {
+  return niche === 'dental' || niche === 'salud'
+}
+
+// Mismo bloque para ambos nichos clínicos, con los ejemplos de síntomas
+// cambiados: un centro de fisioterapia no tiene por qué estar atento a un
+// diente roto.
+const URGENCY_EXAMPLES: Record<ClinicalNiche, string> = {
+  dental: 'dolor severo, golpe, diente roto, sangrado que no para, hinchazón severa',
+  salud: 'dolor severo, golpe, sangrado que no para, hinchazón severa, dificultad para respirar',
+}
+
+function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
+  return [
+    '# IMPORTANTE — Límites clínicos',
+    'NUNCA des diagnósticos, opiniones médicas ni recomendaciones de tratamiento.',
+    'Si el cliente describe síntomas, dolores o condiciones, responde con empatía pero NO intentes explicar qué podría ser. Sugiere que lo consulte directamente con el profesional.',
+    'Frases permitidas: "Entiendo tu molestia, lo mejor es que el doctor/a te evalúe directamente", "Eso es algo que el especialista puede revisar en tu cita".',
+    'Frases PROHIBIDAS: "Podría ser...", "Probablemente tienes...", "Te recomiendo tomar...", "Eso suena a..."',
+    '',
+    '# Urgencias',
+    `Si el cliente describe una situación de urgencia o emergencia (${URGENCY_EXAMPLES[niche]}), responde con calma y empatía, y escala inmediatamente llamando escalate_to_human con razón "Urgencia: [breve descripción]".`,
+    'NO intentes dar primeros auxilios ni instrucciones médicas.',
+    `Mensaje al cliente antes de escalar: "Entiendo que es urgente. Voy a comunicarme con ${businessName} para que te atiendan lo antes posible."`,
+  ]
+}
+
+/**
+ * Refinamientos del prompt propios del nicho del negocio.
+ *
+ * Devuelve '' para barbería, estética y general — esos nichos conservan el
+ * prompt base tal cual, y el caller no inyecta absolutamente nada cuando esto
+ * viene vacío (ni siquiera una línea en blanco).
+ */
+export function buildNicheBlocks(niche: Niche, businessName: string): string {
+  const lines: string[] = []
+
+  const tone = NICHE_TONE[niche]
+  if (tone) {
+    lines.push('# Tono — ajuste para este tipo de negocio', tone)
+  }
+
+  if (isClinicalNiche(niche)) {
+    if (lines.length > 0) lines.push('')
+    lines.push(...clinicalBlocks(niche, businessName))
+  }
+
+  return lines.join('\n')
+}
+
 const NOT_CONFIGURED_BLOCK = [
   '# ATENCIÓN — negocio sin configuración operativa',
   'Este negocio aún no completó su configuración (horarios, servicios, precios específicos).',
@@ -367,6 +459,9 @@ function buildStaticBody(
   todayISO: string,
 ): string[] {
   const mode: AppointmentMode = settings?.appointmentMode ?? 'appointments_only'
+  // Empty string for the non-clinical niches, and for a business with no
+  // settings at all — both keep the base prompt untouched.
+  const nicheBlocks = buildNicheBlocks(settings?.niche ?? 'general', business.name)
 
   return [
     '# Identidad',
@@ -419,9 +514,8 @@ function buildStaticBody(
     '- Si te falta fecha, hora o servicio, preguntá — nunca inventes el dato faltante.',
     '- Después de agendar, confirmá al cliente la fecha y hora final en lenguaje claro.',
     '',
-    '# Conocimiento del negocio',
-    renderKnowledgeBase(knowledgeBase),
-    '',
+    // NOTE: "# Conocimiento del negocio" used to sit right here. It was moved to
+    // the very end of this body — see the comment at the bottom of the array.
     '# Ubicación',
     renderLocationBlock(business.address, business.googleMapsUrl),
     '',
@@ -495,7 +589,28 @@ function buildStaticBody(
     '- Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado: cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
     '- Si ninguno se parece, no asumas: "Cuéntame un poco más sobre lo que buscas para poder ayudarte mejor."',
     '',
+    // Nothing is pushed when the niche adds no blocks, so the prompt for a
+    // barbería stays byte-identical to what it was before niches existed.
+    ...(nicheBlocks === '' ? [] : [nicheBlocks, '']),
     ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
+    // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
+    // comment. An unconfigured business (settings null) keeps `direct`.
+    ...(settings?.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : []),
+    '',
+    // KNOWLEDGE BASE GOES LAST — DO NOT MOVE IT BACK UP.
+    //
+    // Everything above is identical for every message this business receives,
+    // which is exactly what OpenAI's prompt cache needs: it only reuses a
+    // byte-identical prefix, and only when that prefix reaches 1024 tokens.
+    // These entries are picked per message by knowledgeBaseSearch, so they are
+    // the first thing in this prompt that changes between two consecutive
+    // messages. Sitting where it used to (~890 tokens in, right after the date
+    // rules) it truncated the shared prefix BELOW the 1024-token floor, so two
+    // messages routing to different KB categories — "¿cuánto cuesta?" then
+    // "¿dónde quedan?" — shared no cache at all and paid full price for the
+    // whole prompt. Last position keeps ~3.7k tokens cacheable instead.
+    '# Conocimiento del negocio',
+    renderKnowledgeBase(knowledgeBase),
   ]
 }
 
