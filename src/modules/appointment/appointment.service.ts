@@ -28,6 +28,7 @@ import {
   NotFoundError,
   ValidationError,
 } from "@/shared/errors.js";
+import { formatDateTimeForDisplay } from "@/shared/datetime.js";
 import { err, ok, type Result } from "@/shared/result.js";
 import * as appointmentRepo from "./appointment.repo.js";
 
@@ -743,21 +744,10 @@ const NICHE_SERVICE_EMOJI: Record<Niche, string> = {
   general: "💼",
 };
 
-function formatRequestDateTime(instant: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("es-PE", {
-      timeZone: timezone,
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(instant);
-  } catch {
-    return instant.toISOString();
-  }
-}
+// Used in the owner's request card and in every patient-facing notice
+// (confirmed / rejected / rescheduled / cancelled). Was rendering 24h, so a
+// patient was told their appointment was at "19:00".
+const formatRequestDateTime = formatDateTimeForDisplay;
 
 // Push the owner gets when a booking lands as `pending` and needs their call.
 // Best-effort by the same rule as the escalation push: the appointment is

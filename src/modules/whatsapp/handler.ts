@@ -27,7 +27,11 @@ const LLM_FALLBACK_REPLY =
 const PAUSED_REPLY =
   "En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.";
 
-const OWNER_FALLBACK_REPLY = "Algo se rompió de mi lado, prueba de nuevo.";
+// Sent when ownerAssistantService.handle itself fails — the owner never sees the
+// model's voice in that case, so this string has to carry the same warmth the
+// prompt asks for. It is NOT a "no puedo hacer eso": it means something broke.
+const OWNER_FALLBACK_REPLY =
+  "Uy, no pude completar eso 😅 ¿Lo intentamos de nuevo?";
 
 const ESCALATED_REPLY = "Ya avisé al encargado, te escribirá en breve 😊";
 

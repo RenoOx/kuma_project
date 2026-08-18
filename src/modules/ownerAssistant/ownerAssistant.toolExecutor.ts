@@ -5,6 +5,7 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BotPausedState } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
+import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
 import { z } from 'zod'
 import { generateDailyReportText } from './dailyReport.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
@@ -79,8 +80,11 @@ async function buildDailySummary(
       timezone: ctx.businessTimezone,
       messages_received: userMessages,
       appointments_created_today: appointmentsCreated,
+      // Already rendered in the business's wall clock. Handing the model a raw
+      // UTC ISO made it do the conversion itself, and it showed the owner the
+      // UTC hour or a 24h time for an appointment they think of as "8pm".
       appointments_for_today: appointmentsToday.map((a) => ({
-        time: a.scheduledAt.toISOString(),
+        time: formatTimeForDisplay(a.scheduledAt, ctx.businessTimezone),
         service: a.service,
         customer_name: a.customerName,
         customer_phone: a.customerPhone,
@@ -114,9 +118,13 @@ async function buildAppointmentsList(
       from: args.date_from,
       to: args.date_to,
       count: rows.length,
+      instruction:
+        'Los horarios ya vienen en la zona horaria del negocio y en formato 12h. Copialos tal cual — no los conviertas ni los pases a 24h. El campo id es interno: nunca se lo muestres al dueño.',
       appointments: rows.map((r) => ({
         id: r.id,
-        scheduled_at: r.scheduledAt.toISOString(),
+        // Wall clock of the business, not UTC. See the note in buildDailySummary.
+        when: formatDateTimeForDisplay(r.scheduledAt, ctx.businessTimezone),
+        time: formatTimeForDisplay(r.scheduledAt, ctx.businessTimezone),
         service: r.service,
         duration_minutes: r.durationMinutes,
         customer_name: r.customerName,
@@ -194,19 +202,7 @@ async function sendDailyReportNow(ctx: OwnerContext): Promise<OwnerToolExecution
 // turn the outcome into something the model can act on.
 
 function readableSlot(scheduledAt: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat('es-PE', {
-      timeZone: timezone,
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(scheduledAt)
-  } catch {
-    return scheduledAt.toISOString()
-  }
+  return formatDateTimeForDisplay(scheduledAt, timezone)
 }
 
 // Failure here is NOT the same as "the action failed": the appointment already

@@ -1,4 +1,5 @@
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
+import { formatTimeForDisplay } from '@/shared/datetime.js'
 
 // Day-of-week / day-of-month / month formatters all use es-PE so they come
 // back lowercase ("sábado", "junio"). Time format uses en-US + manual
@@ -27,20 +28,10 @@ function formatMonth(date: Date, timezone: string): string {
     .toLowerCase()
 }
 
-// "11:00am" / "2:30pm". en-US gives us "11:00 AM"; we lowercase the dayPeriod
-// and concatenate without space to match the format the user signed off on.
-export function formatTime12h(date: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).formatToParts(date)
-  const hour = parts.find((p) => p.type === 'hour')?.value ?? ''
-  const minute = parts.find((p) => p.type === 'minute')?.value ?? ''
-  const dayPeriod = parts.find((p) => p.type === 'dayPeriod')?.value ?? ''
-  return `${hour}:${minute}${dayPeriod.toLowerCase().replace(/\s|\./g, '')}`
-}
+// "11:00am" / "2:30pm". Kept as a named export because the reminder tests pin
+// this exact shape, but the implementation now lives in shared/datetime so the
+// owner tools, the patient notices and these reminders cannot drift apart.
+export const formatTime12h = formatTimeForDisplay
 
 function buildGreeting(emoji: string, customer: Pick<Customer, 'name'>): string {
   const name = customer.name?.trim()

@@ -3,23 +3,14 @@ import * as businessService from '@/modules/business/business.service.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
+import { formatTimeForDisplay } from '@/shared/datetime.js'
 import { dayRangeInTimezone, shiftDateISO, todayInTimezone } from './timezone.js'
 
 const TODAY_APPOINTMENTS_LIST_THRESHOLD = 5
 const PENDING_ESCALATIONS_LIST_LIMIT = 3
 
-function formatTimeLima(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat('es-PE', {
-      timeZone: timezone,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(date)
-  } catch {
-    return date.toISOString().slice(11, 16)
-  }
-}
+// 12h in the business's timezone, like every other hour Emma shows.
+const formatTimeLima = formatTimeForDisplay
 
 // Builds the structured daily report sent proactively to the business owner.
 // Same data as get_daily_summary, but formatted as a WhatsApp message with

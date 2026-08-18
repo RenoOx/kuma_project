@@ -1,5 +1,7 @@
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
+import * as businessService from '@/modules/business/business.service.js'
+import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
 import { z } from 'zod'
 
@@ -273,14 +275,27 @@ export async function executeTool(
       // service). All this layer does is stop the model from announcing a
       // confirmation that nobody has given yet.
       const pendingApproval = r.data.status === 'pending'
+
+      // Rendered here rather than shipped as a UTC ISO: handed the raw instant,
+      // the model announced the booking in UTC or in 24h ("tu cita quedó a las
+      // 20:00"). The business lookup is one extra read on a path that already
+      // does several, and it is the only way to be right for a non-Lima tenant.
+      const businessResult = await businessService.getById(context.businessId)
+      const timezone = businessResult.ok ? businessResult.data.timezone : 'America/Lima'
+
       return {
         result: JSON.stringify({
           appointment_id: r.data.id,
-          scheduled_at: r.data.scheduledAt.toISOString(),
+          scheduled_at: formatDateTimeForDisplay(r.data.scheduledAt, timezone),
           service: r.data.service,
           status: r.data.status,
           duration_minutes: r.data.durationMinutes,
-          ...(pendingApproval ? { instruction: PENDING_APPROVAL_INSTRUCTION } : {}),
+          ...(pendingApproval
+            ? { instruction: PENDING_APPROVAL_INSTRUCTION }
+            : {
+                instruction:
+                  'La hora en scheduled_at ya está en la zona horaria del negocio y en formato 12h. Confirmásela al cliente tal cual, sin convertirla ni pasarla a 24h.',
+              }),
         }),
       }
     }
