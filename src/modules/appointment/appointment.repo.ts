@@ -153,6 +153,29 @@ export async function listScheduledInRange(
     .limit(limit)
 }
 
+// Every request still waiting on the owner's call, oldest slot first. Joined
+// with the customer because the owner has to recognise WHO is asking before
+// deciding anything. Backs the owner's `list_pending_appointments` tool.
+export async function findPendingByBusiness(
+  businessId: string,
+  exec: Executor = db,
+): Promise<AppointmentWithCustomer[]> {
+  return await exec
+    .select({
+      id: appointments.id,
+      service: appointments.service,
+      scheduledAt: appointments.scheduledAt,
+      durationMinutes: appointments.durationMinutes,
+      status: appointments.status,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+    })
+    .from(appointments)
+    .innerJoin(customers, eq(customers.id, appointments.customerId))
+    .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'pending')))
+    .orderBy(asc(appointments.scheduledAt))
+}
+
 // Counts appointments CREATED in [since, until). Used by the owner's
 // daily-summary tool to report "agendaste N citas hoy".
 export async function countCreatedInRange(

@@ -59,14 +59,98 @@ const PENDING_APPROVAL_INSTRUCTION =
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
 
-// The model must offer exactly two concrete times (see "Consultas de horario y
-// disponibilidad" in the system prompt), and an open Saturday can return 20+
-// slots. Handing it the full list invites either a wall of hours or a reply
-// truncated by max_tokens, so only two ever cross the boundary.
+// ── Presentación de la disponibilidad ────────────────────────────────────────
 //
-// The cap lives here and NOT in appointment.service: the domain result stays
-// truthful about the schedule: this is a presentation rule for the LLM.
-const MAX_SLOTS_OFFERED = 2
+// Availability reaches the model as contiguous BLOCKS, not as a flat list of
+// times. Two concrete options used to cross this boundary ("¿te va 8:00am o
+// 8:30am?"), which reads as an ultimatum on a day that is actually wide open.
+// Blocks let Emma answer the way a receptionist would — "tengo libre de 8:00am
+// a 12:30pm" — and only drill into exact times once the patient narrows down.
+//
+// This stays a presentation concern and lives HERE, not in appointment.service:
+// the domain result remains the plain truthful list of bookable instants.
+
+interface AvailabilityBlock {
+  /** Ready-to-speak label, e.g. "Disponible de 8:00am a 12:30pm". */
+  range: string
+  /** Every bookable instant inside this block, ISO with the business offset. */
+  slots: string[]
+}
+
+// checkAvailability builds each slot with the business's UTC offset already
+// baked in, so the wall-clock time is a plain substring — no timezone math.
+function wallClock(iso: string): string {
+  return iso.slice(11, 16)
+}
+
+function addMinutes(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) return hhmm
+  const total = h * 60 + m + minutes
+  const hh = Math.floor(total / 60) % 24
+  const mm = total % 60
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+// 12-hour form because that is how the prompt tells Emma to speak. Converting
+// here rather than in the prompt keeps the model from doing clock arithmetic,
+// which it gets wrong around noon and midnight.
+function to12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  if (h === undefined || m === undefined || Number.isNaN(h) || Number.isNaN(m)) return hhmm
+  const period = h < 12 ? 'am' : 'pm'
+  const hour12 = h % 12 === 0 ? 12 : h % 12
+  return `${hour12}:${String(m).padStart(2, '0')}${period}`
+}
+
+function makeBlock(slots: string[], slotDurationMinutes: number): AvailabilityBlock {
+  const first = slots[0]
+  const last = slots[slots.length - 1]
+  // Unreachable: blocks are only built from a non-empty run.
+  if (first === undefined || last === undefined) {
+    return { range: 'Disponible', slots }
+  }
+  const from = to12h(wallClock(first))
+  const to = to12h(addMinutes(wallClock(last), slotDurationMinutes))
+  // A run of one slot is a point in time, not a window — saying "de 5:00pm a
+  // 5:30pm" for a single opening invites the patient to ask for 5:15.
+  const range = slots.length === 1 ? `Disponible a las ${from}` : `Disponible de ${from} a ${to}`
+  return { range, slots }
+}
+
+/**
+ * Folds a sorted list of bookable instants into contiguous blocks.
+ *
+ * Two slots are contiguous when exactly one grid step separates them. Anything
+ * wider means something sits in between (a booking, the lunch break, closing
+ * time) and starts a new block — which is why the caller has to pass the real
+ * grid instead of inferring it from the gaps.
+ */
+export function groupIntoBlocks(
+  slots: string[],
+  slotDurationMinutes: number,
+): AvailabilityBlock[] {
+  if (slots.length === 0) return []
+
+  const stepMs = slotDurationMinutes * 60_000
+  const blocks: AvailabilityBlock[] = []
+  let run: string[] = []
+
+  for (const slot of slots) {
+    const previous = run[run.length - 1]
+    const breaksRun =
+      previous !== undefined &&
+      new Date(slot).getTime() - new Date(previous).getTime() !== stepMs
+    if (breaksRun) {
+      blocks.push(makeBlock(run, slotDurationMinutes))
+      run = []
+    }
+    run.push(slot)
+  }
+  if (run.length > 0) blocks.push(makeBlock(run, slotDurationMinutes))
+
+  return blocks
+}
 
 export async function executeTool(
   name: string,
@@ -109,17 +193,15 @@ export async function executeTool(
         }
       }
 
-      // Spread first so `closedReason` (set when the day is closed) survives.
-      const allSlots = r.data.availableSlots
-      const offered = allSlots.slice(0, MAX_SLOTS_OFFERED)
-      const remaining = allSlots.length - offered.length
+      // Built explicitly rather than spread: the flat `availableSlots` list is
+      // deliberately NOT forwarded, since every one of its entries already
+      // appears inside a block and sending both doubles the token cost of an
+      // open day for no gain.
+      const blocks = groupIntoBlocks(r.data.availableSlots, r.data.slotDurationMinutes)
       return {
         result: JSON.stringify({
-          ...r.data,
-          availableSlots: offered,
-          ...(remaining > 0
-            ? { moreSlots: `y ${remaining} horarios más disponibles ese día` }
-            : {}),
+          ...(r.data.closedReason ? { closedReason: r.data.closedReason } : {}),
+          availableBlocks: blocks,
         }),
       }
     }

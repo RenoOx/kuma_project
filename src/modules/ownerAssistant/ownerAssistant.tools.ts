@@ -95,13 +95,119 @@ export const ownerTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_pending_appointments',
+      description:
+        'Lista las solicitudes de cita que están esperando la aprobación del dueño (status pendiente). Usar cuando el dueño pregunta "¿qué solicitudes tengo?", "¿hay pendientes?", o ANTES de confirmar/rechazar cuando no está claro a cuál cita se refiere.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'confirm_appointment',
+      description:
+        'Aprueba una solicitud pendiente: la cita pasa a agendada y el paciente recibe la confirmación por WhatsApp. Usar cuando el dueño dice "confírmala", "acéptala", "dale", refiriéndose a una solicitud concreta.',
+      parameters: {
+        type: 'object',
+        properties: {
+          appointment_id: {
+            type: 'string',
+            description: 'Id de la cita, tal como lo devuelve list_pending_appointments.',
+          },
+        },
+        required: ['appointment_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reject_appointment',
+      description:
+        'Rechaza una solicitud pendiente: la cita queda cancelada y el paciente recibe el aviso. Usar SOLO después de que el dueño confirme expresamente que quiere rechazarla.',
+      parameters: {
+        type: 'object',
+        properties: {
+          appointment_id: {
+            type: 'string',
+            description: 'Id de la cita, tal como lo devuelve list_pending_appointments.',
+          },
+          reason: {
+            type: 'string',
+            description:
+              'Motivo breve que se le comunica al paciente, opcional. Ej: "ese horario se nos ocupó".',
+          },
+        },
+        required: ['appointment_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reschedule_appointment',
+      description:
+        'Propone otro horario para una cita: cancela la original y crea una nueva solicitud pendiente en el horario sugerido, avisando al paciente. Usar cuando el dueño dice "ofrécele las 3pm", "mejor el jueves", "proponle otro horario".',
+      parameters: {
+        type: 'object',
+        properties: {
+          appointment_id: {
+            type: 'string',
+            description: 'Id de la cita a mover.',
+          },
+          suggested_datetime: {
+            type: 'string',
+            description:
+              'Nuevo horario propuesto en ISO 8601 con offset del negocio, ej: 2026-08-19T15:00:00-05:00',
+          },
+          message: {
+            type: 'string',
+            description: 'Nota breve del dueño para el paciente, opcional.',
+          },
+        },
+        required: ['appointment_id', 'suggested_datetime'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_appointment',
+      description:
+        'Cancela una cita en cualquier estado (no solo pendientes) y avisa al paciente. Usar SOLO después de que el dueño confirme expresamente que quiere cancelarla.',
+      parameters: {
+        type: 'object',
+        properties: {
+          appointment_id: {
+            type: 'string',
+            description: 'Id de la cita a cancelar.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Motivo breve que se le comunica al paciente, opcional.',
+          },
+        },
+        required: ['appointment_id'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 // V1.5 (NO IMPLEMENTAR HOY): tools planeadas para expandir el asistente
 // - add_knowledge_base_entry(category, content)
 // - update_knowledge_base_entry(id, content)
-// - cancel_appointment(appointment_id)
-// - reschedule_appointment(appointment_id, new_datetime_iso)
 // - send_message_to_customer(customer_id, message)
 // - broadcast_to_customers(filter, message)
 // Cuando se implementen, agregar al array ownerTools y al

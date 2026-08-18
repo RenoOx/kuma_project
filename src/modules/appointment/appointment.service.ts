@@ -1,5 +1,6 @@
 import { logger } from "@/config/logger.js";
-import type { Appointment } from "@/db/schema/index.js";
+import { db } from "@/db/client.js";
+import type { Appointment, AppointmentStatus, Business } from "@/db/schema/index.js";
 import * as businessService from "@/modules/business/business.service.js";
 import {
   dayKeyForJsDow,
@@ -17,11 +18,14 @@ import * as conversationService from "@/modules/conversation/conversation.servic
 import * as customerRepo from "@/modules/customer/customer.repo.js";
 import * as eventsRepo from "@/modules/events/events.repo.js";
 import * as googleCalendarService from "@/modules/google/googleCalendar.service.js";
+import * as messageService from "@/modules/message/message.service.js";
+import * as customerNotifier from "@/modules/whatsapp/customerNotifier.js";
 import * as ownerNotifier from "@/modules/whatsapp/ownerNotifier.js";
 import {
   AppError,
   ConflictError,
   NotConnectedError,
+  NotFoundError,
   ValidationError,
 } from "@/shared/errors.js";
 import { err, ok, type Result } from "@/shared/result.js";
@@ -32,6 +36,11 @@ const IDEMPOTENCY_WINDOW_MS = 30_000;
 export interface CheckAvailabilityResult {
   availableSlots: string[];
   closedReason?: string;
+  // The grid these slots sit on. Carried out so the caller can tell apart two
+  // adjacent slots from two slots with a booking wedged between them, without
+  // re-reading settings or guessing the step from the gaps (which misreads a
+  // fragmented day as one long free block).
+  slotDurationMinutes: number;
 }
 
 function normalizeServiceName(s: string): string {
@@ -237,7 +246,11 @@ export async function checkAvailability(
 
     const dayHours = resolveDayHours(settings, dateISO, dayKey);
     if (dayHours === null) {
-      return ok({ availableSlots: [], closedReason: "cerrado este día" });
+      return ok({
+        availableSlots: [],
+        closedReason: "cerrado este día",
+        slotDurationMinutes: settings.slotDurationMinutes,
+      });
     }
 
     const tzOffset = tzOffsetForDate(business.timezone, dateISO);
@@ -301,7 +314,10 @@ export async function checkAvailability(
         );
       })
       .filter((iso) => new Date(iso).getTime() >= earliestAcceptable);
-    return ok({ availableSlots });
+    return ok({
+      availableSlots,
+      slotDurationMinutes: settings.slotDurationMinutes,
+    });
   } catch (cause) {
     return err(
       new AppError({
@@ -528,10 +544,12 @@ export async function bookAppointment(
       params.customerId,
     );
 
-    // Fire-and-forget, and ahead of the Google round trip on purpose: the owner
-    // is the one who has to act on this, and the customer is still waiting on
-    // Emma's reply. Failures are warn-logged inside the helper.
+    // A pending request is NOT a commitment, so it does not reach the calendar
+    // yet: the owner would see a booking they never approved sitting next to
+    // their real ones. confirmAppointment mirrors it once they say yes.
     if (requiresApproval) {
+      // Fire-and-forget: the customer is still waiting on Emma's reply, and the
+      // request is already persisted. Failures are warn-logged in the helper.
       notifyOwnerOfPendingRequest({
         businessId: params.businessId,
         niche: settings.niche,
@@ -545,58 +563,20 @@ export async function bookAppointment(
           "notifyOwnerOfPendingRequest rejected unexpectedly",
         );
       });
+      return ok(created);
     }
-    const customerLabel =
-      customer?.name?.trim() || customer?.phone || params.customerId;
-    const summary = `Cita: ${params.service} - ${customerLabel}`;
-    const description = `Cliente: ${customer?.phone ?? "(sin teléfono)"}\nAgendado vía Kuma (WhatsApp)`;
 
-    const googleResult = await googleCalendarService.createEvent({
+    const googleEventId = await mirrorToGoogleCalendar({
       businessId: params.businessId,
-      summary,
-      description,
-      startDateTime: datetime,
-      durationMinutes: serviceDurationMinutes,
+      appointment: created,
       timezone: business.timezone,
+      customer,
     });
+    if (googleEventId === null) return ok(created);
 
-    if (googleResult.ok) {
-      const updated = await appointmentRepo.update(
-        params.businessId,
-        created.id,
-        {
-          googleEventId: googleResult.data.googleEventId,
-        },
-      );
-      logger.info(
-        {
-          businessId: params.businessId,
-          appointmentId: updated.id,
-          googleEventId: googleResult.data.googleEventId,
-          htmlLink: googleResult.data.htmlLink,
-        },
-        "appointment mirrored to google calendar",
-      );
-      return ok(updated);
-    }
-
-    if (googleResult.error instanceof NotConnectedError) {
-      logger.warn(
-        { businessId: params.businessId, appointmentId: created.id },
-        "business has no google calendar connected, appointment saved locally only",
-      );
-    } else {
-      logger.error(
-        {
-          businessId: params.businessId,
-          appointmentId: created.id,
-          code: googleResult.error.code,
-          context: googleResult.error.logContext,
-        },
-        "google calendar sync failed, appointment saved locally only",
-      );
-    }
-    return ok(created);
+    return ok(
+      await appointmentRepo.update(params.businessId, created.id, { googleEventId }),
+    );
   } catch (cause) {
     return err(
       new AppError({
@@ -653,6 +633,103 @@ function wallClockMinutesInTimezone(
   } catch {
     return null;
   }
+}
+
+// ── Espejo en Google Calendar ────────────────────────────────────────────────
+//
+// Best-effort by contract: the local appointment is authoritative and the
+// calendar event is a mirror, so neither helper below ever fails its caller.
+
+interface CustomerContact {
+  name: string | null;
+  phone: string;
+}
+
+/** Creates the calendar event. Returns its id, or null when it didn't happen. */
+async function mirrorToGoogleCalendar(params: {
+  businessId: string;
+  appointment: Appointment;
+  timezone: string;
+  customer: CustomerContact | null;
+}): Promise<string | null> {
+  const { businessId, appointment, customer } = params;
+  const customerLabel =
+    customer?.name?.trim() || customer?.phone || appointment.customerId;
+
+  const result = await googleCalendarService.createEvent({
+    businessId,
+    summary: `Cita: ${appointment.service} - ${customerLabel}`,
+    description: `Cliente: ${customer?.phone ?? "(sin teléfono)"}\nAgendado vía Kuma (WhatsApp)`,
+    startDateTime: appointment.scheduledAt,
+    durationMinutes: appointment.durationMinutes,
+    timezone: params.timezone,
+  });
+
+  if (result.ok) {
+    logger.info(
+      {
+        businessId,
+        appointmentId: appointment.id,
+        googleEventId: result.data.googleEventId,
+        htmlLink: result.data.htmlLink,
+      },
+      "appointment mirrored to google calendar",
+    );
+    return result.data.googleEventId;
+  }
+
+  if (result.error instanceof NotConnectedError) {
+    logger.warn(
+      { businessId, appointmentId: appointment.id },
+      "business has no google calendar connected, appointment saved locally only",
+    );
+  } else {
+    logger.error(
+      {
+        businessId,
+        appointmentId: appointment.id,
+        code: result.error.code,
+        context: result.error.logContext,
+      },
+      "google calendar sync failed, appointment saved locally only",
+    );
+  }
+  return null;
+}
+
+/**
+ * Drops the calendar event of an appointment that no longer stands.
+ *
+ * Without this, an appointment the owner cancelled from WhatsApp kept occupying
+ * their Google Calendar forever — the panel deleted the event, the WhatsApp flow
+ * did not, and the two views of the same day drifted apart.
+ */
+async function removeGoogleMirror(
+  businessId: string,
+  appointment: Appointment,
+): Promise<void> {
+  if (!appointment.googleEventId) return;
+
+  const result = await googleCalendarService.cancelEvent(
+    businessId,
+    appointment.googleEventId,
+  );
+  if (result.ok) {
+    logger.info(
+      { businessId, appointmentId: appointment.id, googleEventId: appointment.googleEventId },
+      "google calendar event removed for cancelled appointment",
+    );
+    return;
+  }
+  logger.warn(
+    {
+      businessId,
+      appointmentId: appointment.id,
+      googleEventId: appointment.googleEventId,
+      code: result.error.code,
+    },
+    "could not remove google calendar event; the local appointment is cancelled anyway",
+  );
 }
 
 // Only the service line changes across verticals — the rest of the card reads
@@ -808,6 +885,522 @@ export async function escalate(params: EscalateParams): Promise<Result<void>> {
         logContext: {
           businessId: params.businessId,
           conversationId: params.conversationId,
+        },
+        cause,
+      }),
+    );
+  }
+}
+
+// ── Gestión de solicitudes por parte del dueño ───────────────────────────────
+//
+// The owner drives these from their own WhatsApp thread (see ownerAssistant).
+// Every one of them validates that the appointment belongs to THIS business,
+// validates the status transition, keeps Google Calendar in step, and tells the
+// patient what happened.
+//
+// The patient notification is AWAITED rather than fire-and-forget, unlike the
+// escalation push. The owner is waiting on a reply that claims "listo, le avisé
+// al paciente" — reporting that without knowing whether it left would make Emma
+// lie about the one thing the owner is relying on.
+
+const STATUS_LABELS: Record<AppointmentStatus, string> = {
+  pending: "pendiente de aprobación",
+  scheduled: "agendada",
+  confirmed: "confirmada",
+  cancelled: "cancelada",
+  completed: "completada",
+};
+
+interface AppointmentContext {
+  appointment: Appointment;
+  business: Business;
+  customer: CustomerContact & { id: string };
+}
+
+// Loads everything the transitions below need, with the tenant check built in:
+// findById filters by businessId, so another business's id simply comes back
+// empty instead of leaking a row.
+async function loadAppointmentContext(
+  businessId: string,
+  appointmentId: string,
+): Promise<Result<AppointmentContext>> {
+  const appointment = await appointmentRepo.findById(businessId, appointmentId);
+  if (!appointment) {
+    return err(
+      new NotFoundError({
+        resource: "appointment",
+        userMessage: "No encontré esa cita en este negocio.",
+        logContext: { businessId, appointmentId },
+      }),
+    );
+  }
+
+  const businessResult = await businessService.getById(businessId);
+  if (!businessResult.ok) return businessResult;
+
+  const customer = await customerRepo.findById(businessId, appointment.customerId);
+  if (!customer) {
+    return err(
+      new NotFoundError({
+        resource: "customer",
+        userMessage: "No encontré al cliente de esa cita.",
+        logContext: { businessId, appointmentId, customerId: appointment.customerId },
+      }),
+    );
+  }
+
+  return ok({
+    appointment,
+    business: businessResult.data,
+    customer: { id: customer.id, name: customer.name, phone: customer.phone },
+  });
+}
+
+function wrongStatus(
+  action: string,
+  businessId: string,
+  appointment: Appointment,
+): ValidationError {
+  return new ValidationError({
+    code: "invalid_status_transition",
+    message: `cannot ${action} an appointment in status ${appointment.status}`,
+    userMessage: `Esa cita está ${STATUS_LABELS[appointment.status]}, no se puede ${action}.`,
+    logContext: {
+      businessId,
+      appointmentId: appointment.id,
+      currentStatus: appointment.status,
+    },
+  });
+}
+
+/**
+ * Delivers a message to the patient AND records it in their conversation.
+ *
+ * The transcript entry is not bookkeeping: without it the patient answers
+ * "gracias, ahí estaré" to a message Emma has no memory of sending, and her
+ * next reply reads as a non sequitur.
+ */
+async function messagePatient(params: {
+  businessId: string;
+  customerId: string;
+  phone: string;
+  text: string;
+}): Promise<Result<void>> {
+  const conversation = await conversationService.getOrCreateOpen(
+    params.businessId,
+    params.customerId,
+  );
+  if (conversation.ok) {
+    const persisted = await messageService.append({
+      businessId: params.businessId,
+      conversationId: conversation.data.id,
+      role: "assistant",
+      content: params.text,
+    });
+    if (!persisted.ok) {
+      logger.warn(
+        { businessId: params.businessId, code: persisted.error.code },
+        "could not record the patient notification in the transcript",
+      );
+    }
+  }
+
+  return customerNotifier.notifyCustomer(
+    params.businessId,
+    params.phone,
+    params.text,
+  );
+}
+
+// "El doctor" only fits a clinic. Anywhere else it reads as a stock template
+// nobody bothered to adapt.
+function proposerLabel(niche: Niche): string {
+  return niche === "dental" || niche === "salud"
+    ? "El doctor te propone"
+    : "Te proponemos";
+}
+
+async function nicheOf(businessId: string): Promise<Niche> {
+  const settings = await businessService.getSettings(businessId);
+  return settings.ok ? settings.data.niche : "general";
+}
+
+export interface PendingAppointmentSummary {
+  id: string;
+  service: string;
+  scheduledAt: Date;
+  customerName: string | null;
+  customerPhone: string;
+}
+
+export async function listPendingAppointments(
+  businessId: string,
+): Promise<Result<PendingAppointmentSummary[]>> {
+  try {
+    const rows = await appointmentRepo.findPendingByBusiness(businessId);
+    return ok(
+      rows.map((r) => ({
+        id: r.id,
+        service: r.service,
+        scheduledAt: r.scheduledAt,
+        customerName: r.customerName,
+        customerPhone: r.customerPhone,
+      })),
+    );
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: "list_pending_failed",
+        message: cause instanceof Error ? cause.message : "unknown error",
+        userMessage: "No pude leer las solicitudes pendientes.",
+        logContext: { businessId },
+        cause,
+      }),
+    );
+  }
+}
+
+export interface AppointmentActionResult {
+  appointment: Appointment;
+  /** False when the status changed but the patient could not be reached. */
+  patientNotified: boolean;
+  patientNotifyError?: string;
+}
+
+function actionResult(
+  appointment: Appointment,
+  notified: Result<void>,
+): AppointmentActionResult {
+  return {
+    appointment,
+    patientNotified: notified.ok,
+    ...(notified.ok ? {} : { patientNotifyError: notified.error.userMessage }),
+  };
+}
+
+export async function confirmAppointment(params: {
+  businessId: string;
+  appointmentId: string;
+}): Promise<Result<AppointmentActionResult>> {
+  try {
+    const ctx = await loadAppointmentContext(
+      params.businessId,
+      params.appointmentId,
+    );
+    if (!ctx.ok) return ctx;
+    const { appointment, business, customer } = ctx.data;
+
+    if (appointment.status !== "pending") {
+      return err(wrongStatus("confirmar", params.businessId, appointment));
+    }
+
+    let updated = await appointmentRepo.update(
+      params.businessId,
+      appointment.id,
+      { status: "scheduled" },
+    );
+
+    // Now it IS a commitment, so it earns its place on the calendar.
+    const googleEventId = await mirrorToGoogleCalendar({
+      businessId: params.businessId,
+      appointment: updated,
+      timezone: business.timezone,
+      customer,
+    });
+    if (googleEventId !== null) {
+      updated = await appointmentRepo.update(params.businessId, appointment.id, {
+        googleEventId,
+      });
+    }
+
+    const niche = await nicheOf(params.businessId);
+    const text = [
+      "¡Tu cita ha sido confirmada! 📋",
+      "",
+      `${NICHE_SERVICE_EMOJI[niche]} ${appointment.service}`,
+      `📅 ${formatRequestDateTime(appointment.scheduledAt, business.timezone)}`,
+      "",
+      "Te esperamos. Si necesitas reprogramar, escríbenos con anticipación.",
+    ].join("\n");
+
+    const notified = await messagePatient({
+      businessId: params.businessId,
+      customerId: customer.id,
+      phone: customer.phone,
+      text,
+    });
+
+    logger.info(
+      { businessId: params.businessId, appointmentId: appointment.id },
+      "owner confirmed a pending appointment",
+    );
+    return ok(actionResult(updated, notified));
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: "confirm_appointment_failed",
+        message: cause instanceof Error ? cause.message : "unknown error",
+        userMessage: "No pude confirmar la cita en este momento.",
+        logContext: {
+          businessId: params.businessId,
+          appointmentId: params.appointmentId,
+        },
+        cause,
+      }),
+    );
+  }
+}
+
+export async function rejectAppointment(params: {
+  businessId: string;
+  appointmentId: string;
+  reason?: string;
+}): Promise<Result<AppointmentActionResult>> {
+  try {
+    const ctx = await loadAppointmentContext(
+      params.businessId,
+      params.appointmentId,
+    );
+    if (!ctx.ok) return ctx;
+    const { appointment, business, customer } = ctx.data;
+
+    if (appointment.status !== "pending") {
+      return err(wrongStatus("rechazar", params.businessId, appointment));
+    }
+
+    const updated = await appointmentRepo.update(
+      params.businessId,
+      appointment.id,
+      { status: "cancelled" },
+    );
+    await removeGoogleMirror(params.businessId, appointment);
+
+    const reason = params.reason?.trim();
+    const text = [
+      `Lamentamos informarte que no pudimos confirmar tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)}.`,
+      ...(reason ? [reason] : []),
+      "¿Te gustaría agendar en otro horario?",
+    ].join(" ");
+
+    const notified = await messagePatient({
+      businessId: params.businessId,
+      customerId: customer.id,
+      phone: customer.phone,
+      text,
+    });
+
+    logger.info(
+      { businessId: params.businessId, appointmentId: appointment.id, reason },
+      "owner rejected a pending appointment",
+    );
+    return ok(actionResult(updated, notified));
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: "reject_appointment_failed",
+        message: cause instanceof Error ? cause.message : "unknown error",
+        userMessage: "No pude rechazar la cita en este momento.",
+        logContext: {
+          businessId: params.businessId,
+          appointmentId: params.appointmentId,
+        },
+        cause,
+      }),
+    );
+  }
+}
+
+export interface RescheduleResult extends AppointmentActionResult {
+  /** The fresh `pending` request holding the newly proposed slot. */
+  replacement: Appointment;
+}
+
+export async function rescheduleAppointment(params: {
+  businessId: string;
+  appointmentId: string;
+  suggestedDatetimeISO: string;
+  message?: string;
+}): Promise<Result<RescheduleResult>> {
+  try {
+    const ctx = await loadAppointmentContext(
+      params.businessId,
+      params.appointmentId,
+    );
+    if (!ctx.ok) return ctx;
+    const { appointment, business, customer } = ctx.data;
+
+    // A finished or already-dropped appointment has nothing left to move.
+    if (appointment.status === "cancelled" || appointment.status === "completed") {
+      return err(wrongStatus("reprogramar", params.businessId, appointment));
+    }
+
+    const datetime = new Date(params.suggestedDatetimeISO);
+    if (Number.isNaN(datetime.getTime())) {
+      return err(
+        new ValidationError({
+          message: `cannot parse suggestedDatetimeISO: ${params.suggestedDatetimeISO}`,
+          userMessage: "No entendí la fecha y hora que propusiste.",
+          logContext: {
+            businessId: params.businessId,
+            suggestedDatetimeISO: params.suggestedDatetimeISO,
+          },
+        }),
+      );
+    }
+
+    // Opening hours, breaks and lead time are deliberately NOT enforced here:
+    // the owner is picking the slot by hand and may well want to squeeze someone
+    // into their lunch break. Double-booking is another matter — that is a real
+    // clash between two patients, so it still blocks.
+    const requestedEnd = new Date(
+      datetime.getTime() + appointment.durationMinutes * 60_000,
+    );
+    const clash = await appointmentRepo.findOverlapping(
+      params.businessId,
+      datetime,
+      requestedEnd,
+    );
+    if (clash && clash.id !== appointment.id) {
+      return err(
+        new ConflictError({
+          message: "suggested slot overlaps an existing appointment",
+          userMessage: "Ese horario se cruza con otra cita ya reservada.",
+          logContext: {
+            businessId: params.businessId,
+            appointmentId: appointment.id,
+            suggestedDatetimeISO: params.suggestedDatetimeISO,
+            clashingAppointmentId: clash.id,
+          },
+        }),
+      );
+    }
+
+    // One transaction: a cancelled original with no replacement would silently
+    // drop the patient's request altogether.
+    const { original, replacement } = await db.transaction(async (tx) => {
+      const original = await appointmentRepo.update(
+        params.businessId,
+        appointment.id,
+        { status: "cancelled" },
+        tx,
+      );
+      const replacement = await appointmentRepo.create(
+        {
+          businessId: params.businessId,
+          customerId: appointment.customerId,
+          service: appointment.service,
+          scheduledAt: datetime,
+          durationMinutes: appointment.durationMinutes,
+          status: "pending",
+        },
+        tx,
+      );
+      return { original, replacement };
+    });
+
+    // The old slot is free again, so its calendar event has to go. The
+    // replacement is `pending` and earns an event only once it is confirmed.
+    await removeGoogleMirror(params.businessId, appointment);
+
+    const niche = await nicheOf(params.businessId);
+    const note = params.message?.trim();
+    const text = [
+      `${proposerLabel(niche)} un cambio de horario para tu ${appointment.service}:`,
+      "",
+      `📅 ${formatRequestDateTime(datetime, business.timezone)}`,
+      ...(note ? [note] : []),
+      "",
+      "Escríbenos para confirmar o elegir otro horario.",
+    ].join("\n");
+
+    const notified = await messagePatient({
+      businessId: params.businessId,
+      customerId: customer.id,
+      phone: customer.phone,
+      text,
+    });
+
+    logger.info(
+      {
+        businessId: params.businessId,
+        appointmentId: appointment.id,
+        replacementId: replacement.id,
+        suggestedDatetimeISO: params.suggestedDatetimeISO,
+      },
+      "owner proposed a new slot for an appointment",
+    );
+    return ok({ ...actionResult(original, notified), replacement });
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: "reschedule_appointment_failed",
+        message: cause instanceof Error ? cause.message : "unknown error",
+        userMessage: "No pude reprogramar la cita en este momento.",
+        logContext: {
+          businessId: params.businessId,
+          appointmentId: params.appointmentId,
+        },
+        cause,
+      }),
+    );
+  }
+}
+
+export async function cancelAppointment(params: {
+  businessId: string;
+  appointmentId: string;
+  reason?: string;
+}): Promise<Result<AppointmentActionResult>> {
+  try {
+    const ctx = await loadAppointmentContext(
+      params.businessId,
+      params.appointmentId,
+    );
+    if (!ctx.ok) return ctx;
+    const { appointment, business, customer } = ctx.data;
+
+    // Any status may be cancelled EXCEPT one already cancelled — telling the
+    // patient twice that the same appointment is off is worse than a no-op.
+    if (appointment.status === "cancelled") {
+      return err(wrongStatus("cancelar", params.businessId, appointment));
+    }
+
+    const updated = await appointmentRepo.update(
+      params.businessId,
+      appointment.id,
+      { status: "cancelled" },
+    );
+    await removeGoogleMirror(params.businessId, appointment);
+
+    const reason = params.reason?.trim();
+    const text = [
+      `Tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)} ha sido cancelada.`,
+      ...(reason ? [reason] : []),
+      "Si deseas reagendar, escríbenos.",
+    ].join(" ");
+
+    const notified = await messagePatient({
+      businessId: params.businessId,
+      customerId: customer.id,
+      phone: customer.phone,
+      text,
+    });
+
+    logger.info(
+      { businessId: params.businessId, appointmentId: appointment.id, reason },
+      "owner cancelled an appointment",
+    );
+    return ok(actionResult(updated, notified));
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: "cancel_appointment_failed",
+        message: cause instanceof Error ? cause.message : "unknown error",
+        userMessage: "No pude cancelar la cita en este momento.",
+        logContext: {
+          businessId: params.businessId,
+          appointmentId: params.appointmentId,
         },
         cause,
       }),
