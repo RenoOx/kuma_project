@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
-import { eq } from 'drizzle-orm'
 
 const PRICE_PER_M_INPUT_USD = 0.15
 const PRICE_PER_M_OUTPUT_USD = 0.6
@@ -36,8 +36,20 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
-        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'barba',
+          durationMinutes: 20,
+          priceMin: 20,
+          priceMax: 20,
+          requiresEvaluation: false,
+        },
       ],
     })
     if (!settingsUpdate.ok) throw settingsUpdate.error
@@ -48,7 +60,11 @@ async function main(): Promise<void> {
     logger.info({ businessId: business.id, ownerThreadId: thread.id }, 'owner thread ready')
 
     // 1) Daily summary.
-    const summaryResult = await ownerAssistantService.handle(business.id, thread.id, '¿cómo va el día?')
+    const summaryResult = await ownerAssistantService.handle(
+      business.id,
+      thread.id,
+      '¿cómo va el día?',
+    )
     if (!summaryResult.ok) throw summaryResult.error
     logger.info(
       {
@@ -62,7 +78,11 @@ async function main(): Promise<void> {
 
     // 2) Pause request (no confirmation yet). The model is expected to ASK
     // for confirmation; it must NOT pause yet.
-    const pauseAskResult = await ownerAssistantService.handle(business.id, thread.id, 'pausá el bot')
+    const pauseAskResult = await ownerAssistantService.handle(
+      business.id,
+      thread.id,
+      'pausá el bot',
+    )
     if (!pauseAskResult.ok) throw pauseAskResult.error
     logger.info(
       { reply: pauseAskResult.data.content, toolsExecuted: pauseAskResult.data.toolsExecuted },
@@ -71,9 +91,7 @@ async function main(): Promise<void> {
 
     const isPausedAfterAsk = await businessService.isBotPaused(business.id)
     if (isPausedAfterAsk) {
-      throw new Error(
-        'Bot was paused without explicit confirmation — model violated the rule',
-      )
+      throw new Error('Bot was paused without explicit confirmation — model violated the rule')
     }
 
     // 3) Confirmation.
@@ -125,7 +143,10 @@ async function main(): Promise<void> {
   } finally {
     if (createdBusinessId !== null) {
       await db.delete(businesses).where(eq(businesses.id, createdBusinessId))
-      logger.info({ businessId: createdBusinessId }, 'cleaned up smoke test data via cascade delete')
+      logger.info(
+        { businessId: createdBusinessId },
+        'cleaned up smoke test data via cascade delete',
+      )
     }
     await queryClient.end().catch(() => undefined)
   }

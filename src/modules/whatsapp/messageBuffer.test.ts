@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  MESSAGE_DEBOUNCE_MS,
-  _resetBufferForTests,
-  bufferMessage,
-} from './messageBuffer.js'
+import { _resetBufferForTests, bufferMessage, MESSAGE_DEBOUNCE_MS } from './messageBuffer.js'
 
 // Fake timers are safe in this file specifically: messageBuffer holds no DB
 // handle, so freezing setTimeout cannot stall postgres-js the way it would in

@@ -1,16 +1,13 @@
+import { and, asc, eq, inArray, or } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
-  knowledgeBase,
   type KbCategory,
   type KnowledgeBaseEntry,
+  knowledgeBase,
   type NewKnowledgeBaseEntry,
 } from '@/db/schema/index.js'
-import { and, asc, eq, inArray, or } from 'drizzle-orm'
 
-export async function deleteByBusiness(
-  businessId: string,
-  exec: Executor = db,
-): Promise<void> {
+export async function deleteByBusiness(businessId: string, exec: Executor = db): Promise<void> {
   await exec.delete(knowledgeBase).where(eq(knowledgeBase.businessId, businessId))
 }
 

@@ -16,9 +16,10 @@
  * kb delete <businessId> <id>
  */
 import { readFileSync } from 'node:fs'
+import { asc } from 'drizzle-orm'
 import { db, queryClient } from '@/db/client.js'
-import { businesses } from '@/db/schema/index.js'
 import type { KbAttachmentType, KbCategory, KbSendMode } from '@/db/schema/index.js'
+import { businesses } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
@@ -30,7 +31,6 @@ import {
   KB_SEND_MODES,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import { normalizePhone } from '@/shared/phone.js'
-import { asc } from 'drizzle-orm'
 
 // ── Arg parser ────────────────────────────────────────────────────────────────
 
@@ -273,7 +273,8 @@ async function kbDelete(businessId: string, id: string): Promise<void> {
 // ── Help ──────────────────────────────────────────────────────────────────────
 
 function usage(): never {
-  console.error(`
+  console.error(
+    `
 Usage: npm run admin -- <resource> <command> [options]
 
 BUSINESS
@@ -307,7 +308,8 @@ EXAMPLES
   npm run admin -- kb add abc123 --category="servicios" --title="Portafolio" --content="Mirá nuestros trabajos" --attachment-type=link --attachment-url="https://instagram.com/x"
   npm run admin -- kb update abc123 entry456 --content="Nuevo texto..."
   npm run admin -- kb delete abc123 entry456
-  `.trim())
+  `.trim(),
+  )
   process.exit(2)
 }
 

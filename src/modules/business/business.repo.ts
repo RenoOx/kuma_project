@@ -1,6 +1,6 @@
-import { db, type Executor } from '@/db/client.js'
-import { businesses, type Business, type NewBusiness } from '@/db/schema/index.js'
 import { asc, eq } from 'drizzle-orm'
+import { db, type Executor } from '@/db/client.js'
+import { type Business, businesses, type NewBusiness } from '@/db/schema/index.js'
 
 export async function findAll(exec: Executor = db): Promise<Business[]> {
   return exec.select().from(businesses).orderBy(asc(businesses.createdAt))

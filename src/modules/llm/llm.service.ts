@@ -1,3 +1,8 @@
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions.js'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import type { Message } from '@/db/schema/index.js'
@@ -9,10 +14,6 @@ import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearc
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionMessageToolCall,
-} from 'openai/resources/chat/completions.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt } from './prompts.js'
@@ -66,9 +67,7 @@ function convertHistoryToChatMessages(history: Message[]): ChatCompletionMessage
   return out
 }
 
-export async function generateReply(
-  params: GenerateReplyParams,
-): Promise<Result<LLMResponse>> {
+export async function generateReply(params: GenerateReplyParams): Promise<Result<LLMResponse>> {
   const log = logger.child({
     component: 'llm.service',
     businessId: params.businessId,
@@ -182,7 +181,7 @@ export async function generateReply(
   let escalated = false
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    let completion
+    let completion: ChatCompletion
     try {
       completion = await openai.chat.completions.create(
         {
@@ -197,8 +196,7 @@ export async function generateReply(
       )
     } catch (cause) {
       const isTimeout =
-        cause instanceof Error &&
-        (cause.name === 'TimeoutError' || cause.name === 'AbortError')
+        cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
       return err(
         new AppError({
           code: isTimeout ? 'llm_timeout' : 'llm_generate_failed',

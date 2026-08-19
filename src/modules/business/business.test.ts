@@ -1,9 +1,9 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { ConflictError, NotFoundError } from '@/shared/errors.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import { closeDb, resetDb } from '../../../tests/helpers/db.js'
 
 describe('business module', () => {

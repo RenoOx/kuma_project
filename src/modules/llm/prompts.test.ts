@@ -1,5 +1,5 @@
-import type { Business } from '@/db/schema/index.js'
 import { describe, expect, it } from 'vitest'
+import type { Business } from '@/db/schema/index.js'
 import { buildSystemPrompt, GREETING_VARIANTS, pickGreeting } from './prompts.js'
 
 const BUSINESS_NAME = 'Bella Vida Salón & Spa'

@@ -3,10 +3,10 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from '@/share
 import { err, ok, type Result } from '@/shared/result.js'
 import * as businessRepo from './business.repo.js'
 import {
+  type BusinessSettings,
   businessSettingsSchema,
   isBotPausedNow,
   parseBusinessSettings,
-  type BusinessSettings,
 } from './business.settings.js'
 
 // Postgres unique_violation. Used to detect race conditions where another caller
@@ -17,9 +17,7 @@ export async function getById(id: string): Promise<Result<Business>> {
   try {
     const found = await businessRepo.findById(id)
     if (!found) {
-      return err(
-        new NotFoundError({ resource: 'business', logContext: { businessId: id } }),
-      )
+      return err(new NotFoundError({ resource: 'business', logContext: { businessId: id } }))
     }
     return ok(found)
   } catch (cause) {
@@ -105,9 +103,7 @@ export async function getSettings(businessId: string): Promise<Result<BusinessSe
   try {
     const business = await businessRepo.findById(businessId)
     if (!business) {
-      return err(
-        new NotFoundError({ resource: 'business', logContext: { businessId } }),
-      )
+      return err(new NotFoundError({ resource: 'business', logContext: { businessId } }))
     }
     return parseBusinessSettings(businessId, business.settings)
   } catch (cause) {
@@ -141,16 +137,16 @@ export async function updateSettings(
   try {
     const business = await businessRepo.findById(businessId)
     if (!business) {
-      return err(
-        new NotFoundError({ resource: 'business', logContext: { businessId } }),
-      )
+      return err(new NotFoundError({ resource: 'business', logContext: { businessId } }))
     }
 
     // Shallow merge — callers replace top-level keys (operatingHours, services,
     // slotDurationMinutes) atomically. Day-by-day or per-service edits would
     // need an admin layer; not for V1.
     const current =
-      business.settings && typeof business.settings === 'object' && !Array.isArray(business.settings)
+      business.settings &&
+      typeof business.settings === 'object' &&
+      !Array.isArray(business.settings)
         ? (business.settings as Record<string, unknown>)
         : {}
     const merged = { ...current, ...partial }

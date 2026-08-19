@@ -58,9 +58,7 @@ export async function getOrCreateOpen(
 
 // One owner_thread per business. customerId stays null because the owner
 // isn't a customer record; the rolling 48h memory lives in this conversation.
-export async function findOrCreateOwnerThread(
-  businessId: string,
-): Promise<Result<Conversation>> {
+export async function findOrCreateOwnerThread(businessId: string): Promise<Result<Conversation>> {
   try {
     const existing = await conversationRepo.findOwnerThread(businessId)
     if (existing) return ok(existing)
@@ -83,10 +81,7 @@ export async function findOrCreateOwnerThread(
   }
 }
 
-export async function close(
-  businessId: string,
-  conversationId: string,
-): Promise<Result<void>> {
+export async function close(businessId: string, conversationId: string): Promise<Result<void>> {
   return changeStatus(
     businessId,
     conversationId,
@@ -96,10 +91,7 @@ export async function close(
   )
 }
 
-export async function escalate(
-  businessId: string,
-  conversationId: string,
-): Promise<Result<void>> {
+export async function escalate(businessId: string, conversationId: string): Promise<Result<void>> {
   return changeStatus(
     businessId,
     conversationId,

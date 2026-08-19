@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
-  googleCredentials,
   type GoogleCredentials,
+  googleCredentials,
   type NewGoogleCredentials,
 } from '@/db/schema/index.js'
-import { eq } from 'drizzle-orm'
 
 export async function findByBusiness(
   businessId: string,
@@ -61,9 +61,6 @@ export async function updateTokens(
   return row
 }
 
-export async function deleteByBusiness(
-  businessId: string,
-  exec: Executor = db,
-): Promise<void> {
+export async function deleteByBusiness(businessId: string, exec: Executor = db): Promise<void> {
   await exec.delete(googleCredentials).where(eq(googleCredentials.businessId, businessId))
 }

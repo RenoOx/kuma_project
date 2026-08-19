@@ -1,3 +1,4 @@
+import { and, count, desc, eq, gte, max } from 'drizzle-orm'
 import { db } from '@/db/client.js'
 import {
   appointments,
@@ -6,7 +7,6 @@ import {
   googleCredentials,
   messages,
 } from '@/db/schema/index.js'
-import { and, count, desc, eq, gte, max } from 'drizzle-orm'
 
 export async function getGoogleConnectedEmail(businessId: string): Promise<string | null> {
   const rows = await db
@@ -53,7 +53,12 @@ export async function getAllBusinessesStats(): Promise<Map<string, BusinessStats
   const map = new Map<string, BusinessStats>()
   const get = (id: string): BusinessStats => {
     if (!map.has(id)) {
-      map.set(id, { customerCount: 0, conversationCount: 0, appointmentCount: 0, lastMessageAt: null })
+      map.set(id, {
+        customerCount: 0,
+        conversationCount: 0,
+        appointmentCount: 0,
+        lastMessageAt: null,
+      })
     }
     return map.get(id)!
   }
@@ -100,63 +105,59 @@ export async function getBusinessDetail(businessId: string): Promise<BusinessDet
   const weekStart = new Date(startOfDay)
   weekStart.setDate(startOfDay.getDate() - 6)
 
-  const [
-    recentCustomers,
-    rawAppointments,
-    [todayRow],
-    [weekRow],
-    [apptWeekRow],
-    gcRows,
-  ] = await Promise.all([
-    db
-      .select({
-        id: customers.id,
-        name: customers.name,
-        phone: customers.phone,
-        lastSeenAt: customers.lastSeenAt,
-        createdAt: customers.createdAt,
-      })
-      .from(customers)
-      .where(eq(customers.businessId, businessId))
-      .orderBy(desc(customers.createdAt))
-      .limit(20),
+  const [recentCustomers, rawAppointments, [todayRow], [weekRow], [apptWeekRow], gcRows] =
+    await Promise.all([
+      db
+        .select({
+          id: customers.id,
+          name: customers.name,
+          phone: customers.phone,
+          lastSeenAt: customers.lastSeenAt,
+          createdAt: customers.createdAt,
+        })
+        .from(customers)
+        .where(eq(customers.businessId, businessId))
+        .orderBy(desc(customers.createdAt))
+        .limit(20),
 
-    db
-      .select({
-        id: appointments.id,
-        service: appointments.service,
-        scheduledAt: appointments.scheduledAt,
-        status: appointments.status,
-        customerName: customers.name,
-        customerPhone: customers.phone,
-      })
-      .from(appointments)
-      .leftJoin(customers, eq(appointments.customerId, customers.id))
-      .where(eq(appointments.businessId, businessId))
-      .orderBy(desc(appointments.scheduledAt))
-      .limit(10),
+      db
+        .select({
+          id: appointments.id,
+          service: appointments.service,
+          scheduledAt: appointments.scheduledAt,
+          status: appointments.status,
+          customerName: customers.name,
+          customerPhone: customers.phone,
+        })
+        .from(appointments)
+        .leftJoin(customers, eq(appointments.customerId, customers.id))
+        .where(eq(appointments.businessId, businessId))
+        .orderBy(desc(appointments.scheduledAt))
+        .limit(10),
 
-    db
-      .select({ n: count() })
-      .from(messages)
-      .where(and(eq(messages.businessId, businessId), gte(messages.createdAt, startOfDay))),
+      db
+        .select({ n: count() })
+        .from(messages)
+        .where(and(eq(messages.businessId, businessId), gte(messages.createdAt, startOfDay))),
 
-    db
-      .select({ n: count() })
-      .from(messages)
-      .where(and(eq(messages.businessId, businessId), gte(messages.createdAt, weekStart))),
+      db
+        .select({ n: count() })
+        .from(messages)
+        .where(and(eq(messages.businessId, businessId), gte(messages.createdAt, weekStart))),
 
-    db
-      .select({ n: count() })
-      .from(appointments)
-      .where(and(eq(appointments.businessId, businessId), gte(appointments.scheduledAt, weekStart))),
+      db
+        .select({ n: count() })
+        .from(appointments)
+        .where(
+          and(eq(appointments.businessId, businessId), gte(appointments.scheduledAt, weekStart)),
+        ),
 
-    db
-      .select({ connectedEmail: googleCredentials.connectedEmail })
-      .from(googleCredentials)
-      .where(eq(googleCredentials.businessId, businessId))
-      .limit(1),
-  ])
+      db
+        .select({ connectedEmail: googleCredentials.connectedEmail })
+        .from(googleCredentials)
+        .where(eq(googleCredentials.businessId, businessId))
+        .limit(1),
+    ])
 
   return {
     recentCustomers,

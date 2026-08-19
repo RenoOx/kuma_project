@@ -1,11 +1,11 @@
+import { count } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/client.js'
-import { messages, type Conversation, type Customer } from '@/db/schema/index.js'
+import { type Conversation, type Customer, messages } from '@/db/schema/index.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { count } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import {
   closeDb,
   resetDb,

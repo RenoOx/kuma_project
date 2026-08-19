@@ -1,3 +1,8 @@
+import { rm } from 'node:fs/promises'
+import { asc } from 'drizzle-orm'
+import type { Context, Next } from 'hono'
+import { Hono } from 'hono'
+import { z } from 'zod'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
@@ -14,11 +19,6 @@ import {
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
 import { normalizePhone, samePhone } from '@/shared/phone.js'
-import { asc } from 'drizzle-orm'
-import { Hono } from 'hono'
-import { rm } from 'node:fs/promises'
-import { z } from 'zod'
-import type { Context, Next } from 'hono'
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -51,14 +51,11 @@ const createBusinessBody = z
     address: z.string().min(1).nullable().optional(),
     googleMapsUrl: z.string().url().nullable().optional(),
   })
-  .refine(
-    (v) => !samePhone(v.ownerWhatsappNumber, v.whatsappNumber),
-    {
-      message:
-        'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant. Use a separate personal number for the owner.',
-      path: ['ownerWhatsappNumber'],
-    },
-  )
+  .refine((v) => !samePhone(v.ownerWhatsappNumber, v.whatsappNumber), {
+    message:
+      'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant. Use a separate personal number for the owner.',
+    path: ['ownerWhatsappNumber'],
+  })
 
 // Deliberately awkward: forcing past the anti-ban guard should require typing
 // the consequence out, not a reflexive `-d '{}'`.
@@ -84,14 +81,11 @@ const patchBusinessBody = z
     googleMapsUrl: z.string().url().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
-  .refine(
-    (v) => !v.whatsappNumber || !samePhone(v.ownerWhatsappNumber, v.whatsappNumber),
-    {
-      message:
-        'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant.',
-      path: ['ownerWhatsappNumber'],
-    },
-  )
+  .refine((v) => !v.whatsappNumber || !samePhone(v.ownerWhatsappNumber, v.whatsappNumber), {
+    message:
+      'ownerWhatsappNumber must be different from whatsappNumber — the bot is logged in as whatsappNumber so messages from that same number are treated as fromMe and never reach the owner assistant.',
+    path: ['ownerWhatsappNumber'],
+  })
 
 // An attachment type other than 'none' is meaningless without a URL, and a URL
 // is meaningless without a type. Rejected up front rather than stored half-set.
@@ -129,7 +123,11 @@ const createKbBody = z
   })
 
 const patchKbBody = z
-  .object({ ...kbFields, content: kbFields.content.optional(), category: kbFields.category.optional() })
+  .object({
+    ...kbFields,
+    content: kbFields.content.optional(),
+    category: kbFields.category.optional(),
+  })
   .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
   .refine(hasCoherentAttachment, attachmentRefinement)
   .refine((v) => v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0, {
@@ -159,10 +157,7 @@ adminRoutes.use('/admin/*', requireAdmin)
 // ── Businesses ────────────────────────────────────────────────────────────────
 
 adminRoutes.get('/admin/businesses', async (c) => {
-  const rows = await db
-    .select()
-    .from(businesses)
-    .orderBy(asc(businesses.createdAt))
+  const rows = await db.select().from(businesses).orderBy(asc(businesses.createdAt))
   return c.json({ items: rows })
 })
 
@@ -173,7 +168,10 @@ adminRoutes.post('/admin/businesses', async (c) => {
   }
   const result = await businessService.register(body.data)
   if (!result.ok) {
-    return c.json({ error: result.error.code, message: result.error.message }, appErrorStatus(result.error.code))
+    return c.json(
+      { error: result.error.code, message: result.error.message },
+      appErrorStatus(result.error.code),
+    )
   }
   return c.json(result.data, 201)
 })
@@ -181,7 +179,10 @@ adminRoutes.post('/admin/businesses', async (c) => {
 adminRoutes.get('/admin/businesses/:id', async (c) => {
   const result = await businessService.getById(c.req.param('id'))
   if (!result.ok) {
-    return c.json({ error: result.error.code, message: result.error.message }, appErrorStatus(result.error.code))
+    return c.json(
+      { error: result.error.code, message: result.error.message },
+      appErrorStatus(result.error.code),
+    )
   }
   return c.json(result.data)
 })
@@ -274,10 +275,7 @@ adminRoutes.put('/admin/businesses/:id/settings', async (c) => {
   const raw = await c.req.json().catch(() => null)
   const parsed = businessSettingsSchema.safeParse(raw)
   if (!parsed.success) {
-    return c.json(
-      { error: 'validation_error', issues: parsed.error.flatten().fieldErrors },
-      400,
-    )
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten().fieldErrors }, 400)
   }
   try {
     const updated = await businessRepo.update(c.req.param('id'), {

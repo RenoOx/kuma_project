@@ -1,11 +1,11 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/client.js'
-import { conversations, type Customer } from '@/db/schema/index.js'
+import { type Customer, conversations } from '@/db/schema/index.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { NotFoundError } from '@/shared/errors.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import {
   closeDb,
   resetDb,
@@ -80,10 +80,7 @@ describe('conversation module', () => {
     const result = await conversationService.close(seed.businessA.id, created.data.id)
     assert(result.ok)
 
-    const [row] = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, created.data.id))
+    const [row] = await db.select().from(conversations).where(eq(conversations.id, created.data.id))
     expect(row?.status).toBe('closed')
   })
 
@@ -93,10 +90,7 @@ describe('conversation module', () => {
     const result = await conversationService.escalate(seed.businessA.id, created.data.id)
     assert(result.ok)
 
-    const [row] = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.id, created.data.id))
+    const [row] = await db.select().from(conversations).where(eq(conversations.id, created.data.id))
     expect(row?.status).toBe('escalated')
   })
 

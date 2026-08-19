@@ -1,10 +1,8 @@
+import { z } from 'zod'
 import { NotConfiguredError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import { z } from 'zod'
 
-const timeHHMM = z
-  .string()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:mm 24-hour time')
+const timeHHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:mm 24-hour time')
 
 const breakSchema = z.object({
   start: timeHHMM,
@@ -219,10 +217,7 @@ export function formatServicePrice(service: Service): string {
 // Pure check: given a settings object (or null when business is unconfigured),
 // is the customer-facing bot currently paused? Used by handler.ts and the
 // owner tool executor.
-export function isBotPausedNow(
-  settings: BusinessSettings | null,
-  now: Date = new Date(),
-): boolean {
+export function isBotPausedNow(settings: BusinessSettings | null, now: Date = new Date()): boolean {
   const state = settings?.botPaused
   if (!state || !state.paused) return false
   if (state.until && Date.parse(state.until) <= now.getTime()) return false
@@ -248,7 +243,11 @@ export function dayKeyForJsDow(dow: number): DayKey | null {
 // specialDays entry overrides the recurring weekly operatingHours for that
 // date. Used by checkAvailability and bookAppointment so both stay in sync —
 // call this instead of reading settings.operatingHours[dayKey] directly.
-export function resolveDayHours(settings: BusinessSettings, dateISO: string, dayKey: DayKey): DayHours {
+export function resolveDayHours(
+  settings: BusinessSettings,
+  dateISO: string,
+  dayKey: DayKey,
+): DayHours {
   const special = settings.specialDays?.find((d) => d.date === dateISO)
   if (special) return special.hours
   return settings.operatingHours[dayKey]
@@ -266,10 +265,7 @@ function isEmptyObject(value: unknown): boolean {
 // Returns ok(settings) when raw matches the schema. Returns NotConfiguredError
 // for the common "not configured" shapes (null, undefined, {}) as well as for
 // partial / invalid payloads, with `missing` filled from Zod's path issues.
-export function parseBusinessSettings(
-  businessId: string,
-  raw: unknown,
-): Result<BusinessSettings> {
+export function parseBusinessSettings(businessId: string, raw: unknown): Result<BusinessSettings> {
   if (raw === null || raw === undefined || isEmptyObject(raw)) {
     return err(
       new NotConfiguredError({

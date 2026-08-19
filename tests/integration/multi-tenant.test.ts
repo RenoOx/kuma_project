@@ -42,7 +42,12 @@ describe('multi-tenant isolation', () => {
     const { businessA, businessB } = await seedTwoBusinesses()
 
     await db.insert(knowledgeBase).values([
-      { businessId: businessA.id, title: 'Servicios', category: 'servicios', content: 'Corte, barba' },
+      {
+        businessId: businessA.id,
+        title: 'Servicios',
+        category: 'servicios',
+        content: 'Corte, barba',
+      },
       { businessId: businessA.id, title: 'Corte', category: 'precios', content: 'S/30 corte' },
     ])
 
@@ -150,8 +155,18 @@ describe('multi-tenant isolation', () => {
     if (!custA || !custB) throw new Error('seed customers failed')
 
     await db.insert(knowledgeBase).values([
-      { businessId: businessA.id, title: 'A services', category: 'servicios', content: 'A services' },
-      { businessId: businessB.id, title: 'B services', category: 'servicios', content: 'B services' },
+      {
+        businessId: businessA.id,
+        title: 'A services',
+        category: 'servicios',
+        content: 'A services',
+      },
+      {
+        businessId: businessB.id,
+        title: 'B services',
+        category: 'servicios',
+        content: 'B services',
+      },
     ])
 
     const [convA] = await db
@@ -217,9 +232,9 @@ describe('multi-tenant isolation', () => {
     expect(await db.select().from(events).where(eq(events.businessId, businessA.id))).toEqual([])
 
     // All B data intact
-    expect(
-      await db.select().from(businesses).where(eq(businesses.id, businessB.id)),
-    ).toHaveLength(1)
+    expect(await db.select().from(businesses).where(eq(businesses.id, businessB.id))).toHaveLength(
+      1,
+    )
     expect(
       await db.select().from(customers).where(eq(customers.businessId, businessB.id)),
     ).toHaveLength(1)

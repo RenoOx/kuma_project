@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
@@ -9,7 +10,6 @@ import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { generateDailyReportText } from '@/modules/ownerAssistant/dailyReport.js'
 import type { WhatsappClient } from '@/modules/whatsapp/baileys.client.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
-import { eq } from 'drizzle-orm'
 
 interface FakeSend {
   jid: string
@@ -86,8 +86,20 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
-        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'barba',
+          durationMinutes: 20,
+          priceMin: 20,
+          priceMax: 20,
+          requiresEvaluation: false,
+        },
       ],
     })
     if (!settingsUpdate.ok) throw settingsUpdate.error

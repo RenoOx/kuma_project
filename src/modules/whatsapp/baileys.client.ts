@@ -1,17 +1,17 @@
-import { logger as rootLogger } from '@/config/logger.js'
+import { mkdir } from 'node:fs/promises'
+import type { Boom } from '@hapi/boom'
 import {
-  makeWASocket,
   Browsers,
   fetchLatestBaileysVersion,
+  makeWASocket,
   useMultiFileAuthState,
   type WAMessage,
   type WASocket,
 } from '@whiskeysockets/baileys'
-import type { Boom } from '@hapi/boom'
-import { mkdir } from 'node:fs/promises'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
-import { classifyDisconnect, disconnectReasonName, type DisconnectKind } from './sessionPolicy.js'
+import { logger as rootLogger } from '@/config/logger.js'
+import { classifyDisconnect, type DisconnectKind, disconnectReasonName } from './sessionPolicy.js'
 
 export type MessageHandler = (raw: WAMessage) => Promise<void> | void
 export interface DisconnectInfo {
@@ -67,9 +67,7 @@ export interface WhatsappClient {
   logout(): Promise<void>
 }
 
-export async function makeWhatsappClient(
-  opts: WhatsappClientOptions,
-): Promise<WhatsappClient> {
+export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<WhatsappClient> {
   const log = rootLogger.child({ component: 'baileys', businessId: opts.businessId })
 
   await mkdir(opts.sessionDir, { recursive: true })
@@ -142,7 +140,8 @@ export async function makeWhatsappClient(
       const kind = classifyDisconnect(statusCode)
       const reasonName = disconnectReasonName(statusCode)
       log.warn({ statusCode, errMessage, kind, reasonName }, 'whatsapp connection closed')
-      for (const handler of disconnectHandlers) handler({ kind, statusCode, reasonName, errMessage })
+      for (const handler of disconnectHandlers)
+        handler({ kind, statusCode, reasonName, errMessage })
     }
   })
 
@@ -213,7 +212,10 @@ export async function makeWhatsappClient(
         }
       }
       const result = await sock.sendMessage(jid, { text })
-      log.info({ jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status }, 'sock.sendMessage: returned')
+      log.info(
+        { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
+        'sock.sendMessage: returned',
+      )
     },
     onMessage(handler) {
       messageHandlers.push(handler)

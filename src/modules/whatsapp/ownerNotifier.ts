@@ -14,10 +14,7 @@ function ownerJidFromPhone(phone: string): string {
 // Soft-fail cases (owner not configured / WA client not registered) return
 // ok(undefined) because they are recoverable states the caller doesn't need
 // to react to. Hard failures (sendMessage throws) return err and are logged.
-export async function notifyOwner(
-  businessId: string,
-  text: string,
-): Promise<Result<void>> {
+export async function notifyOwner(businessId: string, text: string): Promise<Result<void>> {
   const businessResult = await businessService.getById(businessId)
   if (!businessResult.ok) return businessResult
   const business = businessResult.data
@@ -42,10 +39,7 @@ export async function notifyOwner(
   const jid = ownerJidFromPhone(business.ownerWhatsappNumber)
   try {
     await client.sendMessage(jid, text)
-    logger.info(
-      { businessId, jid, textPreview: text.slice(0, 60) },
-      'notified owner',
-    )
+    logger.info({ businessId, jid, textPreview: text.slice(0, 60) }, 'notified owner')
     return ok(undefined)
   } catch (cause) {
     return err(

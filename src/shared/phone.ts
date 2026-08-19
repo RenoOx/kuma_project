@@ -30,10 +30,7 @@ export function normalizePhone(raw: string | null | undefined): string | null {
  * Null/empty never matches — "no owner configured" must not compare equal to
  * "no phone extracted", or an unparsable JID would be greeted as the owner.
  */
-export function samePhone(
-  a: string | null | undefined,
-  b: string | null | undefined,
-): boolean {
+export function samePhone(a: string | null | undefined, b: string | null | undefined): boolean {
   const normalizedA = normalizePhone(a)
   return normalizedA !== null && normalizedA === normalizePhone(b)
 }

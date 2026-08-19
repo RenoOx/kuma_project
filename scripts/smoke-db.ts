@@ -32,13 +32,13 @@ async function main(): Promise<void> {
           {
             businessId: business.id,
             title: 'Servicios',
-        category: 'servicios',
+            category: 'servicios',
             content: 'Corte de cabello, barba, cejas, lavado.',
           },
           {
             businessId: business.id,
             title: 'Precios',
-        category: 'precios',
+            category: 'precios',
             content: 'Corte: S/30. Barba: S/20. Cejas: S/10.',
           },
         ])

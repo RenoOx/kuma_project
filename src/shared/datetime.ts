@@ -42,7 +42,9 @@ export function formatDateTimeForDisplay(date: Date, timezone: string): string {
     const weekday = new Intl.DateTimeFormat('es-PE', { timeZone: timezone, weekday: 'long' })
       .format(date)
       .toLowerCase()
-    const day = new Intl.DateTimeFormat('es-PE', { timeZone: timezone, day: 'numeric' }).format(date)
+    const day = new Intl.DateTimeFormat('es-PE', { timeZone: timezone, day: 'numeric' }).format(
+      date,
+    )
     const month = new Intl.DateTimeFormat('es-PE', { timeZone: timezone, month: 'long' })
       .format(date)
       .toLowerCase()

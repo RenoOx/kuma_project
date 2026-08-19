@@ -26,9 +26,7 @@ export function dayRangeInTimezone(
       timeZoneName: 'longOffset',
     })
     const sample = new Date(`${dateISO}T12:00:00Z`)
-    const tzName = formatter
-      .formatToParts(sample)
-      .find((p) => p.type === 'timeZoneName')?.value
+    const tzName = formatter.formatToParts(sample).find((p) => p.type === 'timeZoneName')?.value
     if (!tzName) return null
     const offset =
       tzName === 'GMT'

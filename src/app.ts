@@ -1,12 +1,16 @@
-import { Hono, type Context } from 'hono'
+import { type Context, Hono } from 'hono'
 import qrcode from 'qrcode'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
 import { adminRoutes } from './modules/admin/admin.routes.js'
 import { dashboardRoutes } from './modules/admin/dashboard.routes.js'
-import { googleAuthRoutes } from './modules/google/auth.routes.js'
 import * as businessRepo from './modules/business/business.repo.js'
-import { getConnectionState, getClient, storePairingCode } from './modules/whatsapp/clientRegistry.js'
+import { googleAuthRoutes } from './modules/google/auth.routes.js'
+import {
+  getClient,
+  getConnectionState,
+  storePairingCode,
+} from './modules/whatsapp/clientRegistry.js'
 import * as sessionGuard from './modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from './shared/errors.js'
 
@@ -47,7 +51,10 @@ app.get('/admin/whatsapp/qr', async (c) => {
     const all = await businessRepo.findAll()
     if (all.length === 0) {
       return c.html(
-        renderPage('Sin negocios', '<p>No hay negocios registrados. Creá uno con la API admin.</p>'),
+        renderPage(
+          'Sin negocios',
+          '<p>No hay negocios registrados. Creá uno con la API admin.</p>',
+        ),
         200,
       )
     }
@@ -201,7 +208,11 @@ app.get('/admin/whatsapp/pair', async (c) => {
   const client = getClient(businessId)
   if (!client) {
     return c.html(
-      renderPage('Sin cliente', '<p>El cliente de WhatsApp no está iniciado. Esperá unos segundos y recargá.</p>', 5),
+      renderPage(
+        'Sin cliente',
+        '<p>El cliente de WhatsApp no está iniciado. Esperá unos segundos y recargá.</p>',
+        5,
+      ),
       200,
     )
   }
@@ -257,15 +268,22 @@ app.get('/admin/whatsapp/pair', async (c) => {
       storePairingCode(businessId, code)
     } catch (err) {
       const msg = (err as Error).message ?? 'error desconocido'
-      const isAlreadyRegistered = msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')
+      const isAlreadyRegistered =
+        msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')
       if (isAlreadyRegistered) {
         return c.html(
-          renderPage('Ya vinculado', '<p style="color:green">✅ Este número ya tiene sesión activa. No es necesario vincular.</p>'),
+          renderPage(
+            'Ya vinculado',
+            '<p style="color:green">✅ Este número ya tiene sesión activa. No es necesario vincular.</p>',
+          ),
           200,
         )
       }
       return c.html(
-        renderPage('Error', `<p style="color:red">No se pudo generar el código: ${msg}</p><p><a href="${refreshUrl}">Reintentar</a></p>`),
+        renderPage(
+          'Error',
+          `<p style="color:red">No se pudo generar el código: ${msg}</p><p><a href="${refreshUrl}">Reintentar</a></p>`,
+        ),
         500,
       )
     }
@@ -282,7 +300,10 @@ app.get('/admin/whatsapp/pair', async (c) => {
   }
 
   // Format as XXXX-XXXX
-  const formatted = code.replace(/[^A-Z0-9]/gi, '').toUpperCase().replace(/^(.{4})(.{4})$/, '$1-$2')
+  const formatted = code
+    .replace(/[^A-Z0-9]/gi, '')
+    .toUpperCase()
+    .replace(/^(.{4})(.{4})$/, '$1-$2')
 
   // No auto-refresh here. This page used to reload every 60s, and a reload with
   // no cached code meant another request to WhatsApp. Expiry is handled by the

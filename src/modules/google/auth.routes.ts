@@ -1,6 +1,6 @@
+import { Hono } from 'hono'
 import { logger } from '@/config/logger.js'
 import * as businessService from '@/modules/business/business.service.js'
-import { Hono } from 'hono'
 import * as googleClient from './google.client.js'
 import * as googleCredentialsRepo from './googleCredentials.repo.js'
 
@@ -33,7 +33,10 @@ googleAuthRoutes.get('/auth/google/connect', async (c) => {
   const businessId = c.req.query('businessId')
   if (!businessId) {
     return c.html(
-      htmlPage('Falta businessId', '<h1 class="err">Falta el parámetro <code>businessId</code>.</h1>'),
+      htmlPage(
+        'Falta businessId',
+        '<h1 class="err">Falta el parámetro <code>businessId</code>.</h1>',
+      ),
       400,
     )
   }
@@ -84,10 +87,7 @@ googleAuthRoutes.get('/auth/google/callback', async (c) => {
   const state = c.req.query('state')
   if (!code || !state) {
     return c.html(
-      htmlPage(
-        'Callback inválido',
-        '<h1 class="err">Faltan parámetros del callback.</h1>',
-      ),
+      htmlPage('Callback inválido', '<h1 class="err">Faltan parámetros del callback.</h1>'),
       400,
     )
   }

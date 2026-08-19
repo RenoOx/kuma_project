@@ -43,7 +43,11 @@ export function storeQR(businessId: string, qr: string): void {
 }
 
 export function storePairingCode(businessId: string, code: string): void {
-  const prev = connectionStates.get(businessId) ?? { status: 'connecting', qr: null, pairingCode: code }
+  const prev = connectionStates.get(businessId) ?? {
+    status: 'connecting',
+    qr: null,
+    pairingCode: code,
+  }
   connectionStates.set(businessId, { ...prev, pairingCode: code })
 }
 

@@ -1,11 +1,11 @@
+import { and, asc, count, eq, gte, isNull, lt, lte, ne, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
+  type Appointment,
   appointments,
   customers,
-  type Appointment,
   type NewAppointment,
 } from '@/db/schema/index.js'
-import { and, asc, count, eq, gte, isNull, lt, lte, ne, sql } from 'drizzle-orm'
 
 // Appointments occupying [start, end). Cancelled ones are excluded: they no
 // longer hold their slot, and counting them kept the slot blocked forever —
@@ -209,8 +209,7 @@ export async function findDueForReminder(
   windowEnd: Date,
   exec: Executor = db,
 ): Promise<Appointment[]> {
-  const column =
-    kind === '24h' ? appointments.reminder24hSentAt : appointments.reminder2hSentAt
+  const column = kind === '24h' ? appointments.reminder24hSentAt : appointments.reminder2hSentAt
   return await exec
     .select()
     .from(appointments)

@@ -13,9 +13,7 @@ export interface ValidAccessToken {
   calendarId: string
 }
 
-export async function getValidAccessToken(
-  businessId: string,
-): Promise<Result<ValidAccessToken>> {
+export async function getValidAccessToken(businessId: string): Promise<Result<ValidAccessToken>> {
   try {
     const creds = await googleCredentialsRepo.findByBusiness(businessId)
     if (!creds) {
@@ -34,10 +32,7 @@ export async function getValidAccessToken(
     }
 
     // Need to refresh.
-    logger.info(
-      { businessId, msUntilExpiry },
-      'google access_token close to expiry, refreshing',
-    )
+    logger.info({ businessId, msUntilExpiry }, 'google access_token close to expiry, refreshing')
     const refreshed = await googleClient.refreshAccessToken(creds.refreshToken)
     const updated = await googleCredentialsRepo.updateTokens(businessId, {
       accessToken: refreshed.accessToken,

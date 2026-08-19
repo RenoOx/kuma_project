@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses, knowledgeBase as kbTable } from '@/db/schema/index.js'
@@ -5,7 +6,6 @@ import * as conversationService from '@/modules/conversation/conversation.servic
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { eq } from 'drizzle-orm'
 
 // gpt-4o-mini pricing as of late 2025 / early 2026. Update if OpenAI moves these.
 const PRICE_PER_M_INPUT_USD = 0.15
@@ -43,11 +43,7 @@ async function main(): Promise<void> {
     ])
     logger.info({ businessId: business.id }, 'seeded business with 3 knowledge_base entries')
 
-    const customerResult = await customerService.getOrCreate(
-      business.id,
-      '+51901112222',
-      'Juan',
-    )
+    const customerResult = await customerService.getOrCreate(business.id, '+51901112222', 'Juan')
     if (!customerResult.ok) throw customerResult.error
 
     const conversationResult = await conversationService.getOrCreateOpen(
@@ -86,8 +82,7 @@ async function main(): Promise<void> {
         toolsExecuted: toolCallsExecuted.map((t) => ({
           name: t.name,
           args: t.args,
-          resultPreview:
-            typeof t.result === 'string' ? t.result.slice(0, 120) : String(t.result),
+          resultPreview: typeof t.result === 'string' ? t.result.slice(0, 120) : String(t.result),
           error: t.error,
         })),
         escalated,

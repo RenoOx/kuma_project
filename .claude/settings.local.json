@@ -1,7 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(pnpm --version)"
-    ]
+    "allow": ["Bash(pnpm --version)"]
   }
 }

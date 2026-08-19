@@ -4,7 +4,7 @@ import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
-import { buildReminder24hText, buildReminder2hText } from './reminderTexts.js'
+import { buildReminder2hText, buildReminder24hText } from './reminderTexts.js'
 
 export interface ReminderRunResult {
   sent24h: number
@@ -22,10 +22,7 @@ function customerJidFromPhone(phone: string): string {
 // Dispatches a single reminder for one appointment. Returns true iff the
 // send succeeded; on any failure (business gone, no client, sendMessage
 // throws, etc.) we log and return false so the caller can count the error.
-async function dispatchReminder(
-  appt: Appointment,
-  kind: '24h' | '2h',
-): Promise<boolean> {
+async function dispatchReminder(appt: Appointment, kind: '24h' | '2h'): Promise<boolean> {
   const log = logger.child({
     worker: 'sendReminders',
     appointmentId: appt.id,

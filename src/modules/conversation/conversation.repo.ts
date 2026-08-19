@@ -1,12 +1,12 @@
+import { and, count, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
-  conversations,
-  customers,
   type Conversation,
   type ConversationStatus,
+  conversations,
+  customers,
   type NewConversation,
 } from '@/db/schema/index.js'
-import { and, count, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
 
 export async function findOpenByCustomer(
   businessId: string,
@@ -84,17 +84,12 @@ export async function findOwnerThread(
   const [row] = await exec
     .select()
     .from(conversations)
-    .where(
-      and(eq(conversations.businessId, businessId), eq(conversations.type, 'owner_thread')),
-    )
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.type, 'owner_thread')))
     .limit(1)
   return row ?? null
 }
 
-export async function create(
-  data: NewConversation,
-  exec: Executor = db,
-): Promise<Conversation> {
+export async function create(data: NewConversation, exec: Executor = db): Promise<Conversation> {
   const [row] = await exec.insert(conversations).values(data).returning()
   if (!row) throw new Error('insert conversations returned no row')
   return row

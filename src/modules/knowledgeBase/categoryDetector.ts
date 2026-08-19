@@ -151,7 +151,17 @@ type SpecializableCategory = 'servicios' | 'precios' | 'informacion_general'
 // that omits a category here just gets the base vocabulary for it.
 const NICHE_KEYWORDS: Record<Niche, Partial<Record<SpecializableCategory, readonly string[]>>> = {
   barberia: {
-    servicios: ['corte', 'barba', 'tinte', 'alisado', 'keratina', 'trenza', 'rasura', 'fade', 'degradado'],
+    servicios: [
+      'corte',
+      'barba',
+      'tinte',
+      'alisado',
+      'keratina',
+      'trenza',
+      'rasura',
+      'fade',
+      'degradado',
+    ],
     precios: ['cobran'],
   },
   estetica: {
@@ -282,10 +292,7 @@ export function detectCategories(message: string, niche: Niche): KbCategory[] {
 
 // Which `trigger_based` entries should fire for this message. Matching is done
 // on the normalized message so keywords stored with accents still work.
-export function matchesTriggerKeywords(
-  message: string,
-  triggerKeywords: string[] | null,
-): boolean {
+export function matchesTriggerKeywords(message: string, triggerKeywords: string[] | null): boolean {
   if (!triggerKeywords || triggerKeywords.length === 0) return false
   const normalized = normalize(message)
   return triggerKeywords.some((kw) => {

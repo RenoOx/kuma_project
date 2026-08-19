@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
 import { googleCredentials } from '@/db/schema/index.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
 import * as googleCredentialsService from '@/modules/google/googleCredentials.service.js'
 import { NotConnectedError } from '@/shared/errors.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   resetDb,

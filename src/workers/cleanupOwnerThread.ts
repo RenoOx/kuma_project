@@ -1,6 +1,6 @@
+import { sql } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
-import { sql } from 'drizzle-orm'
 
 const RETENTION_HOURS = 48
 
@@ -14,13 +14,15 @@ export async function cleanupOwnerThreadMessages(): Promise<number> {
   // well with an IN(SELECT ...) subquery for the cross-table filter we need.
   // The query is safe because none of the inputs come from outside the
   // process — RETENTION_HOURS is a constant defined above.
-  const result = await db.execute(sql.raw(`
+  const result = await db.execute(
+    sql.raw(`
     DELETE FROM messages
     WHERE conversation_id IN (
       SELECT id FROM conversations WHERE type = 'owner_thread'
     )
     AND created_at < NOW() - INTERVAL '${RETENTION_HOURS} hours'
-  `))
+  `),
+  )
   // postgres-js exposes the affected row count on the underlying result.
   const count = (result as unknown as { count?: number }).count ?? 0
   if (count > 0) {

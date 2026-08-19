@@ -1,12 +1,12 @@
+import { z } from 'zod'
 import {
-  kbAttachmentTypeEnum,
-  kbCategoryEnum,
-  kbSendModeEnum,
   type KbAttachmentType,
   type KbCategory,
   type KbSendMode,
+  kbAttachmentTypeEnum,
+  kbCategoryEnum,
+  kbSendModeEnum,
 } from '@/db/schema/index.js'
-import { z } from 'zod'
 
 // Single source of truth for every KB enum. The admin API, the dashboard forms,
 // the CLI and the demo profiles all validate through here so a new category is

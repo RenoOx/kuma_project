@@ -18,9 +18,7 @@ export interface CreateEventResult {
   htmlLink: string
 }
 
-export async function createEvent(
-  params: CreateEventParams,
-): Promise<Result<CreateEventResult>> {
+export async function createEvent(params: CreateEventParams): Promise<Result<CreateEventResult>> {
   const tokenResult = await googleCredentialsService.getValidAccessToken(params.businessId)
   if (!tokenResult.ok) {
     // NotConnectedError propagates as-is so callers can pattern-match on it

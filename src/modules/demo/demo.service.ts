@@ -4,7 +4,7 @@ import * as knowledgeBaseRepo from '@/modules/knowledgeBase/knowledgeBase.repo.j
 import { deriveTitle } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import { AppError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import { DEMO_PROFILES, DEMO_PROFILE_KEYS } from './demoProfiles.js'
+import { DEMO_PROFILE_KEYS, DEMO_PROFILES } from './demoProfiles.js'
 
 export async function applyDemoProfile(
   businessId: string,

@@ -1,15 +1,10 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
-import {
-  businesses,
-  conversations,
-  messages,
-  type Conversation,
-} from '@/db/schema/index.js'
+import { businesses, type Conversation, conversations, messages } from '@/db/schema/index.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import { AppError } from '@/shared/errors.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   resetDb,
@@ -67,7 +62,9 @@ describe('ownerAssistant.service.handle', () => {
 
   it('returns a plain reply with no tool calls for a general question', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'Hola jefe, todo tranquilo por acá.', tool_calls: undefined } }],
+      choices: [
+        { message: { content: 'Hola jefe, todo tranquilo por acá.', tool_calls: undefined } },
+      ],
       usage: { prompt_tokens: 70, completion_tokens: 12 },
     })
 
@@ -106,7 +103,9 @@ describe('ownerAssistant.service.handle', () => {
     })
     mockCreate.mockResolvedValueOnce({
       choices: [
-        { message: { content: 'Hoy 0 mensajes, 0 citas, sin escalaciones.', tool_calls: undefined } },
+        {
+          message: { content: 'Hoy 0 mensajes, 0 citas, sin escalaciones.', tool_calls: undefined },
+        },
       ],
       usage: { prompt_tokens: 130, completion_tokens: 18 },
     })
@@ -154,10 +153,7 @@ describe('ownerAssistant.service.handle', () => {
     assert(result.ok)
     expect(result.data.toolsExecuted).toContain('pause_bot')
 
-    const [biz] = await db
-      .select()
-      .from(businesses)
-      .where(eq(businesses.id, seed.businessA.id))
+    const [biz] = await db.select().from(businesses).where(eq(businesses.id, seed.businessA.id))
     const settings = biz?.settings as { botPaused?: { paused: boolean; reason?: string } } | null
     expect(settings?.botPaused?.paused).toBe(true)
     expect(settings?.botPaused?.reason).toBe('corte de luz')
@@ -165,10 +161,7 @@ describe('ownerAssistant.service.handle', () => {
 
   it('resumes the bot via the resume_bot tool', async () => {
     // First pause it directly so we have a paused state to clear.
-    const [biz] = await db
-      .select()
-      .from(businesses)
-      .where(eq(businesses.id, seed.businessA.id))
+    const [biz] = await db.select().from(businesses).where(eq(businesses.id, seed.businessA.id))
     const baseSettings = biz?.settings as Record<string, unknown>
     await db
       .update(businesses)
@@ -210,10 +203,7 @@ describe('ownerAssistant.service.handle', () => {
     assert(result.ok)
     expect(result.data.toolsExecuted).toContain('resume_bot')
 
-    const [biz2] = await db
-      .select()
-      .from(businesses)
-      .where(eq(businesses.id, seed.businessA.id))
+    const [biz2] = await db.select().from(businesses).where(eq(businesses.id, seed.businessA.id))
     const settings = biz2?.settings as { botPaused: unknown } | null
     expect(settings?.botPaused).toBeNull()
   })
@@ -352,10 +342,7 @@ describe('ownerAssistant.service.handle', () => {
     assert(fromB.ok)
     expect(fromB.data.id).not.toBe(ownerConvA.id)
 
-    const rows = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.type, 'owner_thread'))
+    const rows = await db.select().from(conversations).where(eq(conversations.type, 'owner_thread'))
     expect(rows).toHaveLength(2)
     expect(rows.map((r) => r.businessId).sort()).toEqual(
       [seed.businessA.id, seed.businessB.id].sort(),

@@ -44,12 +44,7 @@ export async function generateDailyReportText(businessId: string): Promise<strin
     messageRepo.countUserMessagesInRange(businessId, todayRange.start, todayRange.end),
     appointmentRepo.countCreatedInRange(businessId, todayRange.start, todayRange.end),
     appointmentRepo.listScheduledInRange(businessId, todayRange.start, todayRange.end, 20),
-    appointmentRepo.listScheduledInRange(
-      businessId,
-      tomorrowRange.start,
-      tomorrowRange.end,
-      20,
-    ),
+    appointmentRepo.listScheduledInRange(businessId, tomorrowRange.start, tomorrowRange.end, 20),
     conversationRepo.countRecentEscalatedCustomerConversations(businessId, escalationsSince),
     conversationRepo.listRecentEscalatedCustomerConversations(
       businessId,
@@ -61,9 +56,7 @@ export async function generateDailyReportText(businessId: string): Promise<strin
   // For each listed escalation, look up the latest 'escalation' event's
   // reason. Small N (≤3), so the extra round-trips are acceptable.
   const reasons = await Promise.all(
-    escalationsList.map((e) =>
-      eventsRepo.findLatestEscalationReason(businessId, e.conversationId),
-    ),
+    escalationsList.map((e) => eventsRepo.findLatestEscalationReason(businessId, e.conversationId)),
   )
 
   const lines: string[] = []
@@ -72,7 +65,10 @@ export async function generateDailyReportText(businessId: string): Promise<strin
   lines.push(`• Mensajes recibidos: ${messagesReceived}`)
   lines.push(`• Citas agendadas hoy: ${appointmentsCreated}`)
   lines.push(`• Citas para hoy: ${appointmentsToday.length}`)
-  if (appointmentsToday.length > 0 && appointmentsToday.length <= TODAY_APPOINTMENTS_LIST_THRESHOLD) {
+  if (
+    appointmentsToday.length > 0 &&
+    appointmentsToday.length <= TODAY_APPOINTMENTS_LIST_THRESHOLD
+  ) {
     for (const a of appointmentsToday) {
       const time = formatTimeLima(a.scheduledAt, timezone)
       const who = a.customerName?.trim() || a.customerPhone

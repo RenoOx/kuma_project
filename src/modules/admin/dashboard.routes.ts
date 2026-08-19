@@ -1,21 +1,29 @@
+import { rm } from 'node:fs/promises'
+import type { Context } from 'hono'
+import { Hono } from 'hono'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
+import type {
+  KbAttachmentType,
+  KbCategory,
+  KbSendMode,
+  KnowledgeBaseEntry,
+} from '@/db/schema/index.js'
+import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
+import * as businessRepo from '@/modules/business/business.repo.js'
+import * as businessService from '@/modules/business/business.service.js'
 import {
   BOOKING_MODE_LABELS,
-  businessSettingsSchema,
-  NICHE_LABELS,
   type BookingMode,
   type BusinessSettings,
+  businessSettingsSchema,
   type DayKey,
+  NICHE_LABELS,
   type Niche,
   type Service,
 } from '@/modules/business/business.settings.js'
-import * as businessRepo from '@/modules/business/business.repo.js'
-import * as businessService from '@/modules/business/business.service.js'
-import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
-import { MAX_ENTRIES_PER_QUERY } from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import {
   KB_ATTACHMENT_TYPE_LABELS,
   KB_ATTACHMENT_TYPES,
@@ -24,13 +32,12 @@ import {
   KB_SEND_MODE_LABELS,
   KB_SEND_MODES,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
-import type {
-  KbAttachmentType,
-  KbCategory,
-  KbSendMode,
-  KnowledgeBaseEntry,
-} from '@/db/schema/index.js'
-import { dayRangeInTimezone, shiftDateISO, todayInTimezone } from '@/modules/ownerAssistant/timezone.js'
+import { MAX_ENTRIES_PER_QUERY } from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
+import {
+  dayRangeInTimezone,
+  shiftDateISO,
+  todayInTimezone,
+} from '@/modules/ownerAssistant/timezone.js'
 import {
   getClient,
   getConnectionState,
@@ -40,9 +47,6 @@ import {
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
 import { normalizePhone, samePhone } from '@/shared/phone.js'
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import { rm } from 'node:fs/promises'
 import * as dashRepo from './dashboard.repo.js'
 
 export const dashboardRoutes = new Hono()
@@ -256,7 +260,7 @@ function renderDayRow(key: DayKey, label: string, hours: DayHours): string {
   const bStart = hours?.break?.start ?? '13:00'
   const bEnd = hours?.break?.end ?? '14:00'
   const dis = enabled ? '' : 'disabled'
-  const bDis = (enabled && hasBreak) ? '' : 'disabled'
+  const bDis = enabled && hasBreak ? '' : 'disabled'
 
   return `<tr>
     <td style="font-weight:500;padding-right:.5rem">${label}</td>
@@ -1014,13 +1018,16 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
     <div class="card" style="margin-bottom:1.5rem">
       <div class="card-header">
         <span class="card-title">Google Calendar</span>
-        ${detail.googleConnectedEmail
-          ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
-          : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'}
+        ${
+          detail.googleConnectedEmail
+            ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
+            : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'
+        }
       </div>
       <div class="card-body">
-        ${detail.googleConnectedEmail
-          ? `<div class="info-row" style="margin-bottom:1rem">
+        ${
+          detail.googleConnectedEmail
+            ? `<div class="info-row" style="margin-bottom:1rem">
                <span class="info-label">Cuenta</span>
                <span class="info-value">${esc(detail.googleConnectedEmail)}</span>
              </div>
@@ -1031,10 +1038,11 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
                </form>
                <a href="/auth/google/connect?businessId=${bid}" class="btn btn-ghost btn-sm">Reconectar / cambiar cuenta</a>
              </div>`
-          : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+            : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
                Conectá Google Calendar para que las citas se registren automáticamente.
              </p>
-             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`}
+             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`
+        }
       </div>
     </div>
 
@@ -1126,12 +1134,14 @@ dashboardRoutes.get('/admin/dashboard/:id/appointments', async (c) => {
               <td><span class="mono muted">${esc(a.customerPhone)}</span></td>
               <td>${apptStatusBadge(a.status)}</td>
               <td>
-                ${canCancel
-                  ? `<form method="post" action="${cancelUrl}" style="display:inline"
+                ${
+                  canCancel
+                    ? `<form method="post" action="${cancelUrl}" style="display:inline"
                        onsubmit="return confirm('¿Cancelar esta cita? Se le puede avisar al cliente por separado.')">
                        <button type="submit" class="btn btn-danger btn-sm">Cancelar</button>
                      </form>`
-                  : '<span class="muted">—</span>'}
+                    : '<span class="muted">—</span>'
+                }
               </td>
             </tr>`
           })
@@ -1280,7 +1290,9 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   ).join('')
 
   const slotOptions = [15, 20, 30, 45, 60, 90, 120]
-    .map((v) => `<option value="${v}" ${slotDuration === v ? 'selected' : ''}>${v} minutos</option>`)
+    .map(
+      (v) => `<option value="${v}" ${slotDuration === v ? 'selected' : ''}>${v} minutos</option>`,
+    )
     .join('')
 
   const body = `
@@ -1303,7 +1315,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <label class="form-label" for="niche">Tipo de negocio</label>
               <select id="niche" name="niche" class="form-input form-select">
                 ${Object.entries(NICHE_LABELS)
-                  .map(([v, l]) => `<option value="${v}" ${niche === v ? 'selected' : ''}>${esc(l)}</option>`)
+                  .map(
+                    ([v, l]) =>
+                      `<option value="${v}" ${niche === v ? 'selected' : ''}>${esc(l)}</option>`,
+                  )
                   .join('')}
               </select>
             </div>
@@ -1311,7 +1326,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <label class="form-label" for="bookingMode">Modo de reserva</label>
               <select id="bookingMode" name="bookingMode" class="form-input form-select">
                 ${Object.entries(BOOKING_MODE_LABELS)
-                  .map(([v, l]) => `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`)
+                  .map(
+                    ([v, l]) =>
+                      `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`,
+                  )
                   .join('')}
               </select>
               <p class="form-hint">
@@ -1339,7 +1357,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                   ['America/Caracas', 'América/Caracas (Venezuela)'],
                   ['America/La_Paz', 'América/La Paz (Bolivia)'],
                 ]
-                  .map(([v, l]) => `<option value="${v}" ${business.timezone === v ? 'selected' : ''}>${l}</option>`)
+                  .map(
+                    ([v, l]) =>
+                      `<option value="${v}" ${business.timezone === v ? 'selected' : ''}>${l}</option>`,
+                  )
                   .join('')}
               </select>
             </div>
@@ -1509,13 +1530,16 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     <div class="card" style="margin-top:1rem">
       <div class="card-header">
         <span class="card-title">Google Calendar</span>
-        ${gcEmail
-          ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
-          : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'}
+        ${
+          gcEmail
+            ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
+            : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'
+        }
       </div>
       <div class="card-body">
-        ${gcEmail
-          ? `<div class="info-row" style="margin-bottom:1rem">
+        ${
+          gcEmail
+            ? `<div class="info-row" style="margin-bottom:1rem">
                <span class="info-label">Cuenta</span>
                <span class="info-value">${esc(gcEmail)}</span>
              </div>
@@ -1526,10 +1550,11 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                </form>
                <a href="/auth/google/connect?businessId=${bid}" class="btn btn-ghost btn-sm">Reconectar / cambiar cuenta</a>
              </div>`
-          : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+            : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
                Conectá Google Calendar para que las citas se creen automáticamente.
              </p>
-             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`}
+             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`
+        }
       </div>
     </div>
 
@@ -1727,7 +1752,8 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
   const ownerWhatsappNumber = normalizePhone(formData.get('ownerWhatsappNumber')?.toString())
   const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
   const address = formData.get('address')?.toString().trim() || null
-  const whatsappNumber = formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
+  const whatsappNumber =
+    formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
 
   const configureError = (msg: string) =>
     c.redirect(
@@ -1817,7 +1843,10 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
       err instanceof SessionGuardError
         ? `${err.userMessage} Reintentá en ${humanizeMs(err.retryAfterMs)}.`
         : 'No se pudo iniciar la sesión con el número nuevo. Usá el botón "Conectar".'
-    logger.error({ err, businessId, whatsappNumber }, 'dashboard: rebind after number change failed')
+    logger.error(
+      { err, businessId, whatsappNumber },
+      'dashboard: rebind after number change failed',
+    )
   }
 
   const params = rebindError
@@ -1887,10 +1916,7 @@ dashboardRoutes.post('/admin/dashboard/:id/google-disconnect', async (c) => {
   await dashRepo.deleteGoogleCredential(businessId)
   logger.info({ businessId }, 'dashboard: Google Calendar disconnected by admin')
 
-  return c.redirect(
-    `/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}`,
-    302,
-  )
+  return c.redirect(`/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}`, 302)
 })
 
 // ── POST /:id/session/clear-guard — limpia el estado anti-ban del número ──────
@@ -1979,10 +2005,7 @@ dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
       ? `/admin/dashboard/${encodeURIComponent(businessId)}/configure`
       : `/admin/dashboard/${encodeURIComponent(businessId)}`
 
-  return c.redirect(
-    `${target}?secret=${encodeURIComponent(secret)}`,
-    302,
-  )
+  return c.redirect(`${target}?secret=${encodeURIComponent(secret)}`, 302)
 })
 
 // ── Vista: Base de conocimiento (listar + crear + editar + eliminar) ──────────

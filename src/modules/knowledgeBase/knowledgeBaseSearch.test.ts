@@ -1,6 +1,6 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/client.js'
 import { knowledgeBase, type NewKnowledgeBaseEntry } from '@/db/schema/index.js'
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { closeDb, resetDb, seedTwoBusinesses } from '../../../tests/helpers/db.js'
 import { searchByCategory, searchBySimilarity } from './knowledgeBaseSearch.service.js'
 
@@ -25,7 +25,12 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
 
   it('loads only the detected category', async () => {
     await seedEntries([
-      { businessId: businessAId, title: 'Dirección', category: 'ubicacion', content: 'Av. Larco 123' },
+      {
+        businessId: businessAId,
+        title: 'Dirección',
+        category: 'ubicacion',
+        content: 'Av. Larco 123',
+      },
       { businessId: businessAId, title: 'Corte', category: 'precios', content: 'S/30' },
     ])
 
@@ -136,7 +141,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     expect(result.data.entries.map((e) => e.title).sort()).toEqual(['Dirección', 'Formas de pago'])
   })
 
-  it("includes a trigger_based entry only when its keywords hit the message", async () => {
+  it('includes a trigger_based entry only when its keywords hit the message', async () => {
     await seedEntries([
       {
         businessId: businessAId,

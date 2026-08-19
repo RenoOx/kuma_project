@@ -1,5 +1,5 @@
-import { env } from '@/config/env.js'
 import { google } from 'googleapis'
+import { env } from '@/config/env.js'
 
 // googleapis ships its own bundled google-auth-library; the OAuth2Client type
 // exported from the top-level google-auth-library has a separate declaration
@@ -123,9 +123,7 @@ export async function insertCalendarEvent(params: InsertEventParams): Promise<In
   client.setCredentials({ access_token: params.accessToken })
   const calendar = google.calendar({ version: 'v3', auth: client })
 
-  const endDateTime = new Date(
-    params.startDateTime.getTime() + params.durationMinutes * 60_000,
-  )
+  const endDateTime = new Date(params.startDateTime.getTime() + params.durationMinutes * 60_000)
 
   // googleapis types `events.insert` with multiple overloads; one is the
   // callback variant returning void, which TS sometimes picks when nothing

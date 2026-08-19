@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
-  whatsappSessionGuard,
   type NewWhatsappSessionGuard,
   type WhatsappSessionGuard,
+  whatsappSessionGuard,
 } from '@/db/schema/index.js'
-import { eq } from 'drizzle-orm'
 
 export async function findByNumber(
   whatsappNumber: string,

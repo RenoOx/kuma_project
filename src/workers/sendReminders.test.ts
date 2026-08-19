@@ -1,19 +1,14 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
-import {
-  appointments,
-  type Appointment,
-  type Business,
-  type Customer,
-} from '@/db/schema/index.js'
+import { type Appointment, appointments, type Business, type Customer } from '@/db/schema/index.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import {
-  buildReminder24hText,
   buildReminder2hText,
+  buildReminder24hText,
   formatTime12h,
 } from '@/workers/reminderTexts.js'
 import { sendDueReminders } from '@/workers/sendReminders.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   resetDb,
@@ -193,11 +188,7 @@ describe('sendDueReminders worker', () => {
         phone: '+51900099999',
         name: null,
       })
-      await insertAppointment(
-        seed.businessA.id,
-        anon.id,
-        new Date('2026-07-07T15:00:00-05:00'),
-      )
+      await insertAppointment(seed.businessA.id, anon.id, new Date('2026-07-07T15:00:00-05:00'))
 
       const result = await sendDueReminders()
 
@@ -271,4 +262,3 @@ describe('reminderTexts formatting', () => {
     )
   })
 })
-

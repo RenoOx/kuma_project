@@ -1,13 +1,11 @@
 import type { KbCategory, KnowledgeBaseEntry } from '@/db/schema/index.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import * as knowledgeBaseRepo from './knowledgeBase.repo.js'
 import type { KnowledgeBasePatch } from './knowledgeBase.repo.js'
+import * as knowledgeBaseRepo from './knowledgeBase.repo.js'
 import { deriveTitle } from './knowledgeBase.types.js'
 
-export async function getByBusiness(
-  businessId: string,
-): Promise<Result<KnowledgeBaseEntry[]>> {
+export async function getByBusiness(businessId: string): Promise<Result<KnowledgeBaseEntry[]>> {
   try {
     const entries = await knowledgeBaseRepo.findByBusiness(businessId)
     return ok(entries)
@@ -16,14 +14,13 @@ export async function getByBusiness(
   }
 }
 
-export async function getById(
-  businessId: string,
-  id: string,
-): Promise<Result<KnowledgeBaseEntry>> {
+export async function getById(businessId: string, id: string): Promise<Result<KnowledgeBaseEntry>> {
   try {
     const entry = await knowledgeBaseRepo.findById(businessId, id)
     if (!entry) {
-      return err(new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }))
+      return err(
+        new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }),
+      )
     }
     return ok(entry)
   } catch (cause) {
@@ -70,7 +67,9 @@ export async function update(
     }
     const entry = await knowledgeBaseRepo.update(businessId, id, next)
     if (!entry) {
-      return err(new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }))
+      return err(
+        new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }),
+      )
     }
     return ok(entry)
   } catch (cause) {
@@ -82,7 +81,9 @@ export async function remove(businessId: string, id: string): Promise<Result<str
   try {
     const deletedId = await knowledgeBaseRepo.remove(businessId, id)
     if (!deletedId) {
-      return err(new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }))
+      return err(
+        new NotFoundError({ resource: 'knowledge_base entry', logContext: { businessId, id } }),
+      )
     }
     return ok(deletedId)
   } catch (cause) {

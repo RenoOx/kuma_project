@@ -1,6 +1,6 @@
-import { db, type Executor } from '@/db/client.js'
-import { events, type Event, type NewEvent } from '@/db/schema/index.js'
 import { and, desc, eq } from 'drizzle-orm'
+import { db, type Executor } from '@/db/client.js'
+import { type Event, events, type NewEvent } from '@/db/schema/index.js'
 
 export async function create(data: NewEvent, exec: Executor = db): Promise<Event> {
   const [row] = await exec.insert(events).values(data).returning()

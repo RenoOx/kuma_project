@@ -1,6 +1,6 @@
-import { db, type Executor } from '@/db/client.js'
-import { messages, type Message, type NewMessage } from '@/db/schema/index.js'
 import { and, asc, count, desc, eq, gte, lt } from 'drizzle-orm'
+import { db, type Executor } from '@/db/client.js'
+import { type Message, messages, type NewMessage } from '@/db/schema/index.js'
 
 const DEFAULT_LIMIT = 50
 
@@ -13,9 +13,7 @@ export async function findByConversation(
   return await exec
     .select()
     .from(messages)
-    .where(
-      and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)),
-    )
+    .where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)))
     .orderBy(asc(messages.createdAt))
     .limit(limit)
 }
@@ -33,9 +31,7 @@ export async function findRecentByConversation(
   const rows = await exec
     .select()
     .from(messages)
-    .where(
-      and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)),
-    )
+    .where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)))
     .orderBy(desc(messages.createdAt))
     .limit(limit)
   return rows.reverse()
@@ -55,9 +51,7 @@ export async function countByConversation(
   const [row] = await exec
     .select({ value: count() })
     .from(messages)
-    .where(
-      and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)),
-    )
+    .where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId)))
   return row?.value ?? 0
 }
 

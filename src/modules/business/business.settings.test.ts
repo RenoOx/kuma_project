@@ -1,11 +1,11 @@
+import { assert, describe, expect, it } from 'vitest'
 import {
+  type BusinessSettings,
   businessSettingsSchema,
   parseBusinessSettings,
   resolveDayHours,
-  type BusinessSettings,
 } from '@/modules/business/business.settings.js'
 import { NotConfiguredError } from '@/shared/errors.js'
-import { assert, describe, expect, it } from 'vitest'
 
 const BASE_SETTINGS: BusinessSettings = {
   niche: 'general',
@@ -87,9 +87,7 @@ describe('business.settings — specialDays', () => {
       specialDays: [{ date: '2026-12-25', hours: null, label: 'Navidad' }],
     })
     assert(result.ok)
-    expect(result.data.specialDays).toEqual([
-      { date: '2026-12-25', hours: null, label: 'Navidad' },
-    ])
+    expect(result.data.specialDays).toEqual([{ date: '2026-12-25', hours: null, label: 'Navidad' }])
   })
 
   it('parses a special day with custom hours', () => {

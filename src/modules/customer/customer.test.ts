@@ -1,9 +1,9 @@
+import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/client.js'
 import { customers } from '@/db/schema/index.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import { NotFoundError } from '@/shared/errors.js'
-import { afterAll, assert, beforeEach, describe, expect, it } from 'vitest'
 import {
   closeDb,
   resetDb,

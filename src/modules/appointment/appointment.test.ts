@@ -1,20 +1,26 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
 import {
   appointments,
   businesses,
-  conversations,
-  events,
   type Conversation,
   type Customer,
+  conversations,
+  events,
 } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
-import { AppError, ConflictError, NotConfiguredError, NotConnectedError, ValidationError } from '@/shared/errors.js'
+import {
+  AppError,
+  ConflictError,
+  NotConfiguredError,
+  NotConnectedError,
+  ValidationError,
+} from '@/shared/errors.js'
 import { err, ok } from '@/shared/result.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   DEFAULT_TEST_SETTINGS,
@@ -142,10 +148,7 @@ describe('appointment module', () => {
 
   it('checkAvailability returns NotConfiguredError when the business has no settings', async () => {
     // Replace settings with empty {} (the schema's "not configured" sentinel).
-    await db
-      .update(businesses)
-      .set({ settings: {} })
-      .where(eq(businesses.id, seed.businessA.id))
+    await db.update(businesses).set({ settings: {} }).where(eq(businesses.id, seed.businessA.id))
 
     const result = await appointmentService.checkAvailability(
       seed.businessA.id,
@@ -279,9 +282,27 @@ describe('appointment module', () => {
     const updateResult = await businessService.updateSettings(businessId, {
       slotDurationMinutes: 30,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
-        { name: 'limpieza', durationMinutes: 60, priceMin: 60, priceMax: 60, requiresEvaluation: false },
-        { name: 'tratamiento', durationMinutes: 90, priceMin: 90, priceMax: 90, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'limpieza',
+          durationMinutes: 60,
+          priceMin: 60,
+          priceMax: 60,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'tratamiento',
+          durationMinutes: 90,
+          priceMin: 90,
+          priceMax: 90,
+          requiresEvaluation: false,
+        },
       ],
     })
     assert(updateResult.ok)
@@ -424,10 +445,7 @@ describe('appointment module', () => {
   })
 
   it('bookAppointment returns NotConfiguredError when the business has no settings', async () => {
-    await db
-      .update(businesses)
-      .set({ settings: {} })
-      .where(eq(businesses.id, seed.businessA.id))
+    await db.update(businesses).set({ settings: {} }).where(eq(businesses.id, seed.businessA.id))
 
     const result = await appointmentService.bookAppointment({
       businessId: seed.businessA.id,
@@ -617,7 +635,10 @@ describe('appointment module', () => {
   it('bookAppointment patches the appointment with googleEventId when Google sync succeeds', async () => {
     mockCreateEvent.mockReset()
     mockCreateEvent.mockResolvedValueOnce(
-      ok({ googleEventId: 'evt-google-123', htmlLink: 'https://calendar.google.com/event?eid=evt-google-123' }),
+      ok({
+        googleEventId: 'evt-google-123',
+        htmlLink: 'https://calendar.google.com/event?eid=evt-google-123',
+      }),
     )
 
     const result = await appointmentService.bookAppointment({
@@ -640,10 +661,7 @@ describe('appointment module', () => {
     expect(createArgs.summary).toContain('Cliente Test')
     expect(createArgs.description).toContain('+51900007000')
 
-    const [row] = await db
-      .select()
-      .from(appointments)
-      .where(eq(appointments.id, result.data.id))
+    const [row] = await db.select().from(appointments).where(eq(appointments.id, result.data.id))
     expect(row?.googleEventId).toBe('evt-google-123')
   })
 
@@ -658,10 +676,7 @@ describe('appointment module', () => {
     assert(result.ok)
     expect(result.data.googleEventId).toBeNull()
 
-    const [row] = await db
-      .select()
-      .from(appointments)
-      .where(eq(appointments.id, result.data.id))
+    const [row] = await db.select().from(appointments).where(eq(appointments.id, result.data.id))
     expect(row?.googleEventId).toBeNull()
   })
 
@@ -751,11 +766,7 @@ describe('appointment module', () => {
       datetimeISO: `${MONDAY_ISO}T17:00:00-05:00`,
     })
 
-    const fromB = await appointmentService.checkAvailability(
-      seed.businessB.id,
-      MONDAY_ISO,
-      'corte',
-    )
+    const fromB = await appointmentService.checkAvailability(seed.businessB.id, MONDAY_ISO, 'corte')
     assert(fromB.ok)
     // From B's perspective every default slot is free — A's row never leaks.
     expect(fromB.data.availableSlots).toHaveLength(9)

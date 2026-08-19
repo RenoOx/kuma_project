@@ -42,10 +42,7 @@ export async function notifyCustomer(
   const jid = customerJidFromPhone(phone)
   try {
     await client.sendMessage(jid, text)
-    logger.info(
-      { businessId, jid, textPreview: text.slice(0, 60) },
-      'notified customer',
-    )
+    logger.info({ businessId, jid, textPreview: text.slice(0, 60) }, 'notified customer')
     return ok(undefined)
   } catch (cause) {
     return err(

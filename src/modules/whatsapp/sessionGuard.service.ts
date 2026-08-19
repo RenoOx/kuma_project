@@ -4,9 +4,9 @@ import { SessionGuardError } from '@/shared/errors.js'
 import * as guardRepo from './sessionGuard.repo.js'
 import {
   CIRCUIT_BREAKER_BLOCK_MS,
+  nextAttemptWindow,
   PAIRING_CODE_COOLDOWN_MS,
   RESTART_COOLDOWN_MS,
-  nextAttemptWindow,
   shouldTripBreaker,
 } from './sessionPolicy.js'
 
@@ -139,7 +139,9 @@ async function recordAttempt(
   const guard = await readGuard(whatsappNumber)
   const window = nextAttemptWindow(guard, now)
   const tripped = shouldTripBreaker(window)
-  const blockedUntil = tripped ? new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS) : (guard?.blockedUntil ?? null)
+  const blockedUntil = tripped
+    ? new Date(now.getTime() + CIRCUIT_BREAKER_BLOCK_MS)
+    : (guard?.blockedUntil ?? null)
 
   const saved = await safeUpsert({
     whatsappNumber,
@@ -262,7 +264,10 @@ export async function recordConnected(
  * Operator escape hatch. Deliberately loud: forcing past a block is exactly how
  * the previous production number got burned, so every use leaves a trail.
  */
-export async function forceUnblock(whatsappNumber: string, businessId: string | null): Promise<void> {
+export async function forceUnblock(
+  whatsappNumber: string,
+  businessId: string | null,
+): Promise<void> {
   const previous = await readGuard(whatsappNumber)
   await safeUpsert({
     whatsappNumber,

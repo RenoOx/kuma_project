@@ -1,17 +1,17 @@
+import { asc, eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
 import {
+  type Conversation,
+  type Customer,
   conversations,
   knowledgeBase,
   messages,
-  type Conversation,
-  type Customer,
 } from '@/db/schema/index.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
-import { asc, eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   resetDb,

@@ -22,7 +22,6 @@ function parseArgs(argv: string[]): ParsedArgs {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2))
   if (!args.name || !args.whatsapp) {
-    // biome-ignore lint/suspicious/noConsoleLog: CLI help text, not application log
     console.error('usage: npm run create:business -- --name="..." --whatsapp="+51XXXXXXXXX"')
     process.exit(2)
   }
@@ -33,7 +32,10 @@ async function main(): Promise<void> {
   })
 
   if (!result.ok) {
-    logger.error({ code: result.error.code, context: result.error.logContext }, result.error.message)
+    logger.error(
+      { code: result.error.code, context: result.error.logContext },
+      result.error.message,
+    )
     process.exit(1)
   }
 
@@ -48,7 +50,6 @@ async function main(): Promise<void> {
   )
 
   // Also print the bare id to stdout so the user can pipe / copy it easily.
-  // biome-ignore lint/suspicious/noConsoleLog: tooling output, not application log
   console.log(result.data.id)
 }
 

@@ -1,9 +1,9 @@
+import { eq } from 'drizzle-orm'
+import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import { notifyOwner } from '@/modules/whatsapp/ownerNotifier.js'
-import { eq } from 'drizzle-orm'
-import { afterAll, assert, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   closeDb,
   resetDb,
@@ -34,7 +34,10 @@ describe('notifyOwner', () => {
 
   it('returns ok without calling sendMessage when business has no ownerWhatsappNumber', async () => {
     const fake = makeFakeClient()
-    clientRegistry.registerClient(seed.businessA.id, fake as unknown as Parameters<typeof clientRegistry.registerClient>[1])
+    clientRegistry.registerClient(
+      seed.businessA.id,
+      fake as unknown as Parameters<typeof clientRegistry.registerClient>[1],
+    )
 
     const result = await notifyOwner(seed.businessA.id, 'hola dueño')
 
@@ -49,7 +52,10 @@ describe('notifyOwner', () => {
       .where(eq(businesses.id, seed.businessA.id))
 
     const fake = makeFakeClient()
-    clientRegistry.registerClient(seed.businessA.id, fake as unknown as Parameters<typeof clientRegistry.registerClient>[1])
+    clientRegistry.registerClient(
+      seed.businessA.id,
+      fake as unknown as Parameters<typeof clientRegistry.registerClient>[1],
+    )
 
     const result = await notifyOwner(seed.businessA.id, '🔔 algo pasó')
 
@@ -67,7 +73,10 @@ describe('notifyOwner', () => {
     const fake: FakeClient = {
       sendMessage: vi.fn().mockRejectedValue(new Error('connection closed')),
     }
-    clientRegistry.registerClient(seed.businessA.id, fake as unknown as Parameters<typeof clientRegistry.registerClient>[1])
+    clientRegistry.registerClient(
+      seed.businessA.id,
+      fake as unknown as Parameters<typeof clientRegistry.registerClient>[1],
+    )
 
     const result = await notifyOwner(seed.businessA.id, 'no llega')
 

@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
@@ -5,7 +6,6 @@ import * as appointmentService from '@/modules/appointment/appointment.service.j
 import * as businessService from '@/modules/business/business.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
-import { eq } from 'drizzle-orm'
 
 // This smoke does NOT touch the real Google API. Instead it seeds a fake
 // google_credentials row and overrides the calendar service via the same
@@ -51,8 +51,20 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
-        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'barba',
+          durationMinutes: 20,
+          priceMin: 20,
+          priceMax: 20,
+          requiresEvaluation: false,
+        },
       ],
     })
     if (!updateResult.ok) throw updateResult.error

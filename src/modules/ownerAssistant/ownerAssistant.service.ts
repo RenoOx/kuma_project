@@ -1,3 +1,8 @@
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
+} from 'openai/resources/chat/completions.js'
 import { logger } from '@/config/logger.js'
 import type { Message } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
@@ -6,10 +11,6 @@ import * as messageRepo from '@/modules/message/message.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import type {
-  ChatCompletionMessageParam,
-  ChatCompletionMessageToolCall,
-} from 'openai/resources/chat/completions.js'
 import { buildOwnerSystemPrompt } from './ownerAssistant.prompts.js'
 import { executeOwnerTool } from './ownerAssistant.toolExecutor.js'
 import { ownerTools } from './ownerAssistant.tools.js'
@@ -126,7 +127,7 @@ export async function handle(
   const toolsExecuted: string[] = []
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    let completion
+    let completion: ChatCompletion
     try {
       completion = await openai.chat.completions.create(
         {
@@ -141,8 +142,7 @@ export async function handle(
       )
     } catch (cause) {
       const isTimeout =
-        cause instanceof Error &&
-        (cause.name === 'TimeoutError' || cause.name === 'AbortError')
+        cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
       return err(
         new AppError({
           code: isTimeout ? 'owner_assistant_timeout' : 'owner_assistant_failed',

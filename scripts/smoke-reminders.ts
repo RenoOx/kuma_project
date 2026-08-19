@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { appointments, businesses } from '@/db/schema/index.js'
@@ -6,7 +7,6 @@ import * as customerService from '@/modules/customer/customer.service.js'
 import type { WhatsappClient } from '@/modules/whatsapp/baileys.client.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import { sendDueReminders } from '@/workers/sendReminders.js'
-import { eq } from 'drizzle-orm'
 
 interface FakeSend {
   jid: string
@@ -79,7 +79,13 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
       ],
     })
     if (!settingsUpdate.ok) throw settingsUpdate.error
@@ -117,9 +123,7 @@ async function main(): Promise<void> {
     logger.info(result, 'sendDueReminders returned')
 
     if (result.sent24h !== 1 || result.sent2h !== 0 || result.errors !== 0) {
-      throw new Error(
-        `expected sent24h=1, sent2h=0, errors=0 but got ${JSON.stringify(result)}`,
-      )
+      throw new Error(`expected sent24h=1, sent2h=0, errors=0 but got ${JSON.stringify(result)}`)
     }
     if (sent.length !== 1) {
       throw new Error(`expected 1 captured push, got ${sent.length}`)
@@ -131,10 +135,7 @@ async function main(): Promise<void> {
       'reminder push captured by fake client',
     )
 
-    const [row] = await db
-      .select()
-      .from(appointments)
-      .where(eq(appointments.id, appt.id))
+    const [row] = await db.select().from(appointments).where(eq(appointments.id, appt.id))
     if (!row?.reminder24hSentAt) {
       throw new Error('reminder_24h_sent_at was not set after a successful send')
     }

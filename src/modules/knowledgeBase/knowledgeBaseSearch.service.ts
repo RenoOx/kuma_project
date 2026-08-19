@@ -55,9 +55,7 @@ export async function searchByCategory(
     const byId = new Map<string, KnowledgeBaseEntry>()
     for (const entry of [...ungated, ...gated]) byId.set(entry.id, entry)
 
-    const entries = [...byId.values()].sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-    )
+    const entries = [...byId.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 
     return ok({ entries, matchedCategories: categories })
   } catch (cause) {

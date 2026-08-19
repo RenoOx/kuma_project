@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { eq } from 'drizzle-orm'
 
 // We cannot wrap the whole smoke in db.transaction(...): the services run
 // through the singleton `db` connection, which under READ COMMITTED cannot

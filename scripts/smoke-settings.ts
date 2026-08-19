@@ -1,10 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { logger } from '@/config/logger.js'
 import { db, queryClient } from '@/db/client.js'
 import { businesses } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { NotConfiguredError } from '@/shared/errors.js'
-import { eq } from 'drizzle-orm'
 
 // Future Monday in Lima time. Aligns with operatingHours[monday] in the
 // settings we set below.
@@ -26,7 +26,9 @@ async function main(): Promise<void> {
     //    should return NotConfiguredError, NOT invent slots.
     const scenarioA = await appointmentService.checkAvailability(business.id, MONDAY_ISO, 'corte')
     if (scenarioA.ok) {
-      throw new Error(`expected NotConfiguredError, got ok with ${scenarioA.data.availableSlots.length} slots`)
+      throw new Error(
+        `expected NotConfiguredError, got ok with ${scenarioA.data.availableSlots.length} slots`,
+      )
     }
     if (!(scenarioA.error instanceof NotConfiguredError)) {
       throw new Error(`expected NotConfiguredError, got ${scenarioA.error.code}`)
@@ -53,8 +55,20 @@ async function main(): Promise<void> {
       },
       slotDurationMinutes: 60,
       services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
-        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, requiresEvaluation: false },
+        {
+          name: 'corte',
+          durationMinutes: 30,
+          priceMin: 30,
+          priceMax: 30,
+          requiresEvaluation: false,
+        },
+        {
+          name: 'barba',
+          durationMinutes: 20,
+          priceMin: 20,
+          priceMax: 20,
+          requiresEvaluation: false,
+        },
       ],
     })
     if (!updateResult.ok) throw updateResult.error
