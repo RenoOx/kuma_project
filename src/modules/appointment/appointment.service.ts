@@ -1312,6 +1312,53 @@ export async function rescheduleAppointment(params: {
 // message went to the doctor, and the doctor never writes into the patient's
 // chat. That is why nothing in the tool result below mentions a notification.
 
+/**
+ * What the customer still has open, in the shape the system prompt needs.
+ *
+ * The proposal text already sits in the transcript, but a past assistant turn
+ * is something the model *describes* ("te habíamos propuesto...") rather than
+ * something it acts on. This is the structured signal that makes it act.
+ */
+export interface PendingAppointmentContext {
+  service: string
+  /** Ready to speak, in the business timezone: "martes 19 de agosto, 3:00pm". */
+  scheduledAtDisplay: string
+  /**
+   * True when the owner proposed this slot and the patient still owes an
+   * answer — the only case Emma may offer to confirm. False means the patient
+   * filed the request and the OWNER owes the answer. See OWNER_PROPOSED_NOTE.
+   */
+  proposedByOwner: boolean
+}
+
+// Read on every inbound customer message, so it stays a single indexed lookup
+// (appointments_customer_id_idx) plus the business read the caller already did.
+export async function getPendingContextForCustomer(
+  businessId: string,
+  customerId: string,
+  timezone: string,
+): Promise<Result<PendingAppointmentContext | null>> {
+  try {
+    const pending = await appointmentRepo.findLatestPendingByCustomer(businessId, customerId)
+    if (!pending) return ok(null)
+    return ok({
+      service: pending.service,
+      scheduledAtDisplay: formatRequestDateTime(pending.scheduledAt, timezone),
+      proposedByOwner: pending.notes === OWNER_PROPOSED_NOTE,
+    })
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'pending_context_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pude leer tus citas pendientes.',
+        logContext: { businessId, customerId },
+        cause,
+      }),
+    )
+  }
+}
+
 export interface ConfirmPendingResult {
   appointment: Appointment
   /** Ready to speak, in the business timezone: "martes 19 de agosto, 3:00pm". */

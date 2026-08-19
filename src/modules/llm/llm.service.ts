@@ -162,6 +162,25 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     customerId: conversation.customerId,
   }
 
+  // 6. Anything this customer still has open. The proposal text is already in
+  // the history above, but a past assistant turn is something the model
+  // describes rather than acts on — a patient answering "hola" to a proposed
+  // slot got greeted as a first-timer. This is the structured signal.
+  //
+  // Non-fatal: failing to read it must not cost the customer their reply.
+  const pendingResult = await appointmentService.getPendingContextForCustomer(
+    params.businessId,
+    conversation.customerId,
+    business.timezone,
+  )
+  if (!pendingResult.ok) {
+    log.warn(
+      { code: pendingResult.error.code },
+      'could not load the pending appointment context; replying without it',
+    )
+  }
+  const pending = pendingResult.ok ? pendingResult.data : null
+
   // History drives the call-to-action decision (see decideCallToAction): the
   // model no longer judges whether it already invited recently.
   const systemPrompt = buildSystemPrompt(
@@ -169,6 +188,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     kbResult.data.entries,
     settings,
     historyResult.data,
+    pending,
   )
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },

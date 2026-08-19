@@ -1,4 +1,7 @@
 import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
+// Type-only: erased at compile time, so this adds no runtime edge to a module
+// that already sits downstream of the tool executor.
+import type { PendingAppointmentContext } from '@/modules/appointment/appointment.service.js'
 import type {
   AppointmentMode,
   BusinessSettings,
@@ -671,6 +674,35 @@ function buildStaticBody(
   ]
 }
 
+/**
+ * Block describing what this customer still has open.
+ *
+ * Two very different situations produce a `pending` appointment and they must
+ * never be worded the same way: one is waiting on the CUSTOMER's answer and can
+ * be confirmed right here, the other is waiting on the OWNER's approval and
+ * Emma offering to confirm it would promise something nobody granted.
+ */
+function renderPendingBlock(pending: PendingAppointmentContext): string[] {
+  if (pending.proposedByOwner) {
+    return [
+      '# Cita pendiente de este cliente — ESPERA SU RESPUESTA',
+      `Le propusimos: *${pending.service}* el *${pending.scheduledAtDisplay}*. Todavía NO está agendada: falta que él acepte.`,
+      'Ese es el tema abierto de esta conversación. Aunque el cliente escriba de otra cosa, tenelo presente.',
+      '- Si acepta ("sí", "dale", "perfecto", "ok", "me parece bien"), llamá confirm_pending_appointment en ese mismo turno.',
+      '- Si pregunta por su cita ("¿qué pasó con mi cita?", "¿en qué quedamos?"), recordale el horario propuesto y preguntale si se lo confirmás. No te limites a describirlo.',
+      '- Si rechaza o pide otro horario, NO confirmes: escalá con escalate_to_human indicando qué prefiere.',
+      '',
+    ]
+  }
+  return [
+    '# Cita pendiente de este cliente — ESPERA APROBACIÓN DEL NEGOCIO',
+    `Pidió: *${pending.service}* el *${pending.scheduledAtDisplay}*. La solicitud ya fue enviada y falta que el encargado la apruebe.`,
+    'NO está agendada y vos NO podés confirmarla. Si pregunta, decile que su solicitud está en revisión y que le confirman en breve.',
+    'NUNCA le ofrezcas confirmársela vos ni llames confirm_pending_appointment para esta.',
+    '',
+  ]
+}
+
 function buildVariableTail(
   business: Business,
   todayISO: string,
@@ -678,14 +710,29 @@ function buildVariableTail(
   nowHHMM: string,
   greeting: string,
   cta: CallToActionDecision,
+  pending: PendingAppointmentContext | null,
 ): string[] {
+  // An isolated "hola" is normally answered with the canned greeting, history
+  // or no history. That rule is what made Emma greet a patient as a first-timer
+  // right after proposing a new time to them — she was obeying it. When a
+  // proposal is on the table, the greeting yields.
+  const awaitingAnswer = pending?.proposedByOwner === true
+
   const lines = [
     '# Contexto actual',
     `Fecha y hora actual: ${dayOfWeek} ${todayISO} ${nowHHMM} (${business.timezone}). Usala como base para resolver "hoy", "mañana", "el sábado", etc., y para saber si el negocio está abierto en este momento comparando la hora contra los horarios de arriba.`,
     '',
+    ...(pending ? renderPendingBlock(pending) : []),
     '# Saludo',
     `- Si es el primer mensaje de la conversación (sin historial previo), abrí SIEMPRE con este saludo exacto, sin modificarlo ni parafrasearlo: "${greeting}"`,
-    `- Si el cliente envía únicamente un saludo ("hola", "buenas", "buenos días", "hey", o similar), respondé con ese mismo saludo exacto, sin importar si hay historial previo. Un saludo aislado siempre se trata como inicio de conversación.`,
+    ...(awaitingAnswer
+      ? [
+          `- Este cliente tiene una propuesta de horario esperando respuesta, así que un saludo suelto NO abre una conversación nueva. Si escribe solo "hola" (o similar), saludalo brevemente y retomá la cita pendiente: "¡Hola! Te propusimos *${pending.service}* el *${pending.scheduledAtDisplay}*. ¿Te lo confirmo? 📅"`,
+          '- NO uses el saludo genérico de arriba en ese caso: dejaría al cliente sin saber en qué quedó su cita.',
+        ]
+      : [
+          `- Si el cliente envía únicamente un saludo ("hola", "buenas", "buenos días", "hey", o similar), respondé con ese mismo saludo exacto, sin importar si hay historial previo. Un saludo aislado siempre se trata como inicio de conversación.`,
+        ]),
     '',
     '# Cierre de este mensaje — INSTRUCCIÓN OBLIGATORIA',
   ]
@@ -719,6 +766,7 @@ export function buildSystemPrompt(
   knowledgeBase: KnowledgeBaseEntry[],
   settings: BusinessSettings | null,
   history: Message[] = [],
+  pending: PendingAppointmentContext | null = null,
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
@@ -729,6 +777,6 @@ export function buildSystemPrompt(
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today),
     '',
-    ...buildVariableTail(business, today, dayOfWeek, nowHHMM, greeting, cta),
+    ...buildVariableTail(business, today, dayOfWeek, nowHHMM, greeting, cta, pending),
   ].join('\n')
 }
