@@ -1,9 +1,9 @@
+import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
-import { z } from 'zod'
 
 export interface ToolContext {
   businessId: string
@@ -29,6 +29,7 @@ const checkAvailabilityArgs = z.object({
 const bookAppointmentArgs = z.object({
   datetime_iso: z.string(),
   service: z.string(),
+  customer_name: z.string(),
 })
 
 const escalateArgs = z.object({
@@ -42,7 +43,8 @@ function malformedArgs(toolName: string, parseError: z.ZodError): ToolExecutionR
   return {
     result: JSON.stringify({
       error: 'invalid_args',
-      instruction: 'Los argumentos enviados a la herramienta no son válidos. Revisá el formato y volvé a llamarla.',
+      instruction:
+        'Los argumentos enviados a la herramienta no son válidos. Revisá el formato y volvé a llamarla.',
       details: summary,
     }),
     error: `invalid_args:${toolName}`,
@@ -57,6 +59,17 @@ const NOT_CONFIGURED_BOOK_INSTRUCTION =
 
 const PENDING_APPROVAL_INSTRUCTION =
   'La solicitud quedó registrada y ya se le envió al encargado. NO le digas al cliente que su cita está agendada, confirmada ni reservada: decile que su SOLICITUD fue enviada y que le van a confirmar en breve.'
+
+const MISSING_NAME_INSTRUCTION =
+  'Todavía no tenés el nombre del paciente. Preguntáselo antes de agendar: "¿A nombre de quién agendo la cita?". NO inventes un nombre, NO uses el nombre de WhatsApp, y no vuelvas a llamar esta herramienta hasta que el cliente te lo diga.'
+
+// The tool schema marks customer_name required, which stops the model from
+// omitting the field — but not from filling it with the WhatsApp push name or
+// a placeholder just to satisfy it. A real name carries at least two letters,
+// which "💕", "-", "." and "?" do not.
+function isUsableName(raw: string): boolean {
+  return (raw.match(/\p{L}/gu) ?? []).length >= 2
+}
 
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
@@ -133,10 +146,7 @@ function makeBlock(slots: string[], slotDurationMinutes: number): AvailabilityBl
  * time) and starts a new block — which is why the caller has to pass the real
  * grid instead of inferring it from the gaps.
  */
-export function groupIntoBlocks(
-  slots: string[],
-  slotDurationMinutes: number,
-): AvailabilityBlock[] {
+export function groupIntoBlocks(slots: string[], slotDurationMinutes: number): AvailabilityBlock[] {
   if (slots.length === 0) return []
 
   const stepMs = slotDurationMinutes * 60_000
@@ -146,8 +156,7 @@ export function groupIntoBlocks(
   for (const slot of slots) {
     const previous = run[run.length - 1]
     const breaksRun =
-      previous !== undefined &&
-      new Date(slot).getTime() - new Date(previous).getTime() !== stepMs
+      previous !== undefined && new Date(slot).getTime() - new Date(previous).getTime() !== stepMs
     if (breaksRun) {
       blocks.push(makeBlock(run, slotDurationMinutes))
       run = []
@@ -222,11 +231,25 @@ export async function executeTool(
       const parsed = bookAppointmentArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
 
+      // Checked before anything is persisted: a booking filed under "." is
+      // worse than no booking, because the owner reads that card and has no
+      // idea who is coming.
+      if (!isUsableName(parsed.data.customer_name)) {
+        return {
+          result: JSON.stringify({
+            error: 'missing_customer_name',
+            instruction: MISSING_NAME_INSTRUCTION,
+          }),
+          error: 'missing_customer_name',
+        }
+      }
+
       const r = await appointmentService.bookAppointment({
         businessId: context.businessId,
         customerId: context.customerId,
         service: parsed.data.service,
         datetimeISO: parsed.data.datetime_iso,
+        customerName: parsed.data.customer_name,
       })
       if (!r.ok) {
         if (r.error instanceof NotConfiguredError) {

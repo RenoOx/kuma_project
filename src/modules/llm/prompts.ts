@@ -1,11 +1,14 @@
 import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/schema/index.js'
+import type {
+  AppointmentMode,
+  BusinessSettings,
+  DayKey,
+  Niche,
+} from '@/modules/business/business.settings.js'
 import { formatServicePrice } from '@/modules/business/business.settings.js'
-import type { AppointmentMode, BusinessSettings, DayKey, Niche } from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
-function groupByCategory(
-  entries: KnowledgeBaseEntry[],
-): Record<string, KnowledgeBaseEntry[]> {
+function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
   const out: Record<string, KnowledgeBaseEntry[]> = {}
   for (const entry of entries) {
     const bucket = out[entry.category] ?? []
@@ -198,9 +201,7 @@ export function decideCallToAction(
   mode: AppointmentMode = 'appointments_only',
   randomFn: () => number = Math.random,
 ): CallToActionDecision {
-  const assistantTurns = history.filter(
-    (m) => m.role === 'assistant' && m.content.trim() !== '',
-  )
+  const assistantTurns = history.filter((m) => m.role === 'assistant' && m.content.trim() !== '')
 
   // Nothing said yet → this is the welcome message, which always invites.
   if (assistantTurns.length === 0) {
@@ -303,9 +304,11 @@ function renderSpecialDays(specialDays: BusinessSettings['specialDays'], todayIS
     return `- ${d.date}${label}: ${d.hours.open} a ${d.hours.close}${breakText}`
   })
 
-  return ['', '## Excepciones de horario (fechas puntuales que reemplazan el horario semanal)', ...lines].join(
-    '\n',
-  )
+  return [
+    '',
+    '## Excepciones de horario (fechas puntuales que reemplazan el horario semanal)',
+    ...lines,
+  ].join('\n')
 }
 
 function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): string {
@@ -526,6 +529,17 @@ function buildStaticBody(
     "- Solo después de que el cliente confirme ('sí', 'dale', 'correcto'), llamá book_appointment.",
     '- Si te falta fecha, hora o servicio, preguntá — nunca inventes el dato faltante.',
     '- Después de agendar, confirmá al cliente la fecha y hora final en lenguaje claro.',
+    '',
+    '# Nombre del paciente — obligatorio antes de agendar',
+    'Antes de agendar o solicitar una cita, SIEMPRE preguntá el nombre completo del paciente/cliente.',
+    'NUNCA uses el nombre de WhatsApp: puede estar vacío, ser un apodo o un emoji. Tampoco lo inventes ni lo deduzcas.',
+    'Necesitás 3 datos para llamar book_appointment: nombre completo + servicio + fecha y hora. Recién cuando tengas los 3, llamá la tool.',
+    'Ejemplo:',
+    '  Cliente: "Quiero una cita para limpieza mañana a las 10"',
+    '  Vos: "¡Genial! ¿A nombre de quién agendo la cita?"',
+    '  Cliente: "Juan Pérez"',
+    '  → ahí sí llamás book_appointment con customer_name "Juan Pérez".',
+    'Si el cliente ya te dio su nombre antes en esta conversación, usá ese y NO se lo vuelvas a preguntar.',
     '',
     '# Fluidez conversacional',
     '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes", "esta semana"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',

@@ -1,5 +1,6 @@
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
 import { formatTimeForDisplay } from '@/shared/datetime.js'
+import { formatPersonName } from '@/shared/name.js'
 
 // Day-of-week / day-of-month / month formatters all use es-PE so they come
 // back lowercase ("sábado", "junio"). Time format uses en-US + manual
@@ -34,7 +35,9 @@ function formatMonth(date: Date, timezone: string): string {
 export const formatTime12h = formatTimeForDisplay
 
 function buildGreeting(emoji: string, customer: Pick<Customer, 'name'>): string {
-  const name = customer.name?.trim()
+  // Same formatter the owner's appointment lists use: the patient must not be
+  // "juan perez" in the reminder and "Juan Pérez" on the owner's screen.
+  const name = formatPersonName(customer.name)
   return name ? `${emoji} ¡Hola ${name}!` : `${emoji} ¡Hola!`
 }
 

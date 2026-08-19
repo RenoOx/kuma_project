@@ -29,7 +29,7 @@ export const kumaTools: ChatCompletionTool[] = [
     function: {
       name: 'book_appointment',
       description:
-        'Agenda una cita en un horario específico. Solo usar cuando el cliente confirmó fecha, hora y servicio exactos.',
+        'Agenda una cita en un horario específico. Solo usar cuando el cliente confirmó fecha, hora y servicio exactos, y ya dio su nombre completo.',
       parameters: {
         type: 'object',
         properties: {
@@ -42,8 +42,13 @@ export const kumaTools: ChatCompletionTool[] = [
             type: 'string',
             description: 'Nombre del servicio. Ej: corte, barba, lavado.',
           },
+          customer_name: {
+            type: 'string',
+            description:
+              'Nombre completo del paciente/cliente tal como lo dio en la conversación. Preguntalo antes de llamar esta herramienta: NO uses el nombre de WhatsApp ni lo inventes.',
+          },
         },
-        required: ['datetime_iso', 'service'],
+        required: ['datetime_iso', 'service', 'customer_name'],
         additionalProperties: false,
       },
     },
@@ -70,5 +75,9 @@ export const kumaTools: ChatCompletionTool[] = [
   },
 ]
 
-export const KUMA_TOOL_NAMES = ['check_availability', 'book_appointment', 'escalate_to_human'] as const
+export const KUMA_TOOL_NAMES = [
+  'check_availability',
+  'book_appointment',
+  'escalate_to_human',
+] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]

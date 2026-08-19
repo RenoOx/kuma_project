@@ -1,6 +1,6 @@
+import { and, eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import { customers } from '@/db/schema/index.js'
-import { and, eq } from 'drizzle-orm'
 import type { Customer, NewCustomer } from './customer.types.js'
 
 export async function findByPhone(
@@ -33,6 +33,23 @@ export async function create(data: NewCustomer, exec: Executor = db): Promise<Cu
   const [row] = await exec.insert(customers).values(data).returning()
   if (!row) throw new Error('insert customers returned no row')
   return row
+}
+
+// Overwrites whatever WhatsApp handed us as the push name with the name the
+// customer actually gave Emma. Returns the fresh row so the caller doesn't have
+// to read it back.
+export async function updateName(
+  businessId: string,
+  id: string,
+  name: string,
+  exec: Executor = db,
+): Promise<Customer | null> {
+  const [row] = await exec
+    .update(customers)
+    .set({ name, updatedAt: new Date() })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+    .returning()
+  return row ?? null
 }
 
 export async function updateLastSeen(

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
@@ -5,10 +6,10 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BotPausedState } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
-import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
-import { z } from 'zod'
-import { generateDailyReportText } from './dailyReport.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
+import { formatPersonName } from '@/shared/name.js'
+import { generateDailyReportText } from './dailyReport.js'
 import type { OwnerContext, OwnerToolExecutionResult } from './ownerAssistant.types.js'
 import { dayRangeInTimezone } from './timezone.js'
 
@@ -39,6 +40,14 @@ const rescheduleArgs = z.object({
   message: z.string().optional(),
 })
 
+// Every patient name the owner reads goes through here. A null means WhatsApp
+// never gave us a push name AND the patient never booked through Emma since
+// she started asking — there is no other source to fall back to, so we say so
+// instead of handing the model a bare null it renders as "null".
+function displayName(raw: string | null): string {
+  return formatPersonName(raw) ?? '(sin nombre)'
+}
+
 function malformedArgs(toolName: string, parseError: z.ZodError): OwnerToolExecutionResult {
   const summary = parseError.issues
     .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
@@ -60,7 +69,10 @@ async function buildDailySummary(
   const range = dayRangeInTimezone(dateISO, ctx.businessTimezone)
   if (!range) {
     return {
-      result: JSON.stringify({ error: 'invalid_date', instruction: 'No pude calcular el rango horario de esa fecha.' }),
+      result: JSON.stringify({
+        error: 'invalid_date',
+        instruction: 'No pude calcular el rango horario de esa fecha.',
+      }),
       error: 'invalid_date',
     }
   }
@@ -86,7 +98,7 @@ async function buildDailySummary(
       appointments_for_today: appointmentsToday.map((a) => ({
         time: formatTimeForDisplay(a.scheduledAt, ctx.businessTimezone),
         service: a.service,
-        customer_name: a.customerName,
+        customer_name: displayName(a.customerName),
         customer_phone: a.customerPhone,
         status: a.status,
       })),
@@ -127,7 +139,7 @@ async function buildAppointmentsList(
         time: formatTimeForDisplay(r.scheduledAt, ctx.businessTimezone),
         service: r.service,
         duration_minutes: r.durationMinutes,
-        customer_name: r.customerName,
+        customer_name: displayName(r.customerName),
         customer_phone: r.customerPhone,
         status: r.status,
       })),
@@ -235,7 +247,7 @@ async function listPending(ctx: OwnerContext): Promise<OwnerToolExecutionResult>
         'Presentá estas solicitudes al dueño en una lista corta con nombre, teléfono, servicio y horario. NUNCA le muestres el campo id: es interno, usalo solo para llamar las otras tools.',
       pending: result.data.map((a) => ({
         id: a.id,
-        customer_name: a.customerName ?? '(sin nombre)',
+        customer_name: displayName(a.customerName),
         customer_phone: a.customerPhone,
         service: a.service,
         when: readableSlot(a.scheduledAt, ctx.businessTimezone),
