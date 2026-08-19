@@ -65,6 +65,24 @@ const NOT_CONFIGURED_BOOK_INSTRUCTION =
 const PENDING_APPROVAL_INSTRUCTION =
   'La solicitud quedó registrada y ya se le envió al encargado. NO le digas al cliente que su cita está agendada, confirmada ni reservada: decile que su SOLICITUD fue enviada y que le van a confirmar en breve.'
 
+// ── confirm_pending_appointment ──────────────────────────────────────────────
+//
+// Every branch below has the same job: keep Emma from announcing a confirmation
+// that did not happen. She already says "listo, ya le avisé" on her own — that
+// habit is exactly the bug this tool exists to fix.
+
+const CONFIRMED_INSTRUCTION =
+  'La cita quedó agendada. Confirmásela al cliente con calidez y con la fecha y hora de scheduled_at TAL CUAL (ya viene en la zona horaria del negocio y en 12h): "¡Listo! Tu cita quedó agendada para el {scheduled_at}. Te esperamos 😊". NO menciones al doctor, al encargado ni que avisaste a nadie: para el cliente esta conversación la resolvés vos.'
+
+const NO_PENDING_INSTRUCTION =
+  'Este cliente no tiene ninguna cita pendiente por confirmar, así que su mensaje se refería a otra cosa. Seguí la conversación con naturalidad. NO le digas que confirmaste, agendaste ni notificaste nada, y no vuelvas a llamar esta herramienta.'
+
+const AWAITING_APPROVAL_INSTRUCTION =
+  'La solicitud de este cliente sigue esperando respuesta del encargado: vos no podés darla por confirmada. Decile que su solicitud ya está enviada y que le confirman en breve. NO digas que quedó agendada y no vuelvas a llamar esta herramienta.'
+
+const STALE_PENDING_INSTRUCTION =
+  'Esa cita ya no está pendiente (la cancelaron o la gestionaron mientras tanto). Decile al cliente que hubo un cambio con ese horario y que le van a escribir para coordinar. NO afirmes que quedó agendada. Después llamá escalate_to_human con razón "el cliente aceptó un horario que ya no está disponible".'
+
 const MISSING_NAME_INSTRUCTION =
   'Todavía no tenés el nombre del paciente. Preguntáselo antes de agendar: "¿A nombre de quién agendo la cita?". NO inventes un nombre, NO uses el nombre de WhatsApp, y no vuelvas a llamar esta herramienta hasta que el cliente te lo diga.'
 
@@ -324,6 +342,57 @@ export async function executeTool(
                 instruction:
                   'La hora en scheduled_at ya está en la zona horaria del negocio y en formato 12h. Confirmásela al cliente tal cual, sin convertirla ni pasarla a 24h.',
               }),
+        }),
+      }
+    }
+
+    if (name === 'confirm_pending_appointment') {
+      // No arguments by design: the appointment is found from the conversation's
+      // own customer, so the model has nothing to get wrong.
+      const r = await appointmentService.confirmPendingForCustomer({
+        businessId: context.businessId,
+        customerId: context.customerId,
+      })
+      if (!r.ok) {
+        if (r.error.code === 'no_pending_appointment') {
+          return {
+            result: JSON.stringify({
+              error: 'no_pending_appointment',
+              instruction: NO_PENDING_INSTRUCTION,
+            }),
+            error: 'no_pending_appointment',
+          }
+        }
+        if (r.error.code === 'awaiting_owner_approval') {
+          return {
+            result: JSON.stringify({
+              error: 'awaiting_owner_approval',
+              instruction: AWAITING_APPROVAL_INSTRUCTION,
+            }),
+            error: 'awaiting_owner_approval',
+          }
+        }
+        if (r.error.code === 'invalid_status_transition') {
+          return {
+            result: JSON.stringify({
+              error: 'invalid_status_transition',
+              instruction: STALE_PENDING_INSTRUCTION,
+            }),
+            error: 'invalid_status_transition',
+          }
+        }
+        return {
+          result: JSON.stringify({ error: r.error.code, userMessage: r.error.userMessage }),
+          error: r.error.code,
+        }
+      }
+
+      return {
+        result: JSON.stringify({
+          status: 'confirmed',
+          service: r.data.appointment.service,
+          scheduled_at: r.data.scheduledAtDisplay,
+          instruction: CONFIRMED_INSTRUCTION,
         }),
       }
     }

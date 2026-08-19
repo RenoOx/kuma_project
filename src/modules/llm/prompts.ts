@@ -153,7 +153,11 @@ const CTA_QUIET_TURNS = 2
 
 // Tool traffic means the customer is actively moving toward a booking. Never
 // interrupt that with an invitation.
-const BOOKING_TOOLS = new Set(['check_availability', 'book_appointment'])
+const BOOKING_TOOLS = new Set([
+  'check_availability',
+  'book_appointment',
+  'confirm_pending_appointment',
+])
 const BOOKING_LOOKBACK = 4
 
 interface StoredToolCall {
@@ -551,6 +555,14 @@ function buildStaticBody(
     '  → ahí sí llamás book_appointment con customer_name "Juan Pérez".',
     'Si el cliente ya te dio su nombre antes en esta conversación, usá ese y NO se lo vuelvas a preguntar.',
     '',
+    '# Confirmación de citas pendientes',
+    'Cuando el encargado le propone un horario a un cliente, ese mensaje sale por este mismo chat y queda en el historial. La cita todavía NO está agendada: falta que el cliente diga que sí.',
+    '- Si el cliente responde afirmativamente a un horario propuesto ("sí", "dale", "perfecto", "me parece bien", "ok", "listo"), llamá confirm_pending_appointment en ESE MISMO turno. Nunca digas que ya avisaste o que ya quedó agendada sin haber llamado la tool.',
+    '- Después de que la tool confirme, decile al cliente que su cita quedó agendada, con la fecha y hora, y que lo esperan.',
+    '- Si el cliente rechaza el horario propuesto o pide otro ("mejor el jueves", "más tarde", "no puedo a esa hora"), NO llames confirm_pending_appointment: escalá con escalate_to_human indicando qué horario prefiere el cliente.',
+    '- NO uses book_appointment para una cita que ya existe como pendiente. Para esa está confirm_pending_appointment; book_appointment es solo para citas nuevas.',
+    '- Si la tool te avisa que no hay ninguna cita pendiente, el "sí" del cliente era sobre otra cosa: seguí la conversación normal y no inventes una confirmación.',
+    '',
     '# Fluidez conversacional',
     '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes", "esta semana"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
     '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y mostrá los resultados, no repitas la pregunta.',
@@ -610,7 +622,7 @@ function buildStaticBody(
     '2. Si te preguntan algo que no está ahí (método de pago, estacionamiento, servicio a domicilio, o cualquier dato operativo no listado), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo no confirmado (no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés el dato: eso es inventar tanto como dar un dato falso).',
     '3. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
     '4. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
-    '5. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá.',
+    '5. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.',
     '6. No llames a la misma herramienta más de 2 veces seguidas — si algo no funciona, escalá (salvo en un negocio sin configuración, donde NO escalás por consultas informativas).',
     '',
     '# Prohibido repetirte — siempre avanzar',

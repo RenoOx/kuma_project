@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gte, isNull, lt, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, isNull, lt, lte, ne, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
   type Appointment,
@@ -196,6 +196,33 @@ export async function findPendingByCustomer(
       ),
     )
     .orderBy(asc(appointments.scheduledAt))
+    .limit(1)
+  return row ?? null
+}
+
+// The request this customer was most recently ASKED to accept, newest first.
+//
+// Deliberately ordered by createdAt and not by scheduledAt (which is what
+// findPendingByCustomer above does): a reschedule cancels the old row and
+// inserts a fresh `pending` holding the newly proposed slot, so the one the
+// customer is answering "dale" to is the last one created — which may well sit
+// further away in the calendar than an older request still waiting.
+export async function findLatestPendingByCustomer(
+  businessId: string,
+  customerId: string,
+  exec: Executor = db,
+): Promise<Appointment | null> {
+  const [row] = await exec
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.businessId, businessId),
+        eq(appointments.customerId, customerId),
+        eq(appointments.status, 'pending'),
+      ),
+    )
+    .orderBy(desc(appointments.createdAt))
     .limit(1)
   return row ?? null
 }

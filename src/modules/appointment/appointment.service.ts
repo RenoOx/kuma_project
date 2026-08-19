@@ -856,6 +856,26 @@ export async function escalate(params: EscalateParams): Promise<Result<void>> {
 // al paciente" — reporting that without knowing whether it left would make Emma
 // lie about the one thing the owner is relying on.
 
+/**
+ * Marker written on the `pending` row that a reschedule creates.
+ *
+ * Two different flows produce a `pending` appointment, and the row alone cannot
+ * say which party still has to agree:
+ *   - bookingMode 'requires_approval' → the PATIENT filed a request that waits
+ *     on the owner's call.
+ *   - rescheduleAppointment → the OWNER proposed a slot that waits on the
+ *     patient's answer.
+ *
+ * Only the second one may be confirmed by the patient saying "dale". Without
+ * this marker, a patient answering "perfecto" to their own submitted request
+ * would self-approve it and defeat `requires_approval` entirely.
+ *
+ * Stored in the `notes` column, which no code path was using — so this needs no
+ * migration. Rows created before the marker existed read as null, i.e. still
+ * awaiting the owner, which is the safe side to fail on.
+ */
+export const OWNER_PROPOSED_NOTE = 'owner_proposed_slot'
+
 const STATUS_LABELS: Record<AppointmentStatus, string> = {
   pending: 'pendiente de aprobación',
   scheduled: 'agendada',
@@ -1225,6 +1245,9 @@ export async function rescheduleAppointment(params: {
           scheduledAt: datetime,
           durationMinutes: appointment.durationMinutes,
           status: 'pending',
+          // Records that this slot came FROM the owner, so the patient's "dale"
+          // is allowed to confirm it. See OWNER_PROPOSED_NOTE.
+          notes: OWNER_PROPOSED_NOTE,
         },
         tx,
       )
@@ -1273,6 +1296,155 @@ export async function rescheduleAppointment(params: {
           businessId: params.businessId,
           appointmentId: params.appointmentId,
         },
+        cause,
+      }),
+    )
+  }
+}
+
+// ── Confirmación por parte del paciente ──────────────────────────────────────
+//
+// The mirror image of confirmAppointment above. There, the owner accepts a
+// request the patient filed; here, the patient accepts a slot the owner
+// proposed, and the push runs the other way — to the owner.
+//
+// Emma is the only channel between the two: the patient never learns that a
+// message went to the doctor, and the doctor never writes into the patient's
+// chat. That is why nothing in the tool result below mentions a notification.
+
+export interface ConfirmPendingResult {
+  appointment: Appointment
+  /** Ready to speak, in the business timezone: "martes 19 de agosto, 3:00pm". */
+  scheduledAtDisplay: string
+}
+
+// Card the owner gets the moment a patient accepts. Best-effort, on the same
+// rule as the other two owner pushes fired from the customer path: the patient
+// is waiting on Emma's reply and must not be held up by an outbound send.
+async function notifyOwnerOfPatientConfirmation(params: {
+  businessId: string
+  niche: Niche
+  service: string
+  scheduledAt: Date
+  timezone: string
+  customer: CustomerContact
+}): Promise<void> {
+  const who = formatPersonName(params.customer.name) ?? '(sin nombre)'
+
+  const text = [
+    '✅ *Cita confirmada*',
+    '',
+    `👤 ${who} aceptó el nuevo horario`,
+    // Carried so the owner can answer with reply_to_customer straight off this
+    // card, the same way the pending-request card works.
+    `📱 ${params.customer.phone}`,
+    `${NICHE_SERVICE_EMOJI[params.niche]} ${params.service}`,
+    `📅 ${formatRequestDateTime(params.scheduledAt, params.timezone)}`,
+  ].join('\n')
+
+  const sent = await ownerNotifier.notifyOwner(params.businessId, text)
+  if (!sent.ok) {
+    logger.warn(
+      { businessId: params.businessId, code: sent.error.code },
+      'owner notification of patient confirmation failed (silenced) — the appointment is scheduled but nobody was told',
+    )
+  }
+}
+
+export async function confirmPendingForCustomer(params: {
+  businessId: string
+  customerId: string
+}): Promise<Result<ConfirmPendingResult>> {
+  try {
+    const pending = await appointmentRepo.findLatestPendingByCustomer(
+      params.businessId,
+      params.customerId,
+    )
+    if (!pending) {
+      return err(
+        new AppError({
+          code: 'no_pending_appointment',
+          message: 'customer has no pending appointment to confirm',
+          userMessage: 'No tenés ninguna solicitud de cita pendiente.',
+          logContext: { businessId: params.businessId, customerId: params.customerId },
+        }),
+      )
+    }
+
+    // The patient may only accept what the owner offered. A request the patient
+    // filed themselves is still waiting on the owner and stays untouched.
+    if (pending.notes !== OWNER_PROPOSED_NOTE) {
+      return err(
+        new AppError({
+          code: 'awaiting_owner_approval',
+          message: 'pending appointment was filed by the patient, not proposed by the owner',
+          userMessage: 'Tu solicitud sigue en revisión.',
+          logContext: {
+            businessId: params.businessId,
+            customerId: params.customerId,
+            appointmentId: pending.id,
+          },
+        }),
+      )
+    }
+
+    const ctx = await loadAppointmentContext(params.businessId, pending.id)
+    if (!ctx.ok) return ctx
+    const { appointment, business, customer } = ctx.data
+
+    // Re-read rather than trusting the row selected above: the owner may have
+    // cancelled or confirmed the proposal in between.
+    if (appointment.status !== 'pending') {
+      return err(wrongStatus('confirmar', params.businessId, appointment))
+    }
+
+    let updated = await appointmentRepo.update(params.businessId, appointment.id, {
+      status: 'scheduled',
+    })
+
+    // Same rule as the owner's confirmAppointment: a `pending` row is not a
+    // commitment and stays off the calendar, and the instant it becomes one it
+    // earns its event. Best-effort — Google failing never fails the confirm.
+    const googleEventId = await mirrorToGoogleCalendar({
+      businessId: params.businessId,
+      appointment: updated,
+      timezone: business.timezone,
+      customer,
+    })
+    if (googleEventId !== null) {
+      updated = await appointmentRepo.update(params.businessId, appointment.id, { googleEventId })
+    }
+
+    const niche = await nicheOf(params.businessId)
+    notifyOwnerOfPatientConfirmation({
+      businessId: params.businessId,
+      niche,
+      service: updated.service,
+      scheduledAt: updated.scheduledAt,
+      timezone: business.timezone,
+      customer,
+    }).catch((err) => {
+      logger.warn(
+        { err, businessId: params.businessId, appointmentId: updated.id },
+        'notifyOwnerOfPatientConfirmation rejected unexpectedly',
+      )
+    })
+
+    logger.info(
+      { businessId: params.businessId, appointmentId: updated.id },
+      'patient accepted the slot proposed by the owner',
+    )
+    return ok({
+      appointment: updated,
+      scheduledAtDisplay: formatRequestDateTime(updated.scheduledAt, business.timezone),
+    })
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'confirm_pending_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pude confirmar la cita en este momento.',
+        logContext: { businessId: params.businessId, customerId: params.customerId },
         cause,
       }),
     )

@@ -56,6 +56,20 @@ export const kumaTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'confirm_pending_appointment',
+      description:
+        'Confirma la cita pendiente del cliente. Usar SOLO cuando el cliente acepta un horario que el dueño/encargado le propuso ("sí", "dale", "perfecto", "me parece bien"). Busca sola la cita pendiente, no necesita argumentos. NO la uses para agendar una cita nueva: para eso está book_appointment.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'request_image',
       description:
         'Avisa al sistema que vas a pedirle una foto al cliente, para que esa foto llegue al encargado. Llamala ANTES de pedirle la imagen. Usar cuando: el cliente dice que ya pagó o que va a mandar el comprobante/voucher/captura (purpose "payment"), o cuando necesitás una foto de referencia para cotizar (purpose "reference"). NO la llames para fotos que no pediste ni para cualquier otra imagen.',
@@ -99,6 +113,7 @@ export const kumaTools: ChatCompletionTool[] = [
 export const KUMA_TOOL_NAMES = [
   'check_availability',
   'book_appointment',
+  'confirm_pending_appointment',
   'request_image',
   'escalate_to_human',
 ] as const
