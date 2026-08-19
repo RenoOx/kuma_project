@@ -10,6 +10,7 @@ import { NotConfiguredError } from '@/shared/errors.js'
 const BASE_SETTINGS: BusinessSettings = {
   niche: 'general',
   bookingMode: 'direct',
+  forwardImages: false,
   appointmentMode: 'appointments_only',
   operatingHours: {
     monday: { open: '09:00', close: '19:00' },

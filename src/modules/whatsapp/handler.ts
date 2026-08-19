@@ -1,6 +1,8 @@
-import type { WAMessage } from '@whiskeysockets/baileys'
+import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
+import type { Business, Customer } from '@/db/schema/index.js'
+import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
@@ -10,15 +12,19 @@ import * as llmService from '@/modules/llm/llm.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import { consumeImageExpectation, type ImagePurpose } from '@/modules/whatsapp/imageExpectation.js'
+import * as mediaForwarder from '@/modules/whatsapp/mediaForwarder.js'
 import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
   classifyIncoming,
   describeFormat,
+  IMAGE_FORWARDED_REPLY,
+  IMAGE_RECEIVED_REPLY,
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
+import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import { humanDelay } from '@/shared/humanDelay.js'
 import { samePhone } from '@/shared/phone.js'
 
 const LLM_FALLBACK_REPLY =
@@ -51,51 +57,10 @@ type HandlerLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
 //    500 mensajes en un minuto = baneo inmediato.
 // ────────────────────────────────────────────────
 
-// How long the "typing…" indicator stays up before the text lands. Stacks on
-// top of humanDelay, so the customer perceives 3–4.5s total.
-const COMPOSING_HOLD_MS = 1500
-
-/**
- * Sends a CUSTOMER-facing message with human-looking timing.
- *
- * Exported because callHandler.ts sends the post-call follow-up, which reaches
- * a customer just like anything in this file does.
- *
- * The socket is reached through the registry rather than passed in: `send` is a
- * bound `(jid, text)` closure with no presence capability, and `WhatsappClient`
- * exposes the raw `sock`. A missing client (not yet connected, or mid-reconnect)
- * degrades to no presence rather than blocking the message.
- *
- * Presence failures are swallowed on purpose — "typing…" is cosmetic, and losing
- * the actual reply over it would be a far worse bug than looking robotic.
- */
-export async function sendWithPresence(params: {
-  businessId: string
-  jid: string
-  text: string
-  send: SendFn
-}): Promise<void> {
-  const { businessId, jid, text, send } = params
-
-  await humanDelay()
-
-  const sock = clientRegistry.getClient(businessId)?.sock
-  try {
-    await sock?.sendPresenceUpdate('composing', jid)
-    await new Promise((resolve) => setTimeout(resolve, COMPOSING_HOLD_MS))
-  } catch {
-    // Silent by contract: never block the message over a presence hiccup.
-  }
-
-  // Deliberately NOT wrapped: callers already handle send failures and log them.
-  await send(jid, text)
-
-  try {
-    await sock?.sendPresenceUpdate('paused', jid)
-  } catch {
-    // Silent by contract.
-  }
-}
+// sendWithPresence moved to whatsapp/outbound.ts so the owner assistant can
+// use it without closing an import cycle through this file. Re-exported here
+// because callHandler.ts and the tests already import it from this module.
+export { sendWithPresence }
 
 // Converts any stray Markdown that GPT produces into WhatsApp-native formatting.
 // Acts as a hard backstop so the prompt rules never reach the customer as
@@ -202,7 +167,10 @@ function shouldSendEscalatedNotice(conversationId: string): boolean {
 async function recordUnsupportedEvent(
   businessId: string,
   conversationId: string,
-  format: UnsupportedFormat,
+  // Images left UnsupportedFormat when forwarding arrived, but they still earn
+  // an audit row: "how many photos does this business get" is the number that
+  // tells us whether forwarding is worth keeping.
+  format: UnsupportedFormat | 'image',
   phone: string,
   log: HandlerLogger,
 ): Promise<void> {
@@ -227,7 +195,7 @@ async function recordUnsupportedEvent(
 async function respondUnsupportedFormat(params: {
   businessId: string
   conversationId: string
-  format: UnsupportedFormat
+  format: UnsupportedFormat | 'image'
   jid: string
   send: SendFn
   log: HandlerLogger
@@ -240,7 +208,7 @@ async function respondUnsupportedFormat(params: {
     return
   }
 
-  const reply = replyForFormat(format)
+  const reply = format === 'image' ? IMAGE_RECEIVED_REPLY : replyForFormat(format)
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -261,6 +229,135 @@ async function respondUnsupportedFormat(params: {
   } catch (err) {
     log.error({ err, jid, format }, 'failed to send unsupported format notice')
   }
+}
+
+/**
+ * Handles a photo from a customer.
+ *
+ * Three outcomes, in order of preference:
+ *   1. forwarding on + the photo was expected → relay it to the owner
+ *   2. forwarding off, no owner number, or the relay failed → the old text-only
+ *      notice, so nothing regresses for businesses that never opted in
+ *   3. forwarding on but the photo was NOT expected → the old notice too. An
+ *      unsolicited picture is not something to push to a third phone.
+ *
+ * The acknowledgement to the customer never mentions that a human is involved:
+ * from their side this is one continuous conversation with Emma.
+ */
+async function handleCustomerImage(params: {
+  raw: WAMessage
+  business: Business
+  customer: Customer
+  conversationId: string
+  caption: string | null
+  jid: string
+  send: SendFn
+  log: HandlerLogger
+}): Promise<void> {
+  const { raw, business, customer, conversationId, caption, jid, send, log } = params
+  const businessId = business.id
+
+  // Consumed unconditionally: one request buys one forward, whether or not the
+  // rest of the path succeeds. Leaving it armed would relay the next photo too.
+  const purpose = consumeImageExpectation(conversationId)
+
+  const settingsResult = await businessService.getSettings(businessId)
+  const forwardImages = settingsResult.ok ? settingsResult.data.forwardImages : false
+
+  const pendingAppointment = await appointmentRepo.findPendingByCustomer(businessId, customer.id)
+
+  // A customer waiting on the owner's approval is the one case worth relaying
+  // without being asked: that photo is almost always the payment that unblocks
+  // their appointment, and unlike the expectation above this signal survives a
+  // deploy because it lives in the database.
+  const wanted = purpose !== null || pendingAppointment !== null
+
+  let forwarded = false
+  if (forwardImages && wanted && business.ownerWhatsappNumber) {
+    forwarded = await relayImage({
+      raw,
+      business,
+      customer,
+      caption,
+      pendingAppointment,
+      purpose,
+      log,
+    })
+  } else {
+    log.info(
+      { conversationId, forwardImages, wanted, hasOwner: !!business.ownerWhatsappNumber },
+      'customer image not forwarded',
+    )
+  }
+
+  const reply = forwarded ? IMAGE_FORWARDED_REPLY : IMAGE_RECEIVED_REPLY
+  const persisted = await messageService.append({
+    businessId,
+    conversationId,
+    role: 'assistant',
+    content: reply,
+  })
+  if (!persisted.ok) {
+    log.error({ code: persisted.error.code }, 'append image acknowledgement failed')
+  }
+
+  try {
+    await sendWithPresence({ businessId, jid, text: reply, send })
+  } catch (err) {
+    log.error({ err, jid }, 'failed to acknowledge customer image')
+  }
+}
+
+/**
+ * Downloads the photo and hands it to the forwarder. Never throws: a failed
+ * download or a failed send falls back to the text-only path, which is strictly
+ * better than dropping the customer's message on the floor.
+ */
+async function relayImage(params: {
+  raw: WAMessage
+  business: Business
+  customer: Customer
+  caption: string | null
+  pendingAppointment: Awaited<ReturnType<typeof appointmentRepo.findPendingByCustomer>>
+  purpose: ImagePurpose | null
+  log: HandlerLogger
+}): Promise<boolean> {
+  const { raw, business, customer, caption, pendingAppointment, purpose, log } = params
+
+  const client = clientRegistry.getClient(business.id)
+  if (!client) {
+    log.warn({ businessId: business.id }, 'cannot forward image: no whatsapp client registered')
+    return false
+  }
+
+  // No reupload context: the media was sent seconds ago and has not expired, so
+  // the retry path Baileys offers there would never fire. A download that fails
+  // anyway falls through to the text-only notice.
+  let image: Buffer
+  try {
+    image = await downloadMediaMessage(raw, 'buffer', {})
+  } catch (err) {
+    log.error({ err, businessId: business.id }, 'failed to download customer image')
+    return false
+  }
+
+  const sent = await mediaForwarder.forwardImageToOwner({
+    client,
+    business,
+    customer,
+    image,
+    caption,
+    pendingAppointment,
+    purpose,
+  })
+  if (!sent.ok) {
+    log.error(
+      { code: sent.error.code, context: sent.error.logContext },
+      'failed to forward customer image to owner',
+    )
+    return false
+  }
+  return true
 }
 
 // Returns the peer's E.164 phone (with leading '+') from a Baileys JID or null
@@ -306,7 +403,21 @@ function extractPhone(msg: WAMessage): string | null {
 
 // What processMessage was handed: either readable text, or a format we can
 // only acknowledge. Both still create the customer/conversation records.
-type Payload = { kind: 'text'; text: string } | { kind: 'unsupported'; format: UnsupportedFormat }
+type Payload =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; caption: string | null }
+  | { kind: 'unsupported'; format: UnsupportedFormat }
+
+// What the transcript records for a photo. The LLM reads this on the next turn,
+// so it must not claim the image was discarded — told "no puedo procesar" after
+// the photo already reached the owner, the model goes on to deny having
+// received anything. It states only what is true either way: the image arrived
+// and Emma cannot see it. Whether it went any further is carried by the
+// assistant turn that follows, which is persisted too.
+function imagePlaceholder(caption: string | null): string {
+  const said = caption?.trim() ? ` con el texto: "${caption.trim()}"` : ''
+  return `[El cliente envió una imagen${said}. No puedo verla]`
+}
 
 async function processMessage(
   raw: WAMessage,
@@ -324,7 +435,9 @@ async function processMessage(
   const text =
     payload.kind === 'text'
       ? payload.text
-      : `[El cliente envió ${describeFormat(payload.format)} que no puedo procesar]`
+      : payload.kind === 'image'
+        ? imagePlaceholder(payload.caption)
+        : `[El cliente envió ${describeFormat(payload.format)} que no puedo procesar]`
 
   // Load business once to figure out who is talking to us (owner or customer)
   // and to feed downstream services without re-fetching.
@@ -370,8 +483,12 @@ async function processMessage(
       return
     }
 
-    if (payload.kind === 'unsupported') {
-      await recordUnsupportedEvent(businessId, ownerThread.data.id, payload.format, phone, log)
+    // Includes images: forwarding points customer → owner, so a photo FROM the
+    // owner has nowhere to go and stays a plain "text only" case, exactly as
+    // before this feature existed.
+    if (payload.kind !== 'text') {
+      const format = payload.kind === 'image' ? 'image' : payload.format
+      await recordUnsupportedEvent(businessId, ownerThread.data.id, format, phone, log)
       const persisted = await messageService.append({
         businessId,
         conversationId: ownerThread.data.id,
@@ -384,7 +501,7 @@ async function processMessage(
       await respondUnsupportedFormat({
         businessId,
         conversationId: ownerThread.data.id,
-        format: payload.format,
+        format,
         jid,
         send,
         log,
@@ -488,9 +605,11 @@ async function processMessage(
   }
 
   // Recorded before the paused check so the metric counts every occurrence,
-  // not only the ones that got a reply.
-  if (payload.kind === 'unsupported') {
-    await recordUnsupportedEvent(businessId, conversation.id, payload.format, phone, log)
+  // not only the ones that got a reply. Images included: a photo that arrived
+  // during a pause is still a photo this business received.
+  if (payload.kind !== 'text') {
+    const format = payload.kind === 'image' ? 'image' : payload.format
+    await recordUnsupportedEvent(businessId, conversation.id, format, phone, log)
   }
 
   // BOT PAUSED — keep the customer record + the message, but skip LLM and
@@ -549,6 +668,23 @@ async function processMessage(
     return
   }
 
+  // A photo Emma cannot read but the business can act on. Direct flow: no LLM
+  // call, because there is nothing to reason about — the decision of whether it
+  // matters was already made when Emma asked for it.
+  if (payload.kind === 'image') {
+    await handleCustomerImage({
+      raw,
+      business,
+      customer,
+      conversationId: conversation.id,
+      caption: payload.caption,
+      jid,
+      send,
+      log,
+    })
+    return
+  }
+
   // Nothing to reason about — acknowledge the format and stop before the LLM.
   if (payload.kind === 'unsupported') {
     await respondUnsupportedFormat({
@@ -560,27 +696,6 @@ async function processMessage(
       log,
       humanize: true,
     })
-
-    // A photo is almost always a quote request, and the reply we just sent
-    // promises the owner will see it ("Ya la comparto..."). Nothing else in the
-    // codebase forwards it, so this push is what makes that promise true.
-    //
-    // Deliberately NOT gated on the notice cooldown above: that cooldown exists
-    // to avoid repeating the same line at the CUSTOMER, while a second photo is
-    // still a second thing the owner has to look at. Fire-and-forget so the
-    // customer's reply is never blocked by an outbound send.
-    if (payload.format === 'image') {
-      const who = customer.name?.trim() || '(sin nombre)'
-      const photoText = [
-        '📸 *Foto recibida*',
-        `Cliente: ${who} (${phone})`,
-        'Te mandó una foto para cotización.',
-        'Revisá WhatsApp para verla y confirmarle el precio.',
-      ].join('\n')
-      ownerNotifier.notifyOwner(businessId, photoText).catch((err) => {
-        log.warn({ err }, 'notifyOwner for received photo rejected unexpectedly')
-      })
-    }
     return
   }
 
@@ -737,7 +852,9 @@ export function handleIncomingMessage(
   log.info(
     incoming.kind === 'text'
       ? { phone, textPreview: incoming.text.slice(0, 60) }
-      : { phone, format: incoming.format },
+      : incoming.kind === 'image'
+        ? { phone, format: 'image', hasCaption: !!incoming.caption }
+        : { phone, format: incoming.format },
     'handler accepted incoming message',
   )
 
@@ -749,10 +866,7 @@ export function handleIncomingMessage(
   // possibly before the text it came with — accepted trade-off.
   if (incoming.kind !== 'text') {
     return withSenderLock(senderKey, () =>
-      processMessage(raw, businessId, send, jid, phone, {
-        kind: 'unsupported',
-        format: incoming.format,
-      }),
+      processMessage(raw, businessId, send, jid, phone, incoming),
     )
   }
 

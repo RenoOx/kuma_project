@@ -56,6 +56,27 @@ export const kumaTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'request_image',
+      description:
+        'Avisa al sistema que vas a pedirle una foto al cliente, para que esa foto llegue al encargado. Llamala ANTES de pedirle la imagen. Usar cuando: el cliente dice que ya pagó o que va a mandar el comprobante/voucher/captura (purpose "payment"), o cuando necesitás una foto de referencia para cotizar (purpose "reference"). NO la llames para fotos que no pediste ni para cualquier otra imagen.',
+      parameters: {
+        type: 'object',
+        properties: {
+          purpose: {
+            type: 'string',
+            enum: ['payment', 'reference'],
+            description:
+              '"payment" para comprobantes de pago, "reference" para fotos de referencia o del caso.',
+          },
+        },
+        required: ['purpose'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'escalate_to_human',
       description:
         'Marca la conversación para que un humano la atienda. Usar cuando: el cliente pide hablar con una persona, el cliente está molesto o frustrado, el cliente menciona una queja sobre un servicio anterior, el cliente pregunta por pagos o reembolsos o descuentos especiales, o el cliente repite la misma pregunta sin haber recibido una respuesta útil.',
@@ -78,6 +99,7 @@ export const kumaTools: ChatCompletionTool[] = [
 export const KUMA_TOOL_NAMES = [
   'check_availability',
   'book_appointment',
+  'request_image',
   'escalate_to_human',
 ] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]

@@ -53,6 +53,7 @@ const BARBERIA: DemoProfile = {
   settings: {
     niche: 'barberia',
     bookingMode: 'direct',
+    forwardImages: false,
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 15,
     services: [
@@ -109,6 +110,7 @@ const CONSULTORIO: DemoProfile = {
   settings: {
     niche: 'dental',
     bookingMode: 'requires_approval',
+    forwardImages: true,
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
@@ -163,6 +165,12 @@ const CONSULTORIO: DemoProfile = {
     },
     {
       category: 'politicas',
+      title: 'Formas de pago',
+      content:
+        'Aceptamos pagos en efectivo, Yape y Plin. Para tratamientos que requieren adelanto, te indicaremos el monto y a dónde transferir. Mándanos la captura del pago para confirmar tu cita.',
+    },
+    {
+      category: 'politicas',
       title: 'Primera visita',
       content:
         'En tu primera cita el doctor hace una evaluación general, que puede incluir una radiografía si es necesario. Trae tu DNI. Si tomas algún medicamento o tienes alguna condición de salud, avísanos antes del tratamiento.',
@@ -205,6 +213,7 @@ const SPA: DemoProfile = {
   settings: {
     niche: 'estetica',
     bookingMode: 'direct',
+    forwardImages: false,
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,

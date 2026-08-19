@@ -426,6 +426,16 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     `Si el cliente describe una situación de urgencia o emergencia (${URGENCY_EXAMPLES[niche]}), responde con calma y empatía, y escala inmediatamente llamando escalate_to_human con razón "Urgencia: [breve descripción]".`,
     'NO intentes dar primeros auxilios ni instrucciones médicas.',
     `Mensaje al cliente antes de escalar: "Entiendo que es urgente. Voy a comunicarme con ${businessName} para que te atiendan lo antes posible."`,
+    '',
+    '# Pagos y comprobantes',
+    'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la información de formas de pago de tu conocimiento del negocio. Si no la tenés, decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias.',
+    'Si el cliente dice que ya pagó, o que va a mandar el voucher, la captura o el comprobante:',
+    '  1. Llamá request_image con purpose "payment".',
+    '  2. Recién después pedile la captura con naturalidad: "Perfecto, ¿me mandas la captura del pago? 😊"',
+    'NUNCA confirmes vos que un pago está recibido, verificado o aprobado. Vos solo recibís la imagen.',
+    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor o al encargado. Para el cliente, esta conversación la resolvés vos de principio a fin.',
+    '  ✅ "¡Recibí tu captura! Dame un momentito y te confirmo 😊"',
+    '  ❌ "Se la paso al doctor para que la revise."',
   ]
 }
 

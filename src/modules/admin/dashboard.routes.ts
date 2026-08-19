@@ -467,9 +467,14 @@ async function parseSettingsFromForm(
       ? (bookingModeRaw as BookingMode)
       : 'direct'
 
+  // Unchecked checkboxes are simply absent from the form data, so presence is
+  // the value. No fallback needed: absent means false, which is the default.
+  const forwardImages = formData.get('forwardImages')?.toString() === 'on'
+
   const raw = {
     niche,
     bookingMode,
+    forwardImages,
     operatingHours,
     slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
     services,
@@ -1282,6 +1287,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   const isHybrid = raw?.appointmentMode === 'hybrid'
   const niche: Niche = raw?.niche ?? 'general'
   const bookingMode: BookingMode = raw?.bookingMode ?? 'direct'
+  const forwardImages: boolean = raw?.forwardImages ?? false
   const initialServiceCount = Math.max(services.length, 1)
   const initialSpecialDayCount = specialDays.length
 
@@ -1335,6 +1341,20 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <p class="form-hint">
                 Con "Requiere aprobación" Emma no confirma la cita: la deja por aprobar
                 y te manda la solicitud por WhatsApp.
+              </p>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="forwardImages">
+                <input type="checkbox" id="forwardImages" name="forwardImages"
+                  ${forwardImages ? 'checked' : ''}>
+                Reenviar imágenes de clientes al dueño
+              </label>
+              <p class="form-hint">
+                Emma te manda la foto por WhatsApp cuando ella misma la pidió (por ejemplo
+                un comprobante de pago) o cuando el paciente tiene una cita por aprobar.
+                Las fotos que nadie pidió no se reenvían.
               </p>
             </div>
           </div>

@@ -203,6 +203,31 @@ export const ownerTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'reply_to_customer',
+      description:
+        'Le envía un mensaje de texto a un paciente por WhatsApp, en su misma conversación. Usar cuando el dueño te dice qué responderle a alguien: "dile que se ve bien", "respóndele que sí", "pídele que mande la foto de nuevo". El mensaje le llega al paciente como parte de la conversación normal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_phone: {
+            type: 'string',
+            description:
+              'Teléfono del paciente en formato internacional, tal como aparece en la notificación o en la lista de citas. Ej: +51987654321',
+          },
+          message: {
+            type: 'string',
+            description:
+              'El texto que recibe el paciente. Redactalo con la voz de Emma (cálida, breve, tuteo). NO menciones al dueño ni al doctor: para el paciente esta conversación la seguís vos.',
+          },
+        },
+        required: ['customer_phone', 'message'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 // V1.5 (NO IMPLEMENTAR HOY): tools planeadas para expandir el asistente

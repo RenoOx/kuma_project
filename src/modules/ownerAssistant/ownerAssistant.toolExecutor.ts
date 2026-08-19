@@ -5,10 +5,16 @@ import * as appointmentService from '@/modules/appointment/appointment.service.j
 import * as businessService from '@/modules/business/business.service.js'
 import type { BotPausedState } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
+import * as conversationService from '@/modules/conversation/conversation.service.js'
+import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
+import * as messageService from '@/modules/message/message.service.js'
+import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
 import { formatPersonName } from '@/shared/name.js'
+import { normalizePhone } from '@/shared/phone.js'
 import { generateDailyReportText } from './dailyReport.js'
 import type { OwnerContext, OwnerToolExecutionResult } from './ownerAssistant.types.js'
 import { dayRangeInTimezone } from './timezone.js'
@@ -38,6 +44,11 @@ const rescheduleArgs = z.object({
   appointment_id: z.string().min(1),
   suggested_datetime: z.string().min(1),
   message: z.string().optional(),
+})
+
+const replyToCustomerArgs = z.object({
+  customer_phone: z.string().min(1),
+  message: z.string().min(1),
 })
 
 // Every patient name the owner reads goes through here. A null means WhatsApp
@@ -349,6 +360,113 @@ async function cancel(
   }
 }
 
+/**
+ * Relays the owner's words to a patient, as Emma.
+ *
+ * The message is persisted in the PATIENT's conversation, not the owner thread:
+ * without that the patient answers something Emma has no memory of saying, and
+ * her next reply reads as a non sequitur. It also goes out with the same
+ * anti-ban timing as any other customer-facing message — this leaves on the
+ * business's number like everything else.
+ */
+async function replyToCustomer(
+  ctx: OwnerContext,
+  args: { customer_phone: string; message: string },
+): Promise<OwnerToolExecutionResult> {
+  const phone = normalizePhone(args.customer_phone)
+  if (!phone) {
+    return {
+      result: JSON.stringify({
+        error: 'invalid_phone',
+        instruction: 'Ese teléfono no es válido. Pedile al dueño que te diga a quién responderle.',
+      }),
+      error: 'invalid_phone',
+    }
+  }
+
+  const customer = await customerRepo.findByPhone(ctx.businessId, phone)
+  if (!customer) {
+    return {
+      result: JSON.stringify({
+        error: 'customer_not_found',
+        instruction:
+          'No encontré a ningún paciente con ese número en este negocio. Decíselo al dueño y pedile que confirme el teléfono.',
+      }),
+      error: 'customer_not_found',
+    }
+  }
+
+  const conversation = await conversationService.getOrCreateOpen(ctx.businessId, customer.id)
+  if (!conversation.ok) {
+    return {
+      result: JSON.stringify({
+        error: conversation.error.code,
+        instruction: 'No pude abrir la conversación con ese paciente. Avisale al dueño.',
+      }),
+      error: conversation.error.code,
+    }
+  }
+
+  const client = clientRegistry.getClient(ctx.businessId)
+  if (!client) {
+    return {
+      result: JSON.stringify({
+        error: 'whatsapp_client_unavailable',
+        instruction:
+          'WhatsApp no está conectado ahora mismo, así que el mensaje NO se envió. Decíselo al dueño con todas las letras.',
+      }),
+      error: 'whatsapp_client_unavailable',
+    }
+  }
+
+  const jid = `${phone.replace('+', '')}@s.whatsapp.net`
+  try {
+    await sendWithPresence({
+      businessId: ctx.businessId,
+      jid,
+      text: args.message,
+      send: (to, text) => client.sendMessage(to, text),
+    })
+  } catch (cause) {
+    logger.error(
+      { err: cause, businessId: ctx.businessId, jid },
+      'reply_to_customer failed to send',
+    )
+    return {
+      result: JSON.stringify({
+        error: 'send_failed',
+        instruction:
+          'No pude enviarle el mensaje al paciente. Decíselo al dueño para que lo contacte por su cuenta.',
+      }),
+      error: 'send_failed',
+    }
+  }
+
+  // Persisted only after a successful send: a transcript entry for a message
+  // that never left would make Emma reference something the patient never got.
+  const persisted = await messageService.append({
+    businessId: ctx.businessId,
+    conversationId: conversation.data.id,
+    role: 'assistant',
+    content: args.message,
+  })
+  if (!persisted.ok) {
+    logger.warn(
+      { businessId: ctx.businessId, code: persisted.error.code },
+      'reply_to_customer sent but could not be recorded in the transcript',
+    )
+  }
+
+  return {
+    result: JSON.stringify({
+      status: 'sent',
+      customer_name: displayName(customer.name),
+      instruction:
+        'El mensaje ya le llegó al paciente. Confirmáselo al dueño en una línea, nombrando al paciente.',
+    }),
+  }
+}
+
 export async function executeOwnerTool(
   name: string,
   args: unknown,
@@ -402,6 +520,11 @@ export async function executeOwnerTool(
       const parsed = appointmentIdArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
       return await cancel(ctx, parsed.data)
+    }
+    if (name === 'reply_to_customer') {
+      const parsed = replyToCustomerArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+      return await replyToCustomer(ctx, parsed.data)
     }
     return {
       result: JSON.stringify({ error: `Unknown tool: ${name}` }),

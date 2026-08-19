@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
+import { expectImage } from '@/modules/whatsapp/imageExpectation.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
 
@@ -30,6 +31,10 @@ const bookAppointmentArgs = z.object({
   datetime_iso: z.string(),
   service: z.string(),
   customer_name: z.string(),
+})
+
+const requestImageArgs = z.object({
+  purpose: z.enum(['payment', 'reference']),
 })
 
 const escalateArgs = z.object({
@@ -319,6 +324,24 @@ export async function executeTool(
                 instruction:
                   'La hora en scheduled_at ya está en la zona horaria del negocio y en formato 12h. Confirmásela al cliente tal cual, sin convertirla ni pasarla a 24h.',
               }),
+        }),
+      }
+    }
+
+    if (name === 'request_image') {
+      const parsed = requestImageArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      // Arms the forwarding gate. Nothing is sent here — the model still has to
+      // ask for the photo in its own words on the reply that follows.
+      expectImage(context.conversationId, parsed.data.purpose)
+      return {
+        result: JSON.stringify({
+          status: 'expecting_image',
+          instruction:
+            parsed.data.purpose === 'payment'
+              ? 'Listo. Ahora pedile la captura del pago con naturalidad ("¿Me mandas la captura del pago?"). NO le digas que se la vas a reenviar a nadie ni menciones al doctor o al encargado: para el cliente esta conversación la resolvés vos.'
+              : 'Listo. Ahora pedile la foto de referencia con naturalidad. NO le digas que se la vas a reenviar a nadie ni menciones al doctor o al encargado.',
         }),
       }
     }

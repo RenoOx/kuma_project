@@ -39,6 +39,13 @@ export interface WhatsappClientOptions {
 export interface WhatsappClient {
   sock: WASocket
   sendMessage(jid: string, text: string): Promise<void>
+  /**
+   * Relays a photo. Separate from sendMessage rather than an overload because
+   * the payload shape Baileys wants is different, but it runs through the same
+   * LID handshake — an owner paired after the LID migration is reachable only
+   * at an `@lid` jid, and a raw send there fails with 463.
+   */
+  sendImage(jid: string, image: Buffer, caption?: string): Promise<void>
   onMessage(handler: MessageHandler): void
   onDisconnect(handler: DisconnectHandler): void
   onQR(handler: QRHandler): void
@@ -187,34 +194,48 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     }
   })
 
+  // LID recipients require the sender to have E2E key material fetched and a
+  // signal session established. assertSessions alone often isn't enough because
+  // WA delays returning key material until presence is subscribed. Pattern that
+  // works: presenceSubscribe → delay → assertSessions → send.
+  async function prepareLidSession(jid: string): Promise<void> {
+    if (!jid.endsWith('@lid')) return
+    try {
+      await sock.presenceSubscribe(jid)
+      log.info({ jid }, 'presenceSubscribe ok for lid')
+    } catch (err) {
+      log.warn({ err, jid }, 'presenceSubscribe failed')
+    }
+    await new Promise((r) => setTimeout(r, 800))
+    try {
+      await sock.assertSessions([jid], true)
+      log.info({ jid }, 'assertSessions ok for lid')
+    } catch (err) {
+      log.warn({ err, jid }, 'assertSessions failed — send may still 463')
+    }
+  }
+
   return {
     sock,
     async sendMessage(jid, text) {
       log.info({ jid, textLen: text.length }, 'sock.sendMessage: calling')
-      // LID recipients require the sender to have E2E key material fetched
-      // and a signal session established. assertSessions alone often isn't
-      // enough because WA delays returning key material until presence is
-      // subscribed. Pattern that works: presenceSubscribe → delay →
-      // assertSessions → send.
-      if (jid.endsWith('@lid')) {
-        try {
-          await sock.presenceSubscribe(jid)
-          log.info({ jid }, 'presenceSubscribe ok for lid')
-        } catch (err) {
-          log.warn({ err, jid }, 'presenceSubscribe failed')
-        }
-        await new Promise((r) => setTimeout(r, 800))
-        try {
-          await sock.assertSessions([jid], true)
-          log.info({ jid }, 'assertSessions ok for lid')
-        } catch (err) {
-          log.warn({ err, jid }, 'assertSessions failed — send may still 463')
-        }
-      }
+      await prepareLidSession(jid)
       const result = await sock.sendMessage(jid, { text })
       log.info(
         { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
         'sock.sendMessage: returned',
+      )
+    },
+    async sendImage(jid, image, caption) {
+      log.info({ jid, bytes: image.length, hasCaption: !!caption }, 'sock.sendImage: calling')
+      await prepareLidSession(jid)
+      const result = await sock.sendMessage(jid, {
+        image,
+        ...(caption ? { caption } : {}),
+      })
+      log.info(
+        { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
+        'sock.sendImage: returned',
       )
     },
     onMessage(handler) {

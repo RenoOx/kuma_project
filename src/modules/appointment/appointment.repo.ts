@@ -176,6 +176,30 @@ export async function findPendingByBusiness(
     .orderBy(asc(appointments.scheduledAt))
 }
 
+// The soonest request this one customer still has waiting on the owner's call.
+// Backs the image-forwarding card: a photo from someone with a pending request
+// is almost always the payment proof that unblocks it, and the owner needs to
+// see which appointment it belongs to without going to look it up.
+export async function findPendingByCustomer(
+  businessId: string,
+  customerId: string,
+  exec: Executor = db,
+): Promise<Appointment | null> {
+  const [row] = await exec
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.businessId, businessId),
+        eq(appointments.customerId, customerId),
+        eq(appointments.status, 'pending'),
+      ),
+    )
+    .orderBy(asc(appointments.scheduledAt))
+    .limit(1)
+  return row ?? null
+}
+
 // Counts appointments CREATED in [since, until). Used by the owner's
 // daily-summary tool to report "agendaste N citas hoy".
 export async function countCreatedInRange(

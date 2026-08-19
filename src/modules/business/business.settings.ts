@@ -145,9 +145,16 @@ export const BOOKING_MODE_LABELS: Record<z.infer<typeof bookingModeSchema>, stri
   requires_approval: 'Requiere aprobación',
 }
 
+// Whether a customer's photo is relayed to the owner's WhatsApp instead of only
+// announced in text. Off by default: forwarding a customer's picture to a third
+// number is the owner's call to make, not a default they discover after it
+// already happened.
+const forwardImagesSchema = z.boolean().default(false)
+
 export const businessSettingsSchema = z.object({
   niche: nicheSchema,
   bookingMode: bookingModeSchema,
+  forwardImages: forwardImagesSchema,
   operatingHours: operatingHoursSchema,
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
@@ -173,6 +180,7 @@ export type SpecialDay = z.infer<typeof specialDaySchema>
 export type AppointmentMode = z.infer<typeof appointmentModeSchema>
 export type Niche = z.infer<typeof nicheSchema>
 export type BookingMode = z.infer<typeof bookingModeSchema>
+export type ForwardImages = z.infer<typeof forwardImagesSchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
 
 // Default lead time when the business hasn't set its own value.

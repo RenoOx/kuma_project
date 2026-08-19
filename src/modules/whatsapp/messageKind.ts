@@ -3,8 +3,10 @@ import type { WAMessage } from '@whiskeysockets/baileys'
 // Classification of an incoming WhatsApp message. Pure — no I/O, no logging —
 // so the routing decision can be reasoned about and tested on its own.
 
+// Images left this union when forwarding arrived: they are no longer a dead end
+// Emma can only apologise for, so they carry their own kind. Everything here is
+// still genuinely unreadable.
 export type UnsupportedFormat =
-  | 'image'
   | 'video'
   | 'audio'
   | 'voice_note'
@@ -15,6 +17,11 @@ export type UnsupportedFormat =
 
 export type IncomingKind =
   | { kind: 'text'; text: string }
+  // Photos are the one attachment the business can act on without Emma being
+  // able to read it: a payment proof or a reference shot, relayed to the owner
+  // untouched. The caption travels along because it is often the whole message
+  // ("acá está el voucher").
+  | { kind: 'image'; caption: string | null }
   | { kind: 'unsupported'; format: UnsupportedFormat }
   // Protocol noise and anything we don't recognise. `keys` is carried out so
   // the caller can log unknown shapes instead of dropping them invisibly —
@@ -97,7 +104,10 @@ export function classifyIncoming(msg: WAMessage): IncomingKind {
   const extendedText = extended ? asText(extended.text) : null
   if (extendedText) return { kind: 'text', text: extendedText }
 
-  if (node.imageMessage) return { kind: 'unsupported', format: 'image' }
+  if (node.imageMessage) {
+    const image = node.imageMessage as { caption?: unknown }
+    return { kind: 'image', caption: asText(image.caption) }
+  }
   if (node.videoMessage) return { kind: 'unsupported', format: 'video' }
   if (node.audioMessage) {
     const audio = node.audioMessage as { ptt?: unknown }
@@ -119,7 +129,6 @@ export function classifyIncoming(msg: WAMessage): IncomingKind {
 }
 
 const FORMAT_LABELS: Record<UnsupportedFormat, string> = {
-  image: 'una imagen',
   video: 'un video',
   audio: 'un audio',
   voice_note: 'una nota de voz',
@@ -151,16 +160,22 @@ export function pickUnsupportedReply(randomFn: () => number = Math.random): stri
 // Photos are the one unreadable format that is usually the point of the
 // message, not an aside: a reference for a nail design or a hair colour. The
 // generic "I only read text" answer reads as a dead end right where the
-// customer expects a quote, so images get their own acknowledgement. Every
-// other format still falls back to the variants above.
+// customer expects a quote, so images get their own acknowledgement. Used when
+// the business has forwarding OFF — unchanged from before forwarding existed.
 export const IMAGE_RECEIVED_REPLY =
   '¡Recibí tu foto! Ya la comparto para que te confirmen el precio 😊'
 
+// Used when the photo WAS relayed to the owner. Deliberately names nobody: the
+// customer should experience one continuous conversation, so Emma never
+// announces that a human is now looking. The handoff is only ever made explicit
+// when the customer asks for a person, which escalate_to_human already covers.
+export const IMAGE_FORWARDED_REPLY = '¡Recibí tu imagen! Dame un momentito y te confirmo 😊'
+
 export function replyForFormat(
-  format: UnsupportedFormat,
+  _format: UnsupportedFormat,
   randomFn: () => number = Math.random,
 ): string {
-  return format === 'image' ? IMAGE_RECEIVED_REPLY : pickUnsupportedReply(randomFn)
+  return pickUnsupportedReply(randomFn)
 }
 
 export const CALL_REJECTED_VARIANTS: ReadonlyArray<string> = [

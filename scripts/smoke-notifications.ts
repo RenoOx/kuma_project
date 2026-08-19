@@ -25,6 +25,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     async sendMessage(jid, text) {
       sent.push({ jid, text })
     },
+    async sendImage(jid, image, caption) {
+      sent.push({ jid, text: '[image ' + image.length + 'b] ' + (caption || '') })
+    },
     onMessage() {
       // noop
     },
