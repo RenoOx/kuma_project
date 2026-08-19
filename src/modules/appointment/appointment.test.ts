@@ -758,6 +758,47 @@ describe('appointment module', () => {
     }
   })
 
+  it('bookAppointment overwrites the WhatsApp push name with the name the patient gave', async () => {
+    // customerA was seeded as "Cliente Test" — stand-in for the push name.
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T17:00:00-05:00`,
+      customerName: '  juan   pérez  ',
+    })
+    assert(result.ok)
+
+    const stored = await customerRepo.findById(seed.businessA.id, customerA.id)
+    // Normalised on the way in (whitespace collapsed), title-cased on the way
+    // out — so what lands in the column is the plain corrected name.
+    expect(stored?.name).toBe('juan pérez')
+  })
+
+  it("the owner's request card carries the name the patient gave, not the push name", async () => {
+    const updateResult = await businessService.updateSettings(seed.businessA.id, {
+      bookingMode: 'requires_approval',
+    })
+    assert(updateResult.ok)
+
+    const result = await appointmentService.bookAppointment({
+      businessId: seed.businessA.id,
+      customerId: customerA.id,
+      service: 'corte',
+      datetimeISO: `${MONDAY_ISO}T17:00:00-05:00`,
+      customerName: 'juan pérez',
+    })
+    assert(result.ok)
+    expect(result.data.status).toBe('pending')
+
+    // The push is fire-and-forget so the patient's reply is not held up by it:
+    // it may land after bookAppointment has already returned.
+    await vi.waitFor(() => expect(mockNotifyOwner).toHaveBeenCalled())
+    const [, text] = mockNotifyOwner.mock.calls[0] as [string, string]
+    expect(text).toContain('Juan Pérez')
+    expect(text).not.toContain('Cliente Test')
+  })
+
   it('isolation: appointments of businessA are not seen from businessB', async () => {
     await appointmentService.bookAppointment({
       businessId: seed.businessA.id,
