@@ -43,6 +43,14 @@ export interface CheckAvailabilityResult {
   // re-reading settings or guessing the step from the gaps (which misreads a
   // fragmented day as one long free block).
   slotDurationMinutes: number
+  // How many otherwise-free slots the lead-time gate removed. The gate used to
+  // drop them silently, so a caller seeing an empty morning could not tell
+  // "the hour already passed" from "fully booked" from "closed" — and the model
+  // filled that gap with the opening hours it reads in the prompt, offering
+  // 8:00am at 10:36am. Zero on any future date.
+  slotsDroppedByLeadTime: number
+  // The lead time actually applied, so the caller can say why.
+  minNoticeMinutes: number
 }
 
 function normalizeServiceName(s: string): string {
@@ -241,6 +249,8 @@ export async function checkAvailability(
         availableSlots: [],
         closedReason: 'cerrado este día',
         slotDurationMinutes: settings.slotDurationMinutes,
+        slotsDroppedByLeadTime: 0,
+        minNoticeMinutes: getMinBookingNoticeMinutes(settings),
       })
     }
 
@@ -291,16 +301,20 @@ export async function checkAvailability(
     const minNoticeMinutes = getMinBookingNoticeMinutes(settings)
     const earliestAcceptable = Date.now() + minNoticeMinutes * 60_000
 
-    const availableSlots = candidates
-      .filter((iso) => {
-        const startMs = new Date(iso).getTime()
-        const endMs = startMs + serviceDurationMs
-        return !busy.some((b) => intervalsOverlap(startMs, endMs, b.startMs, b.endMs))
-      })
-      .filter((iso) => new Date(iso).getTime() >= earliestAcceptable)
+    // Split in two on purpose: the difference between these two lists is what
+    // the lead-time gate removed, and that count is the only way a caller can
+    // distinguish "today is over" from "fully booked".
+    const freeSlots = candidates.filter((iso) => {
+      const startMs = new Date(iso).getTime()
+      const endMs = startMs + serviceDurationMs
+      return !busy.some((b) => intervalsOverlap(startMs, endMs, b.startMs, b.endMs))
+    })
+    const availableSlots = freeSlots.filter((iso) => new Date(iso).getTime() >= earliestAcceptable)
     return ok({
       availableSlots,
       slotDurationMinutes: settings.slotDurationMinutes,
+      slotsDroppedByLeadTime: freeSlots.length - availableSlots.length,
+      minNoticeMinutes,
     })
   } catch (cause) {
     return err(

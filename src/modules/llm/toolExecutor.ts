@@ -120,6 +120,34 @@ const AVAILABILITY_INSTRUCTION =
   'Listá los horarios exactos de un tramo SOLO cuando el cliente ya eligió ese tramo o dio una preferencia ("en la mañana", "después de las 3"). ' +
   'Si el cliente pidió una hora puntual ("¿tienes a las 4?"), NO listes nada ni repitas la lista: fijate si esa hora está en `slots`, decile sí o no, y si está, confirmá y agendá.'
 
+// ── Horarios de hoy que ya pasaron ───────────────────────────────────────────
+//
+// The lead-time gate in checkAvailability is correct and timezone-independent:
+// it compares absolute instants, so an 8:00am slot is gone by 10:36am no matter
+// what zone the server runs in. What was missing is that it removed those slots
+// SILENTLY.
+//
+// Handed a morning that simply isn't there, with the business's opening hours
+// ("08:00 a 17:00") sitting in its system prompt, the model reconstructed the
+// missing times and offered 8:00am at 10:36am. These notes travel WITH the
+// data, the last thing read before composing the reply, and say out loud why
+// the morning is gone.
+
+function leadTimeNote(minNoticeMinutes: number): string {
+  return (
+    `Para hoy ya pasaron horarios: se requieren ${minNoticeMinutes} minutos de anticipación y availableBlocks YA excluye todo lo que quedó fuera. ` +
+    'Ofrecé ÚNICAMENTE horarios que estén en availableBlocks. NO ofrezcas la hora de apertura del negocio ni ningún horario más temprano como si estuviera libre: ya no se puede reservar.'
+  )
+}
+
+function dayOverInstruction(minNoticeMinutes: number): string {
+  return (
+    `Para hoy ya no queda ningún horario reservable: los que había ya pasaron o están dentro de los ${minNoticeMinutes} minutos de anticipación que necesita el negocio. Esto NO es que esté cerrado ni lleno.` +
+    ' Decile al cliente que para hoy ya no hay cupo y ofrecele el día siguiente. Si acepta, llamá check_availability con esa fecha.' +
+    ' NUNCA le ofrezcas un horario de hoy, ni siquiera el de apertura.'
+  )
+}
+
 // checkAvailability builds each slot with the business's UTC offset already
 // baked in, so the wall-clock time is a plain substring — no timezone math.
 function wallClock(iso: string): string {
@@ -237,6 +265,13 @@ export async function executeTool(
       // appears inside a block and sending both doubles the token cost of an
       // open day for no gain.
       const blocks = groupIntoBlocks(r.data.availableSlots, r.data.slotDurationMinutes)
+      const droppedByLeadTime = r.data.slotsDroppedByLeadTime > 0
+
+      // Nothing left AND the reason is the clock: a different situation from a
+      // closed day or a booked-out one, and the only one where the answer is
+      // "hoy ya no, ¿te ofrezco mañana?".
+      const dayIsOver = blocks.length === 0 && droppedByLeadTime
+
       return {
         result: JSON.stringify({
           ...(r.data.closedReason ? { closedReason: r.data.closedReason } : {}),
@@ -245,7 +280,11 @@ export async function executeTool(
           // system prompt, but that sits thousands of tokens earlier while this
           // is the last thing read before composing the reply — and handed a bare
           // array of times, the model just lists them.
-          instruction: AVAILABILITY_INSTRUCTION,
+          instruction: dayIsOver
+            ? dayOverInstruction(r.data.minNoticeMinutes)
+            : droppedByLeadTime
+              ? `${leadTimeNote(r.data.minNoticeMinutes)} ${AVAILABILITY_INSTRUCTION}`
+              : AVAILABILITY_INSTRUCTION,
         }),
       }
     }
