@@ -17,14 +17,16 @@ export interface DemoProfile {
 
 const CLOSED = null
 
-// Demo profiles carry no real prices by default — the actual rates of these
-// businesses live outside the repo. Evaluation-first is the honest mapping:
-// with nothing on file, Emma must ask instead of quoting a number it made up.
+// `price` is opt-in: pass it for services with a rate worth quoting, omit it for
+// anything that genuinely depends on a case-by-case look (a complex extraction,
+// a root canal). Omitting it maps to evaluation-first, which is the honest
+// default: with nothing on file, Emma must ask instead of quoting a number it
+// made up.
 //
-// `price` is opt-in: pass it for services whose demo range is worth showing
-// (most of a dental catalogue quotes a range), omit it for anything that
-// genuinely depends on a case-by-case look (a complex extraction, a root
-// canal) — same behaviour as before this parameter existed.
+// Prices live here and nowhere else. The barbershop and spa rates used to be
+// duplicated as `precios` knowledge base entries, so Emma could read two
+// different answers to "¿cuánto cuesta?". That category is retired and its
+// numbers were folded in here — see KB_CATEGORIES in knowledgeBase.types.ts.
 function service(
   name: string,
   durationMinutes: number,
@@ -57,20 +59,20 @@ const BARBERIA: DemoProfile = {
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 15,
     services: [
-      service('corte clásico', 45),
-      service('corte degradado', 60),
-      service('corte con tijera', 50),
-      service('corte infantil', 40),
-      service('corte con diseño', 50),
-      service('mohicano', 50),
-      service('arreglo de barba', 30),
-      service('corte y barba', 55),
-      service('afeitado a navaja', 30),
-      service('perfilado de cejas', 10),
-      service('mascarilla facial', 20),
-      service('ondulación', 90),
-      service('tinte', 45),
-      service('tratamiento capilar', 30),
+      service('corte clásico', 45, { min: 25, max: 25 }),
+      service('corte degradado', 60, { min: 30, max: 30 }),
+      service('corte con tijera', 50, { min: 28, max: 28 }),
+      service('corte infantil', 40, { min: 20, max: 20 }),
+      service('corte con diseño', 50, { min: 35, max: 35 }),
+      service('mohicano', 50, { min: 35, max: 35 }),
+      service('arreglo de barba', 30, { min: 15, max: 15 }),
+      service('corte y barba', 55, { min: 40, max: 40 }),
+      service('afeitado a navaja', 30, { min: 20, max: 20 }),
+      service('perfilado de cejas', 10, { min: 10, max: 10 }),
+      service('mascarilla facial', 20, { min: 20, max: 20 }),
+      service('ondulación', 90, { min: 60, max: 60 }),
+      service('tinte', 45, { min: 35, max: 50 }),
+      service('tratamiento capilar', 30, { min: 25, max: 25 }),
     ],
     operatingHours: {
       monday: { open: '09:30', close: '21:30' },
@@ -83,25 +85,29 @@ const BARBERIA: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'precios', content: 'Corte clásico: S/ 25' },
-    { category: 'precios', content: 'Corte degradado: S/ 30' },
-    { category: 'precios', content: 'Corte con tijera: S/ 28' },
-    { category: 'precios', content: 'Corte infantil: S/ 20' },
-    { category: 'precios', content: 'Corte con diseño: S/ 35' },
-    { category: 'precios', content: 'Mohicano: S/ 35' },
-    { category: 'precios', content: 'Arreglo de barba: S/ 15' },
-    { category: 'precios', content: 'Corte y barba: S/ 40' },
-    { category: 'precios', content: 'Afeitado a navaja: S/ 20' },
-    { category: 'precios', content: 'Perfilado de cejas: S/ 10' },
-    { category: 'precios', content: 'Mascarilla facial: S/ 20' },
-    { category: 'precios', content: 'Ondulación: S/ 60' },
-    { category: 'precios', content: 'Tinte: S/ 35–50 (varía según el largo)' },
-    { category: 'precios', content: 'Tratamiento capilar: S/ 25' },
+    {
+      category: 'politicas',
+      title: 'Formas de pago',
+      content: 'Aceptamos efectivo, Yape y Plin. No cobramos adelanto para reservar.',
+    },
+    {
+      category: 'politicas',
+      title: 'Puntualidad y cancelaciones',
+      content:
+        'Te esperamos hasta 10 minutos pasada tu hora; después de eso el turno puede pasar al siguiente cliente. Si no vas a poder venir, avísanos con un par de horas de anticipación y reprogramamos sin problema.',
+    },
     {
       category: 'informacion_general',
-      content: 'Imperio Barber Studio — atendemos de lunes a sábado de 9:30 a 21:30.',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Atienden sin cita? Sí, pero con cita no esperas. ¿Cortan a niños? Sí, desde los 4 años. ¿Cada cuánto conviene cortarse? Cada 3 o 4 semanas para mantener la forma. ¿El tinte incluye el corte? No, son servicios aparte.',
     },
-    { category: 'informacion_general', content: 'Aceptamos efectivo, Yape y Plin.' },
+    {
+      category: 'promociones',
+      title: 'Promo del mes',
+      content:
+        'Si vienen dos juntos, el segundo corte tiene descuento. Preguntá por la promo vigente al reservar.',
+    },
   ],
 }
 
@@ -140,19 +146,13 @@ const CONSULTORIO: DemoProfile = {
   },
   kbEntries: [
     {
-      category: 'servicios',
-      title: 'Tratamientos disponibles',
+      category: 'politicas',
+      title: 'Facilidades de pago',
       content:
-        'Trabajamos preventivos (consulta general, limpieza dental), restaurativos (curaciones, coronas), estéticos (blanqueamiento dental), ortodoncia (brackets) y cirugía menor (extracciones). El doctor evalúa cada caso en consulta y recomienda el tratamiento más adecuado.',
+        'Para tratamientos largos (ortodoncia, coronas, endodoncia) ofrecemos facilidades de pago — consulta por un presupuesto personalizado.',
     },
     {
-      category: 'precios',
-      title: 'Precios y formas de pago',
-      content:
-        'Los precios varían según el caso y el tratamiento. La consulta general es desde S/ 30. Aceptamos pagos en efectivo, transferencia, Yape y Plin. Para tratamientos largos (ortodoncia, coronas, endodoncia) ofrecemos facilidades de pago — consulta por un presupuesto personalizado.',
-    },
-    {
-      category: 'precios',
+      category: 'politicas',
       title: 'Presupuesto y evaluación',
       content:
         'Para tratamientos como ortodoncia, endodoncia o coronas el doctor necesita evaluar primero el caso. La consulta de evaluación tiene un costo que se descuenta del tratamiento si decides continuar con nosotros.',
@@ -194,16 +194,10 @@ const CONSULTORIO: DemoProfile = {
         'Si tienes dolor severo, un diente roto, un golpe en la boca o sangrado que no para, comunícate con nosotros de inmediato. Atendemos urgencias dentro de nuestro horario de atención.',
     },
     {
-      category: 'ubicacion',
-      title: 'Ubicación',
+      category: 'promociones',
+      title: 'Campaña de limpieza dental',
       content:
-        'Consultorio Dental Smile — Av. Caminos del Inca 1234, Santiago de Surco, Lima (dirección de referencia para esta demo). Frente al parque, con fácil acceso y estacionamiento disponible en la cuadra.',
-    },
-    {
-      category: 'contacto',
-      title: 'Contacto y horarios',
-      content:
-        'Atendemos de lunes a viernes de 8:00 a. m. a 5:00 p. m. (descanso de 1:00 a 2:00 p. m.) y sábados de 8:00 a. m. a 1:00 p. m. Domingos cerrado. También puedes escribirnos por este mismo WhatsApp.',
+        'Este mes la limpieza dental (profilaxis) incluye una evaluación general sin costo adicional. Válido solo con cita previa y hasta fin de mes.',
     },
   ],
 }
@@ -218,16 +212,16 @@ const SPA: DemoProfile = {
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
-      service('Uñas acrílicas', 90),
-      service('Gel semipermanente', 60),
-      service('Lifting de pestañas', 60),
-      service('Extensiones de pestañas', 120),
-      service('Pestañas 1x1 anime', 90),
-      service('Planchado de cejas con visajismo', 30),
-      service('Limpieza facial', 60),
-      service('Dermaplaning', 30),
-      service('Pigmentación de cejas con visajismo', 60),
-      service('Planchado de cabello', 45),
+      service('Uñas acrílicas', 90, { min: 39, max: 39 }),
+      service('Gel semipermanente', 60, { min: 20, max: 20 }),
+      service('Lifting de pestañas', 60, { min: 25, max: 25 }),
+      service('Extensiones de pestañas', 120, { min: 39, max: 39 }),
+      service('Pestañas 1x1 anime', 90, { min: 20, max: 20 }),
+      service('Planchado de cejas con visajismo', 30, { min: 15, max: 15 }),
+      service('Limpieza facial', 60, { min: 35, max: 35 }),
+      service('Dermaplaning', 30, { min: 15, max: 15 }),
+      service('Pigmentación de cejas con visajismo', 60, { min: 20, max: 20 }),
+      service('Planchado de cabello', 45, { min: 20, max: 20 }),
     ],
     operatingHours: {
       monday: { open: '09:00', close: '20:00' },
@@ -240,22 +234,29 @@ const SPA: DemoProfile = {
     },
   },
   kbEntries: [
-    { category: 'precios', content: 'Uñas acrílicas: S/ 39' },
-    { category: 'precios', content: 'Gel semipermanente: S/ 20' },
-    { category: 'precios', content: 'Lifting de pestañas: S/ 25' },
-    { category: 'precios', content: 'Extensiones de pestañas: S/ 39' },
-    { category: 'precios', content: 'Pestañas 1x1 anime: S/ 20' },
-    { category: 'precios', content: 'Planchado de cejas con visajismo: S/ 15' },
-    { category: 'precios', content: 'Limpieza facial: S/ 35' },
-    { category: 'precios', content: 'Dermaplaning: S/ 15' },
-    { category: 'precios', content: 'Pigmentación de cejas con visajismo: S/ 20' },
-    { category: 'precios', content: 'Planchado de cabello: S/ 20' },
+    {
+      category: 'politicas',
+      title: 'Formas de pago',
+      content: 'Aceptamos efectivo, Yape y Plin. No cobramos adelanto para reservar.',
+    },
+    {
+      category: 'politicas',
+      title: 'Cancelaciones y puntualidad',
+      content:
+        'Si no vas a poder venir, avísanos con al menos 2 horas de anticipación y reprogramamos sin costo. Llegar más de 15 minutos tarde puede acortar tu servicio para no atrasar a la siguiente clienta.',
+    },
     {
       category: 'informacion_general',
+      title: 'Preguntas frecuentes',
       content:
-        'Bella Vida Salón & Spa — atendemos de lunes a sábado de 9:00 a 20:00 y domingos de 9:00 a 15:00.',
+        '¿Cuánto duran las uñas acrílicas? Entre 3 y 4 semanas, según el crecimiento. ¿El lifting de pestañas daña la pestaña natural? No, es un tratamiento seguro. ¿Puedo venir con las uñas de otro salón? Sí, cobramos el retiro aparte. ¿Atienden menores? Sí, acompañadas de un adulto.',
     },
-    { category: 'informacion_general', content: 'Aceptamos efectivo, Yape y Plin.' },
+    {
+      category: 'promociones',
+      title: 'Combo del mes',
+      content:
+        'Este mes: manos y pies en gel semipermanente juntos con precio de combo. Consultá por disponibilidad al reservar.',
+    },
   ],
 }
 

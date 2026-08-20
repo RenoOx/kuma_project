@@ -1,0 +1,1 @@
+ALTER TYPE "public"."kb_category" ADD VALUE 'promociones';

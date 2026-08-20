@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs'
 import { asc } from 'drizzle-orm'
 import { db, queryClient } from '@/db/client.js'
-import type { KbAttachmentType, KbCategory, KbSendMode } from '@/db/schema/index.js'
+import type { KbAttachmentType, KbSendMode } from '@/db/schema/index.js'
 import { businesses } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
@@ -26,6 +26,7 @@ import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import type { KnowledgeBasePatch } from '@/modules/knowledgeBase/knowledgeBase.repo.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
 import {
+  type ActiveKbCategory,
   KB_ATTACHMENT_TYPES,
   KB_CATEGORIES,
   KB_SEND_MODES,
@@ -172,7 +173,7 @@ async function businessSetSettings(id: string, file: string): Promise<void> {
 // Every KB command takes the businessId, including update and delete: an entry
 // id alone must never be enough to touch a row (rule 3 in CLAUDE.md).
 
-function parseCategory(value: string | undefined): KbCategory {
+function parseCategory(value: string | undefined): ActiveKbCategory {
   const category = KB_CATEGORIES.find((c) => c === value)
   if (!category) {
     die(`--category must be one of: ${KB_CATEGORIES.join(', ')}`, 2)

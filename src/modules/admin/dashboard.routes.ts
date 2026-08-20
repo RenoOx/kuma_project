@@ -25,12 +25,14 @@ import {
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
 import {
+  type ActiveKbCategory,
   KB_ATTACHMENT_TYPE_LABELS,
   KB_ATTACHMENT_TYPES,
   KB_CATEGORIES,
   KB_CATEGORY_LABELS,
   KB_SEND_MODE_LABELS,
   KB_SEND_MODES,
+  LEGACY_KB_CATEGORIES,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import { MAX_ENTRIES_PER_QUERY } from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import {
@@ -517,29 +519,91 @@ function renderToast(
     </div>`
 }
 
-// Read-only status of the knowledge base, grouped the way the owner thinks about
-// it: which topics Emma can already talk about and which ones she cannot. Counts
-// only active entries — a disabled one is out of the prompt, so claiming the
-// category is covered would be a lie.
-function renderKbChecklist(entries: KnowledgeBaseEntry[]): string {
+function checklistRow(
+  mark: '✓' | '✕' | '○',
+  on: boolean,
+  name: string,
+  meta: string,
+): string {
+  return `<div class="kb-check-row${on ? '' : ' is-missing'}">
+      <span class="kb-mark ${on ? 'kb-mark-on' : 'kb-mark-off'}">${mark}</span>
+      <span class="kb-check-name">${esc(name)}</span>
+      <span class="kb-check-meta">${esc(meta)}</span>
+    </div>`
+}
+
+// Read-only status split the way the owner needs to see it: the top group is
+// what business settings already answer (so nobody files a duplicate KB entry
+// for it), the bottom group is what only the knowledge base can answer.
+//
+// The top group reflects the actual settings rather than printing three fixed
+// checkmarks — telling an owner with no services loaded that Emma "already
+// knows" their services is exactly the kind of invented answer the rest of the
+// product refuses to give.
+//
+// Counts only active entries: a disabled one is out of the prompt, so claiming
+// the category is covered would be a lie.
+function renderKbChecklist(params: {
+  entries: KnowledgeBaseEntry[]
+  serviceCount: number
+  hasHours: boolean
+  hasLocation: boolean
+}): string {
   const counts = new Map<KbCategory, number>()
-  for (const e of entries) {
+  for (const e of params.entries) {
     if (e.active) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
   }
 
-  return KB_CATEGORIES.map((cat) => {
+  const known = [
+    checklistRow(
+      params.serviceCount > 0 ? '✓' : '✕',
+      params.serviceCount > 0,
+      'Servicios y precios',
+      params.serviceCount > 0
+        ? `${params.serviceCount} ${params.serviceCount === 1 ? 'servicio' : 'servicios'} configurados`
+        : 'Sin servicios configurados',
+    ),
+    checklistRow(
+      params.hasHours ? '✓' : '✕',
+      params.hasHours,
+      'Horarios de atención',
+      params.hasHours ? 'Horario semanal cargado' : 'Sin días de atención configurados',
+    ),
+    checklistRow(
+      params.hasLocation ? '✓' : '✕',
+      params.hasLocation,
+      'Ubicación y contacto',
+      params.hasLocation ? 'Dirección cargada' : 'Sin dirección configurada',
+    ),
+  ].join('')
+
+  // `promociones` is genuinely optional — a business with nothing on sale is
+  // correctly configured, so it gets a neutral mark instead of a red one.
+  const needed = KB_CATEGORIES.map((cat) => {
     const count = counts.get(cat) ?? 0
-    const has = count > 0
-    return `<div class="kb-check-row${has ? '' : ' is-missing'}">
-        <span class="kb-mark ${has ? 'kb-mark-on' : 'kb-mark-off'}">${has ? '✓' : '✕'}</span>
-        <span class="kb-check-name">${esc(KB_CATEGORY_LABELS[cat])}</span>
-        <span class="kb-check-meta">${
-          has
-            ? `${count} ${count === 1 ? 'entrada' : 'entradas'}`
-            : 'Sin entradas — Emma no podrá responder preguntas sobre este tema.'
-        }</span>
-      </div>`
+    const optional = cat === 'promociones'
+    if (count > 0) {
+      return checklistRow(
+        '✓',
+        true,
+        KB_CATEGORY_LABELS[cat],
+        `${count} ${count === 1 ? 'entrada' : 'entradas'}`,
+      )
+    }
+    return checklistRow(
+      optional ? '○' : '✕',
+      false,
+      KB_CATEGORY_LABELS[cat],
+      optional
+        ? 'Opcional — sin entradas'
+        : 'Sin entradas — Emma no podrá responder preguntas sobre este tema.',
+    )
   }).join('')
+
+  return `<div class="kb-group-title">Lo que Emma ya sabe (desde Configuración)</div>
+    ${known}
+    <div class="kb-group-title is-second">Lo que necesitás agregar acá</div>
+    ${needed}`
 }
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -594,16 +658,16 @@ tr:hover td{background:#fafaf8}
 .dot-yellow{background:#f59e0b}
 .dot-gray{background:#9ca3af}
 
-.btn{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .875rem;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;border:none;cursor:pointer;line-height:1;font-family:inherit;transition:background .1s}
-.btn-primary{background:#059669;color:#fff}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;font-family:inherit;line-height:1.25;text-decoration:none;border:none;cursor:pointer;transition:all .15s ease;white-space:nowrap}
+.btn-primary{background:#059669;color:#fff;padding:9px 18px}
 .btn-primary:hover{background:#047857}
-.btn-ghost{background:transparent;color:#374151;border:1px solid #e5e7eb}
-.btn-ghost:hover{background:#f9fafb}
-.btn-warning{background:#fffbeb;color:#b45309;border:1px solid #fcd34d}
-.btn-warning:hover{background:#fef3c7}
-.btn-danger{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}
-.btn-danger:hover{background:#fecaca}
-.btn-sm{padding:.3rem .65rem;font-size:12px}
+.btn-ghost{background:#fff;color:#1a1a1a;border:1px solid #e8e8e5;padding:8px 16px}
+.btn-ghost:hover{background:#fafaf8;border-color:#d1d1cd}
+.btn-warning{background:#fff;color:#b45309;border:1px solid #fcd34d;padding:8px 16px}
+.btn-warning:hover{background:#fffbeb}
+.btn-danger{background:#fff;color:#dc2626;border:1px solid #fca5a5;padding:8px 16px}
+.btn-danger:hover{background:#fef2f2;border-color:#f87171}
+.btn-sm{padding:6px 12px;font-size:12px}
 .actions{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
 
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
@@ -689,15 +753,36 @@ tr:hover td{background:#fafaf8}
 .svc-head{display:flex;gap:8px;margin-bottom:8px}
 .svc-head span{font-size:12px;font-weight:500;color:var(--text-secondary)}
 
+.kb-group-title{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:2px}
+.kb-group-title.is-second{margin-top:24px}
 .kb-check-row{display:flex;gap:10px;align-items:baseline;padding:10px 0;border-bottom:1px solid #f4f4f2}
 .kb-check-row:last-child{border-bottom:none}
 .kb-mark{width:14px;flex-shrink:0;text-align:center;font-size:13px}
 .kb-mark-on{color:var(--accent)}
 .kb-mark-off{color:var(--text-tertiary)}
-.kb-check-name{font-size:14px;font-weight:500;color:var(--text-primary);width:170px;flex-shrink:0}
+.kb-check-name{font-size:14px;font-weight:500;color:var(--text-primary);width:190px;flex-shrink:0}
 .kb-check-row.is-missing .kb-check-name{font-weight:400;color:var(--text-secondary)}
 .kb-check-meta{font-size:13px;color:var(--text-secondary)}
 .kb-check-row.is-missing .kb-check-meta{color:var(--text-tertiary)}
+
+/* Knowledge base page */
+.kb-page .kb-banner{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-size:13px;color:var(--text-secondary);margin-bottom:24px}
+.kb-page .kb-banner a{color:var(--accent);font-weight:500}
+.kb-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.kb-filter{padding:6px 14px;border-radius:6px;font-size:13px;font-weight:500;background:#fff;color:var(--text-secondary);border:1px solid var(--border);white-space:nowrap}
+.kb-filter:hover{border-color:var(--border-hover);color:var(--text-primary)}
+.kb-filter.is-active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.kb-group{margin-bottom:32px}
+.kb-group-header{font-size:16px;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em;margin-bottom:12px}
+.kb-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:8px;display:flex;gap:16px;align-items:flex-start}
+.kb-card-main{flex:1;min-width:0}
+.kb-card-title{font-size:14px;font-weight:600;color:var(--text-primary);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.kb-card-preview{font-size:13px;color:var(--text-secondary);margin-top:6px;overflow-wrap:anywhere}
+.kb-card-meta{font-size:12px;color:var(--text-tertiary);margin-top:8px}
+.kb-card-actions{display:flex;gap:8px;flex-shrink:0}
+.kb-tag{padding:4px 10px;background:#f5f5f4;color:var(--text-secondary);border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap}
+.kb-empty{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;font-size:13px;color:var(--text-secondary)}
+@media(max-width:640px){.kb-card{flex-direction:column}.kb-card-actions{width:100%}}
 
 .save-bar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 24px;display:flex;justify-content:flex-end;gap:8px;z-index:10}
 
@@ -717,8 +802,6 @@ tr:hover td{background:#fafaf8}
 .config-page .mode-option:hover{border-color:var(--border-hover);background:transparent}
 .config-page .mode-option-title{color:var(--text-primary)}
 .config-page .mode-option-desc{color:var(--text-secondary)}
-.config-page .btn-primary{background:var(--accent)}
-.config-page .btn-primary:hover{background:var(--accent-hover)}
 
 @media(max-width:768px){
 .toast-stack{top:60px;right:16px;left:16px;width:auto}
@@ -1704,7 +1787,12 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         </div>
         ${
           kbResult.ok
-            ? renderKbChecklist(kbResult.data)
+            ? renderKbChecklist({
+                entries: kbResult.data,
+                serviceCount: services.length,
+                hasHours: DAYS.some(({ key }) => effectiveHours[key] !== null),
+                hasLocation: (business.address ?? '').trim() !== '',
+              })
             : '<p class="section-desc">No pudimos cargar la base de conocimiento.</p>'
         }
         <div style="margin-top:20px">
@@ -2250,10 +2338,8 @@ function kbAttachmentTypeOptions(selected?: string): string {
   ).join('')
 }
 
-function kbSendModeBadge(mode: KbSendMode): string {
-  const cls =
-    mode === 'always' ? 'badge-green' : mode === 'trigger_based' ? 'badge-yellow' : 'badge-gray'
-  return `<span class="badge ${cls}">${esc(KB_SEND_MODE_LABELS[mode])}</span>`
+function kbSendModeTag(mode: KbSendMode): string {
+  return `<span class="kb-tag">${esc(KB_SEND_MODE_LABELS[mode])}</span>`
 }
 
 // The create form and the edit form share every field; only the action URL and
@@ -2356,36 +2442,37 @@ function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEnt
     </script>`
 }
 
-function kbEntryRow(businessId: string, secret: string, e: KnowledgeBaseEntry): string {
+function kbEntryCard(businessId: string, secret: string, e: KnowledgeBaseEntry): string {
   const se = encodeURIComponent(secret)
   const bid = esc(businessId)
-  const preview = e.content.length > 140 ? `${e.content.slice(0, 140)}…` : e.content
+  const preview = e.content.length > 180 ? `${e.content.slice(0, 180)}…` : e.content
   const attachment = e.attachmentUrl
-    ? `<div style="font-size:12px;margin-top:.25rem"><a href="${esc(e.attachmentUrl)}" target="_blank" rel="noopener">${esc(KB_ATTACHMENT_TYPE_LABELS[e.attachmentType])} adjunto</a></div>`
+    ? `<a href="${esc(e.attachmentUrl)}" target="_blank" rel="noopener">${esc(KB_ATTACHMENT_TYPE_LABELS[e.attachmentType])} adjunto</a>`
     : ''
   const keywords =
     e.sendMode === 'trigger_based' && e.triggerKeywords && e.triggerKeywords.length > 0
-      ? `<div class="muted" style="font-size:12px;margin-top:.25rem">${esc(e.triggerKeywords.join(', '))}</div>`
+      ? `Palabras clave: ${esc(e.triggerKeywords.join(', '))}`
       : ''
+  const meta = [attachment, keywords].filter((s) => s !== '').join(' · ')
 
-  return `<tr>
-    <td>
-      <strong>${esc(e.title)}</strong>
-      ${e.active ? '' : ' <span class="badge badge-gray">Desactivada</span>'}
-      <div class="muted" style="font-size:12px;margin-top:.25rem">${esc(preview)}</div>
-      ${attachment}
-    </td>
-    <td>${kbSendModeBadge(e.sendMode)}${keywords}</td>
-    <td>
-      <div class="actions">
-        <a href="/admin/dashboard/${bid}/kb/${esc(e.id)}/edit?secret=${se}" class="btn btn-ghost btn-sm">Editar</a>
-        <form method="post" action="/admin/dashboard/${bid}/kb/${esc(e.id)}/delete?secret=${se}" style="display:inline"
-          onsubmit="return confirm('¿Eliminar esta entrada? No se puede deshacer.')">
-          <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
-        </form>
+  return `<div class="kb-card">
+    <div class="kb-card-main">
+      <div class="kb-card-title">
+        ${esc(e.title)}
+        ${kbSendModeTag(e.sendMode)}
+        ${e.active ? '' : '<span class="kb-tag">Desactivada</span>'}
       </div>
-    </td>
-  </tr>`
+      <div class="kb-card-preview">${esc(preview)}</div>
+      ${meta ? `<div class="kb-card-meta">${meta}</div>` : ''}
+    </div>
+    <div class="kb-card-actions">
+      <a href="/admin/dashboard/${bid}/kb/${esc(e.id)}/edit?secret=${se}" class="btn btn-ghost btn-sm">Editar</a>
+      <form method="post" action="/admin/dashboard/${bid}/kb/${esc(e.id)}/delete?secret=${se}" style="display:inline"
+        onsubmit="return confirm('¿Eliminar esta entrada? No se puede deshacer.')">
+        <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+      </form>
+    </div>
+  </div>`
 }
 
 dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
@@ -2422,18 +2509,18 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
     : result.data
 
   const filterLinks = [
-    `<a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-sm ${activeFilter ? 'btn-ghost' : 'btn-primary'}">Todas (${result.data.length})</a>`,
+    `<a href="/admin/dashboard/${bid}/kb?secret=${se}" class="kb-filter ${activeFilter ? '' : 'is-active'}">Todas (${result.data.length})</a>`,
     ...KB_CATEGORIES.map((cat) => {
       const count = result.data.filter((e) => e.category === cat).length
-      const cls = activeFilter === cat ? 'btn-primary' : 'btn-ghost'
-      return `<a href="/admin/dashboard/${bid}/kb?secret=${se}&category=${cat}" class="btn btn-sm ${cls}">${esc(KB_CATEGORY_LABELS[cat])} (${count})</a>`
+      const cls = activeFilter === cat ? 'is-active' : ''
+      return `<a href="/admin/dashboard/${bid}/kb?secret=${se}&category=${cat}" class="kb-filter ${cls}">${esc(KB_CATEGORY_LABELS[cat])} (${count})</a>`
     }),
-  ].join(' ')
+  ].join('')
 
   const groups = KB_CATEGORIES.map((cat) => {
     const entries = visible.filter((e) => e.category === cat)
     if (entries.length === 0) return ''
-    const rows = entries.map((e) => kbEntryRow(businessId, secret, e)).join('')
+    const cards = entries.map((e) => kbEntryCard(businessId, secret, e)).join('')
 
     // Entries load oldest-first and the lookup is capped, so anything past the
     // cap in one category never reaches Emma. Say so where the operator can see
@@ -2441,7 +2528,7 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
     const activeCount = result.data.filter((e) => e.category === cat && e.active).length
     const overflow =
       activeCount > MAX_ENTRIES_PER_QUERY
-        ? `<div class="alert alert-warning" style="margin:0 1rem 1rem">
+        ? `<div class="alert alert-warning">
              Esta categoría tiene ${activeCount} entradas activas y Emma solo carga las
              ${MAX_ENTRIES_PER_QUERY} más antiguas. Las ${activeCount - MAX_ENTRIES_PER_QUERY}
              más nuevas no le llegan — desactivá las que ya no apliquen o juntá varias en una sola entrada.
@@ -2449,35 +2536,59 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
         : ''
 
     return `
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">${esc(KB_CATEGORY_LABELS[cat])}</span></div>
+      <div class="kb-group">
+        <div class="kb-group-header">${esc(KB_CATEGORY_LABELS[cat])}</div>
         ${overflow}
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Entrada</th><th>Envío</th><th></th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
+        ${cards}
       </div>`
   }).join('')
 
+  // Rows filed under a retired category are excluded from everything Emma reads,
+  // but they must stay visible here: hiding them would leave the operator with
+  // undeletable rows they cannot even see. Only shown when some actually exist.
+  const retired = result.data.filter((e) =>
+    (LEGACY_KB_CATEGORIES as readonly string[]).includes(e.category),
+  )
+  const retiredGroup =
+    retired.length > 0 && !activeFilter
+      ? `<div class="kb-group">
+           <div class="kb-group-header">Categorías retiradas</div>
+           <div class="alert alert-warning">
+             Estas ${retired.length} ${retired.length === 1 ? 'entrada duplicaba' : 'entradas duplicaban'}
+             datos que ahora viven en <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>
+             (servicios, precios, ubicación, contacto). Emma ya no las lee. Revisá que el dato esté
+             en Configuración y borralas.
+           </div>
+           ${retired.map((e) => kbEntryCard(businessId, secret, e)).join('')}
+         </div>`
+      : ''
+
   const emptyState =
-    visible.length === 0
-      ? `<div class="card"><div class="card-body"><p class="muted">${
+    visible.length === 0 && retiredGroup === ''
+      ? `<div class="kb-empty">${
           activeFilter
             ? 'No hay entradas en esta categoría.'
             : 'Este negocio todavía no tiene entradas en su base de conocimiento.'
-        }</p></div></div>`
+        }</div>`
       : ''
 
   const newForm = showNew
-    ? `<div class="card" style="margin-bottom:1.5rem">
-         <div class="card-header"><span class="card-title">Nueva entrada</span></div>
-         <div class="card-body">${kbEntryForm(businessId, secret, null)}</div>
+    ? `<div class="config-section" style="margin-bottom:32px">
+         <div class="section-header">
+           <h2 class="section-title">Nueva entrada</h2>
+           <p class="section-desc">Se guarda desactivable y podés editarla en cualquier momento</p>
+         </div>
+         ${kbEntryForm(businessId, secret, null)}
        </div>`
     : ''
 
+  const toasts = [
+    saved ? renderToast('success', 'Cambios guardados', 'La entrada quedó actualizada.', 4000) : '',
+    error ? renderToast('error', 'No se pudo guardar', esc(error)) : '',
+  ].join('')
+
   const body = `
+    <div class="config-page kb-page">
     <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
     <div class="page-header">
       <h1 class="page-title">Base de conocimiento</h1>
@@ -2485,23 +2596,18 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
         <a href="/admin/dashboard/${bid}/kb?secret=${se}&new=1" class="btn btn-primary">Nueva entrada</a>
       </div>
     </div>
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-body">
-        <p style="font-size:13px;color:#6b7280;margin:0">
-          <strong>Base de conocimiento:</strong> información complementaria a los datos generales
-          del negocio. Los datos básicos (dirección, horarios, servicios y precios) ya están en
-          <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>.
-          Acá agregás información adicional que querés que Emma comparta bajo pedido o en
-          contextos específicos (portafolios, PDFs, políticas especiales, promociones).
-        </p>
-      </div>
+    <div class="toast-stack" role="status" aria-live="polite">${toasts}</div>
+    <div class="kb-banner">
+      Información complementaria que Emma comparte con los clientes. Los datos básicos
+      (servicios, precios, horarios, ubicación y contacto) ya están en
+      <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>.
     </div>
-    ${saved ? '<div class="alert alert-success">✓ Cambios guardados correctamente.</div>' : ''}
-    ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
     ${newForm}
-    <div class="actions" style="margin-bottom:1rem;flex-wrap:wrap">${filterLinks}</div>
+    <div class="kb-filters">${filterLinks}</div>
     ${groups}
-    ${emptyState}`
+    ${retiredGroup}
+    ${emptyState}
+    </div>`
 
   return c.html(layout(`Base de conocimiento — ${business.name}`, body, secret))
 })
@@ -2526,13 +2632,17 @@ dashboardRoutes.get('/admin/dashboard/:id/kb/:kbId/edit', async (c) => {
   const bid = esc(businessId)
   const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
   const body = `
+    <div class="config-page kb-page">
     <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="back">← Base de conocimiento</a>
     <div class="page-header">
       <h1 class="page-title">Editar entrada</h1>
     </div>
-    ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
-    <div class="card">
-      <div class="card-body">${kbEntryForm(businessId, secret, result.data)}</div>
+    <div class="toast-stack" role="status" aria-live="polite">${
+      error ? renderToast('error', 'No se pudo guardar', esc(error)) : ''
+    }</div>
+    <div class="config-section">
+      ${kbEntryForm(businessId, secret, result.data)}
+    </div>
     </div>`
 
   return c.html(layout(`Editar entrada — ${business.name}`, body, secret))
@@ -2540,7 +2650,9 @@ dashboardRoutes.get('/admin/dashboard/:id/kb/:kbId/edit', async (c) => {
 
 interface ParsedKbForm {
   title: string | null
-  category: KbCategory
+  // Narrowed by the KB_CATEGORIES lookup in parseKbForm: the form can only ever
+  // produce an active category, never a retired one.
+  category: ActiveKbCategory
   content: string
   attachmentType: KbAttachmentType
   attachmentUrl: string | null

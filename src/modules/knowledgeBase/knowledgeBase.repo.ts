@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or } from 'drizzle-orm'
+import { and, asc, eq, inArray, notInArray, or } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
   type KbCategory,
@@ -6,6 +6,14 @@ import {
   knowledgeBase,
   type NewKnowledgeBaseEntry,
 } from '@/db/schema/index.js'
+import { LEGACY_KB_CATEGORIES } from './knowledgeBase.types.js'
+
+// Rows filed under a retired category are still in the table — nothing deletes
+// them — but they duplicate business settings, which is exactly the contradiction
+// the retirement was meant to end. Every read that feeds Emma's prompt excludes
+// them. The admin CRUD reads below deliberately do NOT: the operator has to be
+// able to see and delete what is actually stored.
+const excludesRetiredCategories = notInArray(knowledgeBase.category, [...LEGACY_KB_CATEGORIES])
 
 export async function deleteByBusiness(businessId: string, exec: Executor = db): Promise<void> {
   await exec.delete(knowledgeBase).where(eq(knowledgeBase.businessId, businessId))
@@ -48,6 +56,7 @@ export async function findActiveByCategories(
         eq(knowledgeBase.businessId, businessId),
         eq(knowledgeBase.active, true),
         inArray(knowledgeBase.category, categories),
+        excludesRetiredCategories,
       ),
     )
     .orderBy(asc(knowledgeBase.createdAt))
@@ -69,6 +78,7 @@ export async function findAlwaysAndTriggerBased(
         eq(knowledgeBase.businessId, businessId),
         eq(knowledgeBase.active, true),
         or(eq(knowledgeBase.sendMode, 'always'), eq(knowledgeBase.sendMode, 'trigger_based')),
+        excludesRetiredCategories,
       ),
     )
     .orderBy(asc(knowledgeBase.createdAt))
@@ -84,7 +94,13 @@ export async function findTopActive(
   return await exec
     .select()
     .from(knowledgeBase)
-    .where(and(eq(knowledgeBase.businessId, businessId), eq(knowledgeBase.active, true)))
+    .where(
+      and(
+        eq(knowledgeBase.businessId, businessId),
+        eq(knowledgeBase.active, true),
+        excludesRetiredCategories,
+      ),
+    )
     .orderBy(asc(knowledgeBase.createdAt))
     .limit(limit)
 }

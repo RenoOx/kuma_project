@@ -1,9 +1,9 @@
-import type { KbCategory, KnowledgeBaseEntry } from '@/db/schema/index.js'
+import type { KnowledgeBaseEntry } from '@/db/schema/index.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { KnowledgeBasePatch } from './knowledgeBase.repo.js'
 import * as knowledgeBaseRepo from './knowledgeBase.repo.js'
-import { deriveTitle } from './knowledgeBase.types.js'
+import { type ActiveKbCategory, deriveTitle } from './knowledgeBase.types.js'
 
 export async function getByBusiness(businessId: string): Promise<Result<KnowledgeBaseEntry[]>> {
   try {
@@ -31,7 +31,9 @@ export async function getById(businessId: string, id: string): Promise<Result<Kn
 export interface CreateEntryInput {
   businessId: string
   title?: string | null
-  category: KbCategory
+  // Write side, so the narrow type: a retired category must not be creatable,
+  // even though stored rows may still carry one.
+  category: ActiveKbCategory
   content: string
   attachmentType?: 'none' | 'link' | 'image' | 'pdf' | 'video'
   attachmentUrl?: string | null

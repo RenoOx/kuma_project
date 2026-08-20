@@ -2,6 +2,12 @@ import { boolean, index, jsonb, pgEnum, pgTable, text, timestamp } from 'drizzle
 import { nanoid } from 'nanoid'
 import { businesses } from './businesses.js'
 
+// The four categories that duplicated business settings (ubicacion, servicios,
+// precios, contacto) are retired, but they stay in the enum on purpose: rows
+// written before the retirement still carry them, and removing an enum value
+// would break reading those rows. New entries can only use the active set —
+// see KB_CATEGORIES in knowledgeBase.types.ts, which is the list the UI, the
+// validation schema and the category detector all work from.
 export const kbCategoryEnum = pgEnum('kb_category', [
   'ubicacion',
   'servicios',
@@ -9,6 +15,7 @@ export const kbCategoryEnum = pgEnum('kb_category', [
   'politicas',
   'contacto',
   'informacion_general',
+  'promociones',
 ])
 
 export const kbAttachmentTypeEnum = pgEnum('kb_attachment_type', [

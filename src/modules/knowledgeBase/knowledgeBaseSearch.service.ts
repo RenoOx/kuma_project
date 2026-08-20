@@ -1,10 +1,11 @@
 import { logger } from '@/config/logger.js'
-import type { KbCategory, KnowledgeBaseEntry } from '@/db/schema/index.js'
+import type { KnowledgeBaseEntry } from '@/db/schema/index.js'
 import type { Niche } from '@/modules/business/business.settings.js'
 import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { detectCategories, matchesTriggerKeywords } from './categoryDetector.js'
 import * as knowledgeBaseRepo from './knowledgeBase.repo.js'
+import type { ActiveKbCategory } from './knowledgeBase.types.js'
 
 // Max entries pulled for the detected category on a single message.
 export const MAX_ENTRIES_PER_QUERY = 5
@@ -19,7 +20,7 @@ export interface SearchResult {
   entries: KnowledgeBaseEntry[]
   // Which categories drove the lookup. Empty means the detector found nothing
   // and the oldest-first fallback was used. Logged, not shown to the customer.
-  matchedCategories: KbCategory[]
+  matchedCategories: ActiveKbCategory[]
 }
 
 // Current implementation. Loads the detected category (capped at
@@ -30,6 +31,10 @@ export interface SearchResult {
 // Note the consequence of the cap: past MAX_ENTRIES_PER_QUERY active entries in
 // one category, the newest ones never reach the prompt. The admin panel warns
 // the operator when a category crosses that line.
+//
+// Rows under a retired category never come back from any of these repo calls —
+// the exclusion lives in the query, so a stale `precios` entry can no longer
+// contradict the prices in business settings.
 export async function searchByCategory(
   businessId: string,
   message: string,
