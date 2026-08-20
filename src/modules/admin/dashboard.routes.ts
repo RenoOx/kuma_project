@@ -519,12 +519,7 @@ function renderToast(
     </div>`
 }
 
-function checklistRow(
-  mark: '✓' | '✕' | '○',
-  on: boolean,
-  name: string,
-  meta: string,
-): string {
+function checklistRow(mark: '✓' | '✕' | '○', on: boolean, name: string, meta: string): string {
   return `<div class="kb-check-row${on ? '' : ' is-missing'}">
       <span class="kb-mark ${on ? 'kb-mark-on' : 'kb-mark-off'}">${mark}</span>
       <span class="kb-check-name">${esc(name)}</span>
@@ -782,6 +777,13 @@ tr:hover td{background:#fafaf8}
 .kb-card-actions{display:flex;gap:8px;flex-shrink:0}
 .kb-tag{padding:4px 10px;background:#f5f5f4;color:var(--text-secondary);border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap}
 .kb-empty{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;font-size:13px;color:var(--text-secondary)}
+.kb-chips{display:flex;gap:8px;flex-wrap:wrap}
+.kb-chips.is-in{animation:kbChipsIn .15s ease}
+@keyframes kbChipsIn{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+.suggestion-chip{display:inline-flex;padding:6px 14px;background:#fff;border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:500;font-family:inherit;color:var(--text-secondary);cursor:pointer;transition:all .15s}
+.suggestion-chip:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-subtle)}
+.suggestion-chip.selected{border-color:var(--accent);background:var(--accent-subtle);color:var(--accent)}
+@media(prefers-reduced-motion:reduce){.kb-chips.is-in{animation:none}}
 @media(max-width:640px){.kb-card{flex-direction:column}.kb-card-actions{width:100%}}
 
 .save-bar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 24px;display:flex;justify-content:flex-end;gap:8px;z-index:10}
@@ -2342,9 +2344,166 @@ function kbSendModeTag(mode: KbSendMode): string {
   return `<span class="kb-tag">${esc(KB_SEND_MODE_LABELS[mode])}</span>`
 }
 
+// ── KB entry suggestions ──────────────────────────────────────────────────────
+//
+// Frontend-only templates: nothing here is stored, validated or sent anywhere.
+// They exist because an owner staring at an empty textarea writes nothing, and
+// an empty knowledge base is the single most common reason Emma has to say "no
+// tengo esa información".
+//
+// Keyed by niche because the panel is multi-tenant. A barbershop owner offered a
+// template about whether teeth whitening damages enamel learns that this panel
+// was not built for them — so the clinical set is gated to dental/salud and
+// every other niche gets its own vocabulary.
+//
+// Square brackets mark what the owner must replace. The form counts them and
+// selects the first one after inserting, since a textarea cannot render them
+// styled.
+
+interface KbSuggestion {
+  label: string
+  title: string
+  content: string
+}
+
+type KbSuggestionMap = Partial<Record<ActiveKbCategory, KbSuggestion[]>>
+
+// Payment terms and appointment rules read the same for a barbershop and a
+// dental clinic, so every niche gets these two.
+const KB_SUGGESTIONS_COMMON: KbSuggestion[] = [
+  {
+    label: 'Formas de pago',
+    title: 'Formas de pago',
+    content:
+      'Aceptamos [efectivo / Yape / Plin / transferencia]. Para confirmar tu cita se requiere un adelanto de S/ [monto]. Puedes pagar por [Yape/Plin] al [número] ([nombre de referencia]). Mándanos la captura del pago para confirmar.',
+  },
+  {
+    label: 'Citas y cancelaciones',
+    title: 'Citas y cancelaciones',
+    content:
+      'Las citas se confirman con [el local]. Llegar [10] minutos antes de la hora agendada. Cancelaciones con al menos [24] horas de anticipación. Reprogramación sin costo si se avisa a tiempo. [Menores de edad deben venir acompañados de un adulto.]',
+  },
+]
+
+const KB_EVALUATION_SUGGESTION: KbSuggestion = {
+  label: 'Consulta de evaluación',
+  title: 'Consulta de evaluación',
+  content:
+    'Antes de iniciar cualquier tratamiento, el doctor realiza una evaluación para determinar el plan adecuado. La consulta tiene un costo de S/ [monto]. [Si decides realizarte el tratamiento, el costo de la consulta se descuenta del precio total. / El costo de la consulta es independiente del tratamiento.]',
+}
+
+const KB_FAQ_BY_NICHE: Record<Niche, KbSuggestion[]> = {
+  dental: [
+    {
+      label: 'Preguntas sobre tratamientos',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Duele la limpieza dental? No, es un procedimiento indoloro.\n¿Cada cuánto debo hacerme limpieza? Cada 6 meses idealmente.\n¿El blanqueamiento daña los dientes? No, es seguro y supervisado por el doctor.\n¿Atienden niños? [Sí, desde los X años.]',
+    },
+    {
+      label: 'Primera visita',
+      title: 'Primera visita',
+      content:
+        'En tu primera cita el doctor realiza una evaluación general. Traer DNI. Si tomas algún medicamento, informar antes del tratamiento. [Cepillarse los dientes antes de venir. Si tienes miedo o ansiedad, avísanos para que el doctor tome las precauciones necesarias.]',
+    },
+    {
+      label: 'Urgencias',
+      title: 'Urgencias dentales',
+      content:
+        'Si tienes dolor severo, un diente roto, golpe en la boca o sangrado que no para, comunícate inmediatamente. Atendemos urgencias dentro del horario de atención.',
+    },
+  ],
+  salud: [
+    {
+      label: 'Preguntas sobre la atención',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Cuánto dura una sesión? [X] minutos.\n¿Necesito una orden médica? [Sí / No].\n¿Atienden por seguro? [Sí, trabajamos con X / No, solo particular].\n¿Cada cuánto debo venir a control? [Cada X meses.]',
+    },
+    {
+      label: 'Primera visita',
+      title: 'Primera visita',
+      content:
+        'En tu primera cita [el especialista] realiza una evaluación general. Traer DNI [y los exámenes previos que tengas]. Si tomas algún medicamento o tienes alguna condición de salud, informar antes de la consulta.',
+    },
+    {
+      label: 'Urgencias',
+      title: 'Urgencias',
+      content:
+        'Si presentas [dolor severo / fiebre alta / un síntoma que empeora de golpe], comunícate inmediatamente. Atendemos urgencias dentro del horario de atención.',
+    },
+  ],
+  barberia: [
+    {
+      label: 'Preguntas frecuentes',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Atienden sin cita? [Sí, pero con cita no esperas.]\n¿Cortan a niños? [Sí, desde los X años.]\n¿Cada cuánto conviene cortarse? [Cada 3 o 4 semanas para mantener la forma.]\n¿El tinte incluye el corte? [No, son servicios aparte.]',
+    },
+    {
+      label: 'Primera visita',
+      title: 'Primera visita',
+      content:
+        'Si es tu primera vez, cuéntanos qué corte buscas o trae una foto de referencia. [Llegar X minutos antes.] Si tienes alguna alergia a tintes o productos, avísanos antes.',
+    },
+  ],
+  estetica: [
+    {
+      label: 'Preguntas frecuentes',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Cuánto duran las uñas en gel? [3 a 4 semanas.]\n¿Puedo venir con trabajo de otro salón? [Sí, el retiro se cobra aparte.]\n¿El tratamiento duele? [No, es indoloro.]\n¿Atienden menores? [Sí, acompañadas de un adulto.]',
+    },
+    {
+      label: 'Primera visita',
+      title: 'Primera visita',
+      content:
+        'Cuéntanos qué servicio buscas y si tienes alguna alergia o condición en la piel o las uñas. [Llegar X minutos antes.] Si vienes con trabajo previo de otro salón, avísanos para calcular el tiempo del retiro.',
+    },
+  ],
+  general: [
+    {
+      label: 'Preguntas frecuentes',
+      title: 'Preguntas frecuentes',
+      content:
+        '¿Atienden sin cita? [Sí / No, solo con cita previa.]\n¿Cuánto dura la atención? [X minutos.]\n¿Atienden menores? [Sí, acompañados de un adulto.]\n[Agrega acá las preguntas que más te hacen por WhatsApp.]',
+    },
+  ],
+}
+
+// `promociones` deliberately has no templates: an offer is specific to the
+// business and the month, and a canned one would be worse than an empty box.
+function kbSuggestionsFor(niche: Niche): KbSuggestionMap {
+  const clinical = niche === 'dental' || niche === 'salud'
+  return {
+    politicas: clinical
+      ? [...KB_SUGGESTIONS_COMMON, KB_EVALUATION_SUGGESTION]
+      : KB_SUGGESTIONS_COMMON,
+    informacion_general: KB_FAQ_BY_NICHE[niche],
+  }
+}
+
+// `settings` is unvalidated jsonb, so an unknown or missing niche falls back to
+// the schema default instead of indexing the suggestion map with garbage.
+function nicheOf(settings: unknown): Niche {
+  const raw = (settings as Partial<BusinessSettings> | null)?.niche
+  return raw && raw in NICHE_LABELS ? (raw as Niche) : 'general'
+}
+
+// JSON destined for a <script> block. Escaping `<` is what stops a future
+// suggestion containing "</script>" from closing the tag early.
+function jsonForScript(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
 // The create form and the edit form share every field; only the action URL and
 // the prefilled values differ. A null `entry` renders the "new entry" variant.
-function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEntry | null): string {
+function kbEntryForm(
+  businessId: string,
+  secret: string,
+  entry: KnowledgeBaseEntry | null,
+  niche: Niche,
+): string {
   const se = encodeURIComponent(secret)
   const bid = esc(businessId)
   const action = entry
@@ -2363,16 +2522,24 @@ function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEnt
         </div>
         <div class="form-group">
           <label class="form-label" for="category">Categoría</label>
-          <select id="category" name="category" class="form-input form-select" required>
+          <select id="category" name="category" class="form-input form-select" required
+            onchange="kbRenderSuggestions()">
             ${kbCategoryOptions(entry?.category)}
           </select>
         </div>
       </div>
 
+      <div class="form-group" id="kb-suggestions-group">
+        <p class="form-hint" id="kb-suggestions-hint" style="margin-top:0"></p>
+        <div class="kb-chips" id="kb-chips"></div>
+      </div>
+
       <div class="form-group">
         <label class="form-label" for="content">Contenido</label>
-        <textarea id="content" name="content" class="form-input" rows="5" required
+        <textarea id="content" name="content" class="form-input" rows="6" required
+          oninput="kbUpdatePlaceholderCount()"
           placeholder="Lo que Emma debe saber">${esc(entry?.content ?? '')}</textarea>
+        <p class="form-hint" id="kb-placeholder-count" style="display:none"></p>
       </div>
 
       <div class="form-row">
@@ -2437,8 +2604,83 @@ function kbEntryForm(businessId: string, secret: string, entry: KnowledgeBaseEnt
         var mode = document.getElementById('sendMode').value
         document.getElementById('kb-keywords-group').style.display = mode === 'trigger_based' ? '' : 'none'
       }
+
+      // Templates only — nothing here is submitted. The owner can ignore them
+      // entirely and type their own text.
+      var KB_SUGGESTIONS = ${jsonForScript(kbSuggestionsFor(niche))}
+      var KB_PLACEHOLDER = /\\[[^\\]]*\\]/
+
+      function kbRenderSuggestions() {
+        var cat = document.getElementById('category').value
+        var list = KB_SUGGESTIONS[cat] || []
+        var chips = document.getElementById('kb-chips')
+        var hint = document.getElementById('kb-suggestions-hint')
+
+        chips.innerHTML = ''
+        if (list.length > 0) {
+          hint.textContent = 'Sugerencias: hacé click para rellenar el formulario. Lo que quede entre corchetes lo reemplazás vos.'
+        } else if (cat === 'promociones') {
+          hint.textContent = 'Agrega ofertas temporales, campañas o descuentos vigentes.'
+        } else {
+          hint.textContent = ''
+        }
+
+        list.forEach(function(s, i) {
+          var chip = document.createElement('button')
+          chip.type = 'button'
+          chip.className = 'suggestion-chip'
+          chip.textContent = s.label
+          chip.onclick = function() { kbApplySuggestion(cat, i, chip) }
+          chips.appendChild(chip)
+        })
+
+        // Restart the fade so switching category reads as a change, not a jump.
+        chips.classList.remove('is-in')
+        void chips.offsetWidth
+        chips.classList.add('is-in')
+      }
+
+      function kbApplySuggestion(cat, index, chip) {
+        var suggestion = (KB_SUGGESTIONS[cat] || [])[index]
+        if (!suggestion) return
+        var titleEl = document.getElementById('title')
+        var contentEl = document.getElementById('content')
+
+        var hasText = titleEl.value.trim() !== '' || contentEl.value.trim() !== ''
+        if (hasText && !confirm('¿Reemplazar el contenido actual?')) return
+
+        titleEl.value = suggestion.title
+        contentEl.value = suggestion.content
+
+        Array.prototype.forEach.call(document.querySelectorAll('.suggestion-chip'), function(c) {
+          c.classList.remove('selected')
+        })
+        chip.classList.add('selected')
+
+        kbUpdatePlaceholderCount()
+
+        // A textarea cannot render the [placeholders] styled, so instead we drop
+        // the caret on the first one already selected: the owner starts typing
+        // and it is replaced.
+        var match = KB_PLACEHOLDER.exec(contentEl.value)
+        contentEl.focus()
+        if (match) contentEl.setSelectionRange(match.index, match.index + match[0].length)
+      }
+
+      function kbUpdatePlaceholderCount() {
+        var value = document.getElementById('content').value
+        var out = document.getElementById('kb-placeholder-count')
+        var found = value.match(new RegExp(KB_PLACEHOLDER.source, 'g')) || []
+        out.style.display = found.length > 0 ? '' : 'none'
+        out.textContent = found.length === 1
+          ? '1 campo entre corchetes por completar'
+          : found.length + ' campos entre corchetes por completar'
+      }
+
       kbToggleAttachment()
       kbToggleKeywords()
+      kbRenderSuggestions()
+      kbUpdatePlaceholderCount()
     </script>`
 }
 
@@ -2578,7 +2820,7 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
            <h2 class="section-title">Nueva entrada</h2>
            <p class="section-desc">Se guarda desactivable y podés editarla en cualquier momento</p>
          </div>
-         ${kbEntryForm(businessId, secret, null)}
+         ${kbEntryForm(businessId, secret, null, nicheOf(business.settings))}
        </div>`
     : ''
 
@@ -2641,7 +2883,7 @@ dashboardRoutes.get('/admin/dashboard/:id/kb/:kbId/edit', async (c) => {
       error ? renderToast('error', 'No se pudo guardar', esc(error)) : ''
     }</div>
     <div class="config-section">
-      ${kbEntryForm(businessId, secret, result.data)}
+      ${kbEntryForm(businessId, secret, result.data, nicheOf(business.settings))}
     </div>
     </div>`
 

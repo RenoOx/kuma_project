@@ -27,19 +27,24 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     await seedEntries([
       {
         businessId: businessAId,
-        title: 'Dirección',
-        category: 'ubicacion',
-        content: 'Av. Larco 123',
+        title: 'Historia',
+        category: 'informacion_general',
+        content: 'Abrimos en 2015',
       },
-      { businessId: businessAId, title: 'Corte', category: 'precios', content: 'S/30' },
+      {
+        businessId: businessAId,
+        title: 'Combo',
+        category: 'promociones',
+        content: '2x1 los martes',
+      },
     ])
 
-    const result = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
+    const result = await searchByCategory(businessAId, '¿tienen alguna promoción?', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.data.matchedCategories[0]).toBe('ubicacion')
-    expect(result.data.entries.map((e) => e.title)).toEqual(['Dirección'])
+    expect(result.data.matchedCategories[0]).toBe('promociones')
+    expect(result.data.entries.map((e) => e.title)).toEqual(['Combo'])
   })
 
   it('orders by created_at ascending — oldest entries first', async () => {
@@ -49,27 +54,27 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       {
         businessId: businessAId,
         title: 'Nueva',
-        category: 'precios',
+        category: 'promociones',
         content: 'c',
         createdAt: new Date('2026-03-01T10:00:00Z'),
       },
       {
         businessId: businessAId,
         title: 'Vieja',
-        category: 'precios',
+        category: 'promociones',
         content: 'a',
         createdAt: new Date('2026-01-01T10:00:00Z'),
       },
       {
         businessId: businessAId,
         title: 'Intermedia',
-        category: 'precios',
+        category: 'promociones',
         content: 'b',
         createdAt: new Date('2026-02-01T10:00:00Z'),
       },
     ])
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
+    const result = await searchByCategory(businessAId, 'tienen descuento', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -78,17 +83,17 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
 
   it('excludes inactive entries', async () => {
     await seedEntries([
-      { businessId: businessAId, title: 'Vigente', category: 'precios', content: 'S/30' },
+      { businessId: businessAId, title: 'Vigente', category: 'promociones', content: '2x1' },
       {
         businessId: businessAId,
         title: 'Vieja',
-        category: 'precios',
-        content: 'S/20',
+        category: 'promociones',
+        content: '3x2',
         active: false,
       },
     ])
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
+    const result = await searchByCategory(businessAId, 'tienen descuento', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -101,30 +106,35 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     await seedEntries(
       Array.from({ length: 8 }, (_, i) => ({
         businessId: businessAId,
-        title: `Precio ${i}`,
-        category: 'precios' as const,
-        content: `S/${i}`,
+        title: `Promo ${i}`,
+        category: 'promociones' as const,
+        content: `oferta ${i}`,
         createdAt: new Date(Date.UTC(2026, 0, i + 1, 10)),
       })),
     )
 
-    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
+    const result = await searchByCategory(businessAId, 'tienen descuento', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
     expect(result.data.entries).toHaveLength(5)
     expect(result.data.entries.map((e) => e.title)).toEqual([
-      'Precio 0',
-      'Precio 1',
-      'Precio 2',
-      'Precio 3',
-      'Precio 4',
+      'Promo 0',
+      'Promo 1',
+      'Promo 2',
+      'Promo 3',
+      'Promo 4',
     ])
   })
 
   it("includes send_mode='always' entries even when their category was not detected", async () => {
     await seedEntries([
-      { businessId: businessAId, title: 'Dirección', category: 'ubicacion', content: 'Av. Larco' },
+      {
+        businessId: businessAId,
+        title: 'Historia',
+        category: 'informacion_general',
+        content: 'Abrimos en 2015',
+      },
       {
         businessId: businessAId,
         title: 'Formas de pago',
@@ -134,11 +144,11 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const result = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
+    const result = await searchByCategory(businessAId, '¿quién es la propietaria?', 'general')
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    expect(result.data.entries.map((e) => e.title).sort()).toEqual(['Dirección', 'Formas de pago'])
+    expect(result.data.entries.map((e) => e.title).sort()).toEqual(['Formas de pago', 'Historia'])
   })
 
   it('includes a trigger_based entry only when its keywords hit the message', async () => {
@@ -146,7 +156,7 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       {
         businessId: businessAId,
         title: 'Estacionamiento',
-        category: 'ubicacion',
+        category: 'informacion_general',
         content: 'Hay cochera en el sótano',
         sendMode: 'trigger_based',
         triggerKeywords: ['estacionamiento', 'cochera'],
@@ -157,9 +167,9 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
     expect(hit.ok).toBe(true)
     if (hit.ok) expect(hit.data.entries.map((e) => e.title)).toEqual(['Estacionamiento'])
 
-    // "dónde quedan" routes to `ubicacion`, but a trigger_based entry must stay
-    // out until one of its own keywords appears.
-    const miss = await searchByCategory(businessAId, '¿dónde quedan?', 'general')
+    // "quién es la propietaria" routes to `informacion_general`, but a
+    // trigger_based entry must stay out until one of its own keywords appears.
+    const miss = await searchByCategory(businessAId, '¿quién es la propietaria?', 'general')
     expect(miss.ok).toBe(true)
     if (miss.ok) expect(miss.data.entries).toEqual([])
   })
@@ -169,14 +179,14 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       {
         businessId: businessAId,
         title: 'Vieja',
-        category: 'precios',
+        category: 'promociones',
         content: 'a',
         createdAt: new Date('2026-01-01T10:00:00Z'),
       },
       {
         businessId: businessAId,
         title: 'Nueva',
-        category: 'ubicacion',
+        category: 'informacion_general',
         content: 'b',
         createdAt: new Date('2026-02-01T10:00:00Z'),
       },
@@ -192,8 +202,8 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
 
   it('never returns entries belonging to another business', async () => {
     await seedEntries([
-      { businessId: businessAId, title: 'Precio A', category: 'precios', content: 'S/30' },
-      { businessId: businessBId, title: 'Precio B', category: 'precios', content: 'S/50' },
+      { businessId: businessAId, title: 'Promo A', category: 'promociones', content: '2x1' },
+      { businessId: businessBId, title: 'Promo B', category: 'promociones', content: '3x2' },
       {
         businessId: businessBId,
         title: 'Siempre B',
@@ -203,25 +213,25 @@ describe('knowledgeBaseSearch.searchByCategory', () => {
       },
     ])
 
-    const resultA = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
+    const resultA = await searchByCategory(businessAId, 'tienen descuento', 'general')
     expect(resultA.ok).toBe(true)
     if (!resultA.ok) return
-    expect(resultA.data.entries.map((e) => e.title)).toEqual(['Precio A'])
+    expect(resultA.data.entries.map((e) => e.title)).toEqual(['Promo A'])
     for (const entry of resultA.data.entries) {
       expect(entry.businessId).toBe(businessAId)
     }
 
-    const resultB = await searchByCategory(businessBId, 'cuánto cuesta', 'general')
+    const resultB = await searchByCategory(businessBId, 'tienen descuento', 'general')
     expect(resultB.ok).toBe(true)
     if (!resultB.ok) return
-    expect(resultB.data.entries.map((e) => e.title).sort()).toEqual(['Precio B', 'Siempre B'])
+    expect(resultB.data.entries.map((e) => e.title).sort()).toEqual(['Promo B', 'Siempre B'])
     for (const entry of resultB.data.entries) {
       expect(entry.businessId).toBe(businessBId)
     }
   })
 
   it('returns an empty list for a business with no entries', async () => {
-    const result = await searchByCategory(businessAId, 'cuánto cuesta', 'general')
+    const result = await searchByCategory(businessAId, 'tienen descuento', 'general')
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.data.entries).toEqual([])
   })

@@ -62,16 +62,16 @@ describe('llm.service.generateReply', () => {
     await db.insert(knowledgeBase).values([
       {
         businessId: seed.businessA.id,
-        title: 'Corte de cabello',
-        category: 'servicios',
-        content: 'Corte de cabello',
+        title: 'Cancelaciones',
+        category: 'politicas',
+        content: 'Avisá con 2 horas de anticipación',
         sendMode: 'always',
       },
       {
         businessId: seed.businessA.id,
-        title: 'Corte',
-        category: 'precios',
-        content: 'Corte: S/30',
+        title: 'Combo',
+        category: 'promociones',
+        content: 'Corte y barba con descuento los martes',
         sendMode: 'always',
       },
     ])

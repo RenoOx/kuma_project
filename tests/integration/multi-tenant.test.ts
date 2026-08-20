@@ -44,11 +44,16 @@ describe('multi-tenant isolation', () => {
     await db.insert(knowledgeBase).values([
       {
         businessId: businessA.id,
-        title: 'Servicios',
-        category: 'servicios',
-        content: 'Corte, barba',
+        title: 'Políticas',
+        category: 'politicas',
+        content: 'Cancelá con 2 horas de anticipación',
       },
-      { businessId: businessA.id, title: 'Corte', category: 'precios', content: 'S/30 corte' },
+      {
+        businessId: businessA.id,
+        title: 'Combo',
+        category: 'promociones',
+        content: 'Descuento los martes',
+      },
     ])
 
     const aRows = await db
@@ -157,15 +162,15 @@ describe('multi-tenant isolation', () => {
     await db.insert(knowledgeBase).values([
       {
         businessId: businessA.id,
-        title: 'A services',
-        category: 'servicios',
-        content: 'A services',
+        title: 'A policies',
+        category: 'politicas',
+        content: 'A policies',
       },
       {
         businessId: businessB.id,
-        title: 'B services',
-        category: 'servicios',
-        content: 'B services',
+        title: 'B policies',
+        category: 'politicas',
+        content: 'B policies',
       },
     ])
 

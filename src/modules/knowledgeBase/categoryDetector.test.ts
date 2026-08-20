@@ -13,13 +13,10 @@ describe('normalize', () => {
 })
 
 describe('detectCategories', () => {
-  it('detects each category from a realistic customer message', () => {
+  it('detects each active category from a realistic customer message', () => {
     const cases: Array<[string, string]> = [
-      ['¿Dónde quedan? no encuentro la dirección', 'ubicacion'],
-      ['qué servicios ofrecen?', 'servicios'],
-      ['cuánto cuesta el corte', 'precios'],
       ['puedo cancelar la cita? cobran penalidad', 'politicas'],
-      ['me pasas otro número de contacto', 'contacto'],
+      ['tienen alguna promoción este mes?', 'promociones'],
       ['quién es la propietaria del local', 'informacion_general'],
     ]
     for (const [message, expected] of cases) {
@@ -27,12 +24,29 @@ describe('detectCategories', () => {
     }
   })
 
+  // Services, prices, hours, address and contact details are answered from
+  // business settings. Routing them to the knowledge base is what let Emma read
+  // two different answers to the same question.
+  it('does not route questions that business settings already answer', () => {
+    for (const message of [
+      '¿Dónde quedan? no encuentro la dirección',
+      'qué servicios ofrecen?',
+      'cuánto cuesta el corte',
+      'me pasas otro número de contacto',
+    ]) {
+      expect(detectCategories(message, 'general'), `message: ${message}`).toEqual([])
+    }
+  })
+
   it('ranks the strongest category first when a message spans several', () => {
-    // Three price keywords ("precio", "cuesta", "promocion") against one
-    // location keyword ("donde").
-    const result = detectCategories('donde vi el precio? cuánto cuesta con la promoción', 'general')
-    expect(result[0]).toBe('precios')
-    expect(result).toContain('ubicacion')
+    // Three promo keywords ("promocion", "descuento", "combo") against one
+    // policy keyword ("pago").
+    const result = detectCategories(
+      'la promoción con descuento del combo acepta pago en efectivo?',
+      'general',
+    )
+    expect(result[0]).toBe('promociones')
+    expect(result).toContain('politicas')
   })
 
   it('returns nothing when no keyword matches, so the caller can fall back', () => {
@@ -42,15 +56,15 @@ describe('detectCategories', () => {
   })
 
   it('does not fire on a keyword embedded in a longer word', () => {
-    // "vale" is a price keyword; "Valentina" must not trigger it.
-    expect(detectCategories('mi nombre es Valentina', 'general')).toEqual([])
+    // "combo" is a promo keyword; "combose" must not trigger it.
+    expect(detectCategories('mi apellido es Combose', 'general')).toEqual([])
   })
 
   it('applies the base vocabulary regardless of niche — specialization only adds words', () => {
-    // "ofrecen" and "cuesta" are generic (BASE_SERVICIOS / BASE_PRECIOS), so
-    // they must still fire even for a niche with a narrower, specific list.
-    expect(detectCategories('qué servicios ofrecen?', 'dental')[0]).toBe('servicios')
-    expect(detectCategories('cuánto cuesta?', 'barberia')[0]).toBe('precios')
+    // "propietaria" is generic (BASE_INFORMACION_GENERAL), so it must still fire
+    // for a niche that carries its own narrower list on top.
+    expect(detectCategories('quién es la propietaria', 'dental')[0]).toBe('informacion_general')
+    expect(detectCategories('tienen descuento?', 'barberia')[0]).toBe('promociones')
   })
 
   it('detects niche-specific vocabulary that the generic list does not cover', () => {
@@ -59,12 +73,6 @@ describe('detectCategories', () => {
     expect(detectCategories('me duele la muela', 'dental')).toEqual(['informacion_general'])
     // Under any other niche the same message matches nothing.
     expect(detectCategories('me duele la muela', 'barberia')).toEqual([])
-  })
-
-  it('dental: "cuánto cuesta un blanqueamiento" detects both servicios and precios', () => {
-    const result = detectCategories('cuánto cuesta un blanqueamiento', 'dental')
-    expect(result).toContain('servicios')
-    expect(result).toContain('precios')
   })
 })
 
