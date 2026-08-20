@@ -493,6 +493,55 @@ async function parseSettingsFromForm(
   return { ok: true, data: parsed.data }
 }
 
+// ── Configure panel helpers ───────────────────────────────────────────────────
+
+// Alerts render as dismissible popups instead of full-width banners so the page
+// keeps the same height whatever query params came back. Only the success toast
+// auto-closes: the error one carries the validation detail the owner needs in
+// order to fix the form, and the rebind one carries the QR link that brings
+// Emma back online — neither may evaporate on its own.
+function renderToast(
+  kind: 'success' | 'error' | 'warning',
+  title: string,
+  bodyHtml: string,
+  autoDismissMs?: number,
+): string {
+  const auto = autoDismissMs ? ` data-autoclose="${autoDismissMs}"` : ''
+  return `<div class="toast toast-${kind}"${auto}>
+      <div class="toast-body">
+        <div class="toast-title">${esc(title)}</div>
+        <div class="toast-text">${bodyHtml}</div>
+      </div>
+      <button type="button" class="toast-close" aria-label="Cerrar"
+        onclick="this.closest('.toast').remove()">✕</button>
+    </div>`
+}
+
+// Read-only status of the knowledge base, grouped the way the owner thinks about
+// it: which topics Emma can already talk about and which ones she cannot. Counts
+// only active entries — a disabled one is out of the prompt, so claiming the
+// category is covered would be a lie.
+function renderKbChecklist(entries: KnowledgeBaseEntry[]): string {
+  const counts = new Map<KbCategory, number>()
+  for (const e of entries) {
+    if (e.active) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
+  }
+
+  return KB_CATEGORIES.map((cat) => {
+    const count = counts.get(cat) ?? 0
+    const has = count > 0
+    return `<div class="kb-check-row${has ? '' : ' is-missing'}">
+        <span class="kb-mark ${has ? 'kb-mark-on' : 'kb-mark-off'}">${has ? '✓' : '✕'}</span>
+        <span class="kb-check-name">${esc(KB_CATEGORY_LABELS[cat])}</span>
+        <span class="kb-check-meta">${
+          has
+            ? `${count} ${count === 1 ? 'entrada' : 'entradas'}`
+            : 'Sin entradas — Emma no podrá responder preguntas sobre este tema.'
+        }</span>
+      </div>`
+  }).join('')
+}
+
 // ── CSS ───────────────────────────────────────────────────────────────────────
 
 const CSS = `
@@ -594,6 +643,92 @@ tr:hover td{background:#fafaf8}
 .mode-option-title{font-size:13px;font-weight:600;color:#0a0f0d}
 .mode-option-desc{font-size:12px;color:#6b7280;margin-top:.1rem}
 .form-actions{display:flex;gap:.75rem;margin-top:1.5rem;padding-top:1.25rem;border-top:1px solid #f3f4f6}
+
+/* ── Configure panel ──────────────────────────────────────────────────────────
+   Scoped under .config-page on purpose. The palette below is a half-tone off
+   the one the older views use (--border #e8e8e5 vs #e5e7eb), so applying it
+   globally would shift the business list, the KB screens and the new-business
+   form too. Only the configure panel opts in. */
+:root{
+--bg:#fafaf8;--surface:#ffffff;--border:#e8e8e5;--border-hover:#d1d1cd;
+--text-primary:#1a1a1a;--text-secondary:#666666;--text-tertiary:#999999;
+--accent:#059669;--accent-hover:#047857;--accent-subtle:#f0fdf4;
+--danger:#dc2626;--danger-bg:#fef2f2;--warning-bg:#fffbeb;--success-bg:#f0fdf4;
+}
+
+.toast-stack{position:fixed;top:68px;right:24px;z-index:50;display:flex;flex-direction:column;gap:8px;width:380px;max-width:calc(100vw - 32px)}
+.toast{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--text-primary);display:flex;gap:10px;align-items:flex-start}
+.toast-success{border-left-color:var(--accent);background:var(--success-bg)}
+.toast-error{border-left-color:var(--danger);background:var(--danger-bg)}
+.toast-warning{border-left-color:#b45309;background:var(--warning-bg)}
+.toast-body{flex:1;min-width:0}
+.toast-title{font-weight:600;margin-bottom:2px}
+.toast-text{color:var(--text-secondary);overflow-wrap:anywhere}
+.toast-close{background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:13px;line-height:1;padding:2px 0 0;font-family:inherit;flex-shrink:0}
+.toast-close:hover{color:var(--text-primary)}
+
+.config-layout{display:grid;grid-template-columns:200px 1fr;gap:32px;align-items:start}
+.config-nav{position:sticky;top:76px;display:flex;flex-direction:column;gap:2px}
+.config-nav-item{display:block;padding:8px 12px;font-size:13px;font-weight:500;color:var(--text-secondary);border-left:2px solid transparent;border-radius:0 6px 6px 0}
+.config-nav-item:hover{color:var(--text-primary)}
+.config-nav-item.is-active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-subtle)}
+.config-col{min-width:0;display:flex;flex-direction:column;gap:32px}
+.config-form{display:flex;flex-direction:column;gap:32px}
+
+.config-section{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;scroll-margin-top:76px}
+.section-header{margin-bottom:20px}
+.section-title{font-size:16px;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em}
+.section-desc{font-size:13px;font-weight:400;color:var(--text-secondary);margin-top:2px}
+.section-danger{border-color:#f2d5d5}
+.section-danger .section-title{color:var(--danger)}
+.subsection{margin-top:24px;padding-top:24px;border-top:1px solid var(--border)}
+.subsection-title{font-size:13px;font-weight:600;color:var(--text-primary)}
+.subsection-desc{font-size:12px;color:var(--text-tertiary);margin-top:2px;margin-bottom:12px}
+.check-field{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:400;color:var(--text-primary);cursor:pointer}
+.check-field input{margin-top:4px;flex-shrink:0}
+.svc-head{display:flex;gap:8px;margin-bottom:8px}
+.svc-head span{font-size:12px;font-weight:500;color:var(--text-secondary)}
+
+.kb-check-row{display:flex;gap:10px;align-items:baseline;padding:10px 0;border-bottom:1px solid #f4f4f2}
+.kb-check-row:last-child{border-bottom:none}
+.kb-mark{width:14px;flex-shrink:0;text-align:center;font-size:13px}
+.kb-mark-on{color:var(--accent)}
+.kb-mark-off{color:var(--text-tertiary)}
+.kb-check-name{font-size:14px;font-weight:500;color:var(--text-primary);width:170px;flex-shrink:0}
+.kb-check-row.is-missing .kb-check-name{font-weight:400;color:var(--text-secondary)}
+.kb-check-meta{font-size:13px;color:var(--text-secondary)}
+.kb-check-row.is-missing .kb-check-meta{color:var(--text-tertiary)}
+
+.save-bar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 24px;display:flex;justify-content:flex-end;gap:8px;z-index:10}
+
+.config-page .form-group{margin-bottom:20px}
+.config-page .form-group:last-child{margin-bottom:0}
+.config-page .form-label{font-size:13px;font-weight:500;color:var(--text-secondary);text-transform:none;margin-bottom:6px}
+.config-page .form-input{border-color:var(--border);border-radius:6px;padding:8px 12px;font-size:14px;color:var(--text-primary)}
+.config-page .form-input:hover:not(:disabled){border-color:var(--border-hover)}
+.config-page .form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(5,150,105,.1)}
+.config-page .form-hint{font-size:12px;color:var(--text-tertiary);margin-top:6px}
+.config-page .form-row{gap:20px}
+.config-page .hours-table th{font-size:12px;font-weight:500;color:var(--text-secondary);text-transform:none;letter-spacing:0;border-bottom-color:var(--border);padding:8px 4px}
+.config-page .hours-table td{border-bottom-color:#f4f4f2;padding:8px 4px}
+.config-page .hours-table tr:hover td{background:transparent}
+.config-page .time-input{border-color:var(--border);border-radius:6px}
+.config-page .mode-option{border-color:var(--border);border-radius:8px}
+.config-page .mode-option:hover{border-color:var(--border-hover);background:transparent}
+.config-page .mode-option-title{color:var(--text-primary)}
+.config-page .mode-option-desc{color:var(--text-secondary)}
+.config-page .btn-primary{background:var(--accent)}
+.config-page .btn-primary:hover{background:var(--accent-hover)}
+
+@media(max-width:768px){
+.toast-stack{top:60px;right:16px;left:16px;width:auto}
+.config-layout{grid-template-columns:1fr;gap:16px}
+.config-nav{position:sticky;top:52px;flex-direction:row;overflow-x:auto;gap:4px;background:var(--bg);border-bottom:1px solid var(--border);margin:0 -1.5rem;padding:8px 1.5rem;z-index:9;scrollbar-width:none}
+.config-nav::-webkit-scrollbar{display:none}
+.config-nav-item{white-space:nowrap;border-left:none;border-bottom:2px solid transparent;border-radius:6px 6px 0 0}
+.config-nav-item.is-active{border-left-color:transparent;border-bottom-color:var(--accent)}
+.config-section{padding:20px;scroll-margin-top:112px}
+}
 `
 
 // ── Layout ────────────────────────────────────────────────────────────────────
@@ -1225,9 +1360,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   if (!secret) return unauthorized(c)
 
   const businessId = c.req.param('id')
-  const [business, gcEmail] = await Promise.all([
+  const [business, gcEmail, kbResult] = await Promise.all([
     businessRepo.findById(businessId),
     dashRepo.getGoogleConnectedEmail(businessId),
+    knowledgeBaseService.getByBusiness(businessId),
   ])
   if (!business) return c.html('<h1>404</h1>', 404) as Response
 
@@ -1237,21 +1373,27 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   const saved = c.req.query('saved') === '1'
   const rebind = c.req.query('rebind')
 
-  const rebindNotice =
+  const toasts = [
+    saved
+      ? renderToast('success', 'Cambios guardados', 'La configuración quedó actualizada.', 4000)
+      : '',
+    error ? renderToast('error', 'No se pudo guardar', esc(error)) : '',
     rebind === 'pending'
-      ? `<div class="alert alert-warning">
-           📱 <strong>Falta vincular el número nuevo.</strong>
-           Emma se desconectó del número anterior. Escaneá el QR con el teléfono de
+      ? renderToast(
+          'warning',
+          'Falta vincular el número nuevo',
+          `Emma se desconectó del número anterior. Escaneá el QR con el teléfono de
            <strong>${esc(business.whatsappNumber)}</strong> para reactivarla.
-           <div style="margin-top:.75rem">
+           <div style="margin-top:10px">
              <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-primary btn-sm">Ver QR</a>
            </div>
-           <p class="form-hint" style="margin-top:.75rem">
+           <div style="margin-top:10px;color:var(--text-tertiary);font-size:12px">
              Acordate de desvincular Emma del teléfono anterior desde
              WhatsApp → Dispositivos vinculados.
-           </p>
-         </div>`
-      : ''
+           </div>`,
+        )
+      : '',
+  ].join('')
 
   const raw = business.settings as Partial<BusinessSettings>
   const hours = (raw?.operatingHours ?? {}) as Partial<Record<DayKey, DayHours>>
@@ -1302,21 +1444,41 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     .join('')
 
   const body = `
+    <div class="config-page">
     <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
     <div class="page-header">
       <h1 class="page-title">Configurar — ${esc(business.name)}</h1>
     </div>
-    ${saved ? '<div class="alert alert-success">✓ Cambios guardados correctamente.</div>' : ''}
-    ${error ? `<div class="alert alert-error">${esc(error)}</div>` : ''}
-    ${rebindNotice}
+    <div class="toast-stack" role="status" aria-live="polite">${toasts}</div>
 
-    <form method="post" action="/admin/dashboard/${bid}/configure?secret=${se}"
-      onsubmit="return confirmNumberChange()">
+    <div class="config-layout">
+      <nav class="config-nav">
+        <a class="config-nav-item is-active" data-section="seccion-info" href="#seccion-info">Información</a>
+        <a class="config-nav-item" data-section="seccion-horarios" href="#seccion-horarios">Horarios</a>
+        <a class="config-nav-item" data-section="seccion-servicios" href="#seccion-servicios">Servicios</a>
+        <a class="config-nav-item" data-section="seccion-citas" href="#seccion-citas">Citas y turnos</a>
+        <a class="config-nav-item" data-section="seccion-conocimiento" href="#seccion-conocimiento">Conocimiento</a>
+        <a class="config-nav-item" data-section="seccion-google" href="#seccion-google">Google Calendar</a>
+        <a class="config-nav-item" data-section="seccion-peligro" href="#seccion-peligro">Zona de peligro</a>
+      </nav>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Información del negocio</span></div>
-        <div class="card-body">
+      <div class="config-col">
+
+      <form id="config-form" class="config-form" method="post"
+        action="/admin/dashboard/${bid}/configure?secret=${se}"
+        onsubmit="return confirmNumberChange()">
+
+        <section id="seccion-info" class="config-section">
+          <div class="section-header">
+            <h2 class="section-title">Información del negocio</h2>
+            <p class="section-desc">Nombre, tipo de negocio, contacto y ubicación</p>
+          </div>
           <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="name">Nombre del negocio</label>
+              <input id="name" name="name" type="text" class="form-input"
+                value="${esc(business.name)}" required>
+            </div>
             <div class="form-group">
               <label class="form-label" for="niche">Tipo de negocio</label>
               <select id="niche" name="niche" class="form-input form-select">
@@ -1328,42 +1490,8 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                   .join('')}
               </select>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="bookingMode">Modo de reserva</label>
-              <select id="bookingMode" name="bookingMode" class="form-input form-select">
-                ${Object.entries(BOOKING_MODE_LABELS)
-                  .map(
-                    ([v, l]) =>
-                      `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`,
-                  )
-                  .join('')}
-              </select>
-              <p class="form-hint">
-                Con "Requiere aprobación" Emma no confirma la cita: la deja por aprobar
-                y te manda la solicitud por WhatsApp.
-              </p>
-            </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="forwardImages">
-                <input type="checkbox" id="forwardImages" name="forwardImages"
-                  ${forwardImages ? 'checked' : ''}>
-                Reenviar imágenes de clientes al dueño
-              </label>
-              <p class="form-hint">
-                Emma te manda la foto por WhatsApp cuando ella misma la pidió (por ejemplo
-                un comprobante de pago) o cuando el paciente tiene una cita por aprobar.
-                Las fotos que nadie pidió no se reenvían.
-              </p>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="name">Nombre</label>
-              <input id="name" name="name" type="text" class="form-input"
-                value="${esc(business.name)}" required>
-            </div>
             <div class="form-group">
               <label class="form-label" for="timezone">Zona horaria</label>
               <select id="timezone" name="timezone" class="form-input form-select">
@@ -1384,15 +1512,13 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                   .join('')}
               </select>
             </div>
-          </div>
-          <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="whatsappNumber">Número de WhatsApp del bot</label>
               <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
                 value="${esc(business.whatsappNumber)}" placeholder="+51987654321" required
                 data-original="${esc(business.whatsappNumber)}">
               <p class="form-hint" style="color:#b45309">
-                ⚠️ Cambiar este número desconecta la sesión actual y hay que escanear un QR nuevo
+                Cambiar este número desconecta la sesión actual y hay que escanear un QR nuevo
                 con el teléfono del número nuevo. Las citas, conversaciones e historial NO se pierden.
               </p>
             </div>
@@ -1419,8 +1545,6 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                 placeholder="ej. Av. Ejército 820, Yanahuara, Arequipa">
               <p class="form-hint">Emma la responde cuando preguntan dónde están o cómo llegar</p>
             </div>
-          </div>
-          <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="googleMapsUrl">Link de Google Maps</label>
               <input id="googleMapsUrl" name="googleMapsUrl" type="url" class="form-input"
@@ -1428,12 +1552,13 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <p class="form-hint">Complementario a la dirección — Emma manda los dos juntos</p>
             </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Horarios de atención</span></div>
-        <div class="card-body">
+        <section id="seccion-horarios" class="config-section">
+          <div class="section-header">
+            <h2 class="section-title">Horarios de atención</h2>
+            <p class="section-desc">Horario semanal, modo de atención y fechas puntuales</p>
+          </div>
           <div class="table-wrap">
             <table class="hours-table">
               <thead>
@@ -1450,13 +1575,11 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <tbody>${hoursRows}</tbody>
             </table>
           </div>
-        </div>
-      </div>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Modo de atención</span></div>
-        <div class="card-body">
-          <div class="mode-options">
+          <div class="subsection">
+            <h3 class="subsection-title">Modo de atención</h3>
+            <p class="subsection-desc">Qué le ofrece Emma a alguien que escribe queriendo venir</p>
+            <div class="mode-options">
             <label class="mode-option">
               <input type="radio" name="appointmentMode" value="appointments_only"
                 ${isHybrid ? '' : 'checked'}>
@@ -1477,36 +1600,37 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
                 </span>
               </span>
             </label>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Días especiales</span></div>
-        <div class="card-body">
-          <p class="form-hint" style="margin-bottom:.75rem">Feriados u horarios puntuales que reemplazan el horario semanal para una fecha específica.</p>
-          <div id="special-days-container">
-            ${renderSpecialDayRows(specialDays)}
+          <div class="subsection">
+            <h3 class="subsection-title">Días especiales</h3>
+            <p class="subsection-desc">
+              Feriados u horarios puntuales que reemplazan el horario semanal para una fecha específica.
+            </p>
+            <div id="special-days-container">
+              ${renderSpecialDayRows(specialDays)}
+            </div>
+            <input type="hidden" name="special_count" id="special_count" value="${initialSpecialDayCount}">
+            <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addSpecialDay()">
+              + Agregar día especial
+            </button>
           </div>
-          <input type="hidden" name="special_count" id="special_count" value="${initialSpecialDayCount}">
-          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addSpecialDay()">
-            + Agregar día especial
-          </button>
-        </div>
-      </div>
+        </section>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Servicios</span></div>
-        <div class="card-body">
-          <p class="form-hint" style="margin-bottom:.75rem">
-            La duración es opcional: si la dejás vacía, ese servicio no tiene duración propia.
-            El precio mínimo es obligatorio salvo que marques "Requiere evaluación previa".
-          </p>
-          <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
-            <span style="flex:1;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Servicio</span>
-            <span style="width:90px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Duración (minutos)</span>
-            <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio mín. (S/)</span>
-            <span style="width:130px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Precio máx. (S/)</span>
+        <section id="seccion-servicios" class="config-section">
+          <div class="section-header">
+            <h2 class="section-title">Servicios</h2>
+            <p class="section-desc">
+              La duración es opcional: si la dejás vacía, ese servicio no tiene duración propia.
+              El precio mínimo es obligatorio salvo que marques "Requiere evaluación previa".
+            </p>
+          </div>
+          <div class="svc-head">
+            <span style="flex:1">Servicio</span>
+            <span style="width:90px">Duración (min)</span>
+            <span style="width:130px">Precio mín. (S/)</span>
+            <span style="width:130px">Precio máx. (S/)</span>
             <span style="width:32px"></span>
           </div>
           <div id="services-container">
@@ -1516,13 +1640,29 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addService()">
             + Agregar servicio
           </button>
-        </div>
-      </div>
+        </section>
 
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span class="card-title">Configuración de turnos</span></div>
-        <div class="card-body">
+        <section id="seccion-citas" class="config-section">
+          <div class="section-header">
+            <h2 class="section-title">Citas y turnos</h2>
+            <p class="section-desc">Cómo Emma reserva, con cuánta anticipación y qué te reenvía</p>
+          </div>
           <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="bookingMode">Modo de reserva</label>
+              <select id="bookingMode" name="bookingMode" class="form-input form-select">
+                ${Object.entries(BOOKING_MODE_LABELS)
+                  .map(
+                    ([v, l]) =>
+                      `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`,
+                  )
+                  .join('')}
+              </select>
+              <p class="form-hint">
+                Con "Requiere aprobación" Emma no confirma la cita: la deja por aprobar
+                y te manda la solicitud por WhatsApp.
+              </p>
+            </div>
             <div class="form-group">
               <label class="form-label" for="slotDurationMinutes">Duración de cada turno</label>
               <select id="slotDurationMinutes" name="slotDurationMinutes" class="form-input form-select">
@@ -1530,6 +1670,8 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               </select>
               <p class="form-hint">Intervalo entre turnos disponibles en el calendario</p>
             </div>
+          </div>
+          <div class="form-row">
             <div class="form-group">
               <label class="form-label" for="minBookingNoticeMinutes">Anticipación mínima (minutos)</label>
               <input id="minBookingNoticeMinutes" name="minBookingNoticeMinutes" type="number"
@@ -1537,57 +1679,74 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
               <p class="form-hint">Mínimo tiempo entre "ahora" y el primer turno agendable (0 = sin restricción, default: 30)</p>
             </div>
           </div>
+          <div class="subsection">
+            <label class="check-field" for="forwardImages">
+              <input type="checkbox" id="forwardImages" name="forwardImages"
+                ${forwardImages ? 'checked' : ''}>
+              Reenviar imágenes de clientes al dueño
+            </label>
+            <p class="form-hint">
+              Emma te manda la foto por WhatsApp cuando ella misma la pidió (por ejemplo
+              un comprobante de pago) o cuando el paciente tiene una cita por aprobar.
+              Las fotos que nadie pidió no se reenvían.
+            </p>
+          </div>
+        </section>
+
+      </form>
+
+      <section id="seccion-conocimiento" class="config-section">
+        <div class="section-header">
+          <h2 class="section-title">Conocimiento del negocio</h2>
+          <p class="section-desc">
+            Qué temas puede responder Emma más allá de los datos de esta página. Se edita aparte.
+          </p>
         </div>
-      </div>
-
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Guardar cambios</button>
-        <a href="/admin/dashboard/${bid}?secret=${se}" class="btn btn-ghost">Cancelar</a>
-      </div>
-
-    </form>
-
-    <div class="card" style="margin-top:1rem">
-      <div class="card-header">
-        <span class="card-title">Google Calendar</span>
         ${
-          gcEmail
-            ? '<span class="badge badge-green"><span class="dot dot-green"></span>Conectado</span>'
-            : '<span class="badge badge-gray"><span class="dot dot-gray"></span>Sin conectar</span>'
+          kbResult.ok
+            ? renderKbChecklist(kbResult.data)
+            : '<p class="section-desc">No pudimos cargar la base de conocimiento.</p>'
         }
-      </div>
-      <div class="card-body">
+        <div style="margin-top:20px">
+          <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost btn-sm">
+            Editar base de conocimiento →
+          </a>
+        </div>
+      </section>
+
+      <section id="seccion-google" class="config-section">
+        <div class="section-header">
+          <h2 class="section-title">Google Calendar</h2>
+          <p class="section-desc">
+            ${
+              gcEmail
+                ? `Conectado a ${esc(gcEmail)} — las citas se crean automáticamente.`
+                : 'Sin conectar. Las citas se guardan igual, pero no aparecen en el calendario.'
+            }
+          </p>
+        </div>
         ${
           gcEmail
-            ? `<div class="info-row" style="margin-bottom:1rem">
-               <span class="info-label">Cuenta</span>
-               <span class="info-value">${esc(gcEmail)}</span>
-             </div>
-             <div class="actions">
+            ? `<div class="actions">
                <form method="post" action="/admin/dashboard/${bid}/google-disconnect?secret=${se}" style="display:inline"
                  onsubmit="return confirm('¿Desconectar Google Calendar?')">
                  <button type="submit" class="btn btn-danger btn-sm">Desconectar Calendar</button>
                </form>
                <a href="/auth/google/connect?businessId=${bid}" class="btn btn-ghost btn-sm">Reconectar / cambiar cuenta</a>
              </div>`
-            : `<p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
-               Conectá Google Calendar para que las citas se creen automáticamente.
-             </p>
-             <a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`
+            : `<a href="/auth/google/connect?businessId=${bid}" class="btn btn-primary btn-sm">Conectar Google Calendar</a>`
         }
-      </div>
-    </div>
+      </section>
 
-    <div class="card" style="margin-top:1rem;border-color:#fecaca">
-      <div class="card-header" style="border-bottom-color:#fee2e2">
-        <span class="card-title" style="color:#b91c1c">Zona de peligro</span>
-      </div>
-      <div class="card-body">
-        <p style="font-size:13px;color:#374151;margin-bottom:.35rem">
-          <strong>Desvincular WhatsApp</strong> — Emma sale del número
-          <span class="mono">${esc(business.whatsappNumber)}</span> y deja de responder de inmediato.
-        </p>
-        <p style="font-size:13px;color:#6b7280;margin-bottom:1rem">
+      <section id="seccion-peligro" class="config-section section-danger">
+        <div class="section-header">
+          <h2 class="section-title">Zona de peligro</h2>
+          <p class="section-desc">
+            Desvincular WhatsApp saca a Emma del número
+            <span class="mono">${esc(business.whatsappNumber)}</span> y deja de responder de inmediato.
+          </p>
+        </div>
+        <p class="section-desc" style="margin-bottom:20px">
           Cierra la sesión contra WhatsApp, quita el dispositivo de la lista del teléfono del cliente
           y borra las credenciales guardadas. Para volver a usar este número hay que escanear un QR nuevo.
         </p>
@@ -1596,6 +1755,13 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           <input type="hidden" name="from" value="configure">
           <button type="submit" class="btn btn-danger btn-sm">Desvincular WhatsApp</button>
         </form>
+      </section>
+
+      <div class="save-bar">
+        <a href="/admin/dashboard/${bid}?secret=${se}" class="btn btn-ghost">Cancelar</a>
+        <button type="submit" form="config-form" class="btn btn-primary">Guardar cambios</button>
+      </div>
+
       </div>
     </div>
 
@@ -1745,7 +1911,40 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       if (openEl) openEl.disabled = closed;
       if (closeEl) closeEl.disabled = closed;
     }
-    </script>`
+
+    // Only toasts that opted in disappear on their own. The error and rebind
+    // ones stay until dismissed — see renderToast.
+    document.querySelectorAll('.toast[data-autoclose]').forEach(function(t) {
+      setTimeout(function() { t.remove() }, parseInt(t.getAttribute('data-autoclose'), 10));
+    });
+
+    // Scroll spy. The rootMargin band ignores the sticky topbar and the bottom
+    // half of the viewport, so the highlighted item is the section the operator
+    // is actually reading, not whatever is barely poking into view.
+    (function() {
+      var items = Array.prototype.slice.call(document.querySelectorAll('.config-nav-item'));
+      var sections = items
+        .map(function(i) { return document.getElementById(i.getAttribute('data-section')) })
+        .filter(Boolean);
+      if (sections.length === 0 || !('IntersectionObserver' in window)) return;
+
+      var visible = {};
+      var obs = new IntersectionObserver(function(entries) {
+        entries.forEach(function(e) { visible[e.target.id] = e.isIntersecting });
+        var topId = null;
+        for (var i = 0; i < sections.length; i++) {
+          if (visible[sections[i].id]) { topId = sections[i].id; break }
+        }
+        if (!topId) return;
+        items.forEach(function(it) {
+          it.classList.toggle('is-active', it.getAttribute('data-section') === topId);
+        });
+      }, { rootMargin: '-80px 0px -55% 0px', threshold: 0 });
+
+      sections.forEach(function(s) { obs.observe(s) });
+    })();
+    </script>
+    </div>`
 
   return c.html(layout(`Configurar — ${business.name}`, body, secret))
 })
