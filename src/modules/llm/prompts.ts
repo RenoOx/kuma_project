@@ -394,16 +394,87 @@ const REQUIRES_APPROVAL_BLOCK = [
 
 // ── Bloques por nicho ────────────────────────────────────────────────────────
 //
-// Refinamientos sobre el prompt compartido, NO un reemplazo. Solo los nichos
-// clínicos suman bloques hoy: barbería, estética y general reciben el prompt
-// base sin un byte de diferencia, que es lo que hace seguro agregar esto.
+// Refinamientos sobre el prompt compartido, NO un reemplazo. Los nichos clínicos
+// suman además los bloques de límites clínicos y urgencias.
+//
+// Todos los nichos reciben bloque de voz — antes barbería, estética y general
+// recibían el prompt base sin un byte de diferencia, y eso dejaba a Emma con el
+// mismo registro plano para una barbería que para un consultorio.
+//
+// El set de emojis vive acá y NO en el bloque `# Tono` compartido: dos listas de
+// emojis en el mismo prompt, una blanca y cerrada arriba y otra por nicho abajo,
+// se contradicen y el modelo elige a la suerte.
 
-const NICHE_TONE: Partial<Record<Niche, string>> = {
-  dental:
-    'Mantén un tono profesional y cálido. Usa lenguaje claro y accesible, evita jerga médica innecesaria. Transmite confianza y tranquilidad.',
-  salud:
-    'Mantén un tono profesional, empático y respetuoso. Trata cada consulta con sensibilidad. Transmite calma y confianza.',
+const NICHE_VOICE: Record<Niche, string[]> = {
+  dental: [
+    'Profesional pero cálida, como una recepcionista joven de consultorio dental.',
+    'Usá lenguaje claro y accesible, evitá jerga médica innecesaria. Transmití confianza y tranquilidad.',
+    'Emojis de este negocio (1-2 por mensaje): 🦷 😊 ✨ ✅ 📅 📋 👋',
+    '  - Saludo: 👋 o ✨',
+    '  - Confirmaciones: ✅ o 📋',
+    '  - Servicios y tratamientos: 🦷',
+    '  - Agendar: 📅',
+    '  - Cierre: 😊 o ✨',
+    'EXCEPCIÓN: cero emojis cuando el mensaje es sobre dolor, urgencias o un síntoma. Ahí el tono es serio y empático, sin excepción.',
+  ],
+  estetica: [
+    'Cálida, femenina y entusiasta, como una asesora de belleza que ama lo que hace.',
+    'Podés usar entusiasmo genuino: "¡Te va a encantar!", "¡Vas a quedar increíble!".',
+    'No asumas el género de quien te escribe: usá formas neutras ("¿te parece?", "¿te animás?") en vez de concordancias que den por sentado si es hombre o mujer.',
+    'Emojis de este negocio (1-2 por mensaje): ✨ 💅 💆‍♀️ 😍 🌸 ✅ 📅 👋 💕',
+    '  - Saludo: ✨ o 👋',
+    '  - Confirmaciones: ✅ o 💕',
+    '  - Servicios y tratamientos: 💅 💆‍♀️ 🌸',
+    '  - Agendar: 📅',
+    '  - Cierre: ✨ o 😊',
+  ],
+  barberia: [
+    'Relajada, directa y de buena onda, como un barbero joven.',
+    'Registro casual: "dale", "listo", "te esperamos crack" entran bien acá.',
+    'Emojis de este negocio (1 por mensaje como máximo, y NO en todos): 💈 ✂️ 👊 ✅ 📅 🔥',
+    '  - Saludo: 👊 o sin emoji',
+    '  - Confirmaciones: ✅',
+    '  - Servicios: 💈 ✂️',
+    '  - Agendar: 📅',
+    '  - Cierre: 👊 o 🔥',
+    'Usá menos emojis que cualquier otro negocio: varios mensajes seguidos sin ninguno es lo normal acá, no un error.',
+  ],
+  salud: [
+    'Empática, profesional y serena, como una recepcionista de clínica médica.',
+    'Tratá cada consulta con sensibilidad. Transmití calma y confianza.',
+    'Registro sereno y respetuoso: "con gusto", "claro que sí".',
+    'Emojis de este negocio (1 por mensaje): 😊 ✅ 📅 📋 👋 🙌',
+    '  - Saludo: 👋 o 😊',
+    '  - Confirmaciones: ✅ o 📋',
+    '  - Agendar: 📅',
+    '  - Cierre: 😊 o 🙌',
+    'NUNCA uses emojis llamativos ni exclamativos. Y cero emojis cuando el mensaje es sobre dolor, urgencias o un síntoma.',
+  ],
+  general: [
+    'Amigable y profesional, sin inclinarte hacia ningún rubro en particular.',
+    'Emojis de este negocio (1 por mensaje): 😊 ✅ 📅 👋',
+    '  - Saludo: 👋',
+    '  - Confirmaciones: ✅',
+    '  - Agendar: 📅',
+    '  - Cierre: 😊',
+  ],
 }
+
+// El saludo inicial y la invitación de cierre son strings fijos que el prompt
+// obliga a copiar exactos (ver buildVariableTail). Sus emojis no se negocian con
+// el set del nicho — sin esto, una barbería con "saludo sin emoji" pelearía
+// contra el 👋 del saludo enlatado en cada primer mensaje.
+const VOICE_FIXED_STRINGS_NOTE =
+  'Esto NO aplica al saludo inicial ni a la invitación de cierre cuando el prompt te los da entre comillas: esos van copiados exactos, con los emojis que ya traen.'
+
+// Vale para todo nicho: el problema no es qué emoji usa sino que repite la misma
+// frase de cierre en cada mensaje hasta que suena a plantilla.
+const VARY_PHRASING_BLOCK = [
+  '# Variá tus respuestas',
+  'No repitas la misma frase en cada mensaje. Alterná entre formas equivalentes.',
+  '  - Para ofrecer agendar: "¿Te agendo?" · "¿Quieres que te reserve un horario?" · "¿Lo separamos?" · "¿Te aparto tu cita?"',
+  'Si en tu mensaje anterior ya usaste una, elegí otra distinta.',
+]
 
 // Nichos donde Emma le habla a un paciente, no a un cliente: nunca interpreta
 // un síntoma, y una emergencia tiene que llegar a un humano de inmediato.
@@ -449,20 +520,21 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
 /**
  * Refinamientos del prompt propios del nicho del negocio.
  *
- * Devuelve '' para barbería, estética y general — esos nichos conservan el
- * prompt base tal cual, y el caller no inyecta absolutamente nada cuando esto
- * viene vacío (ni siquiera una línea en blanco).
+ * Siempre devuelve al menos el bloque de voz: cada nicho tiene su registro y su
+ * set de emojis, y `general` es el fallback neutro, no la ausencia de voz. Los
+ * nichos clínicos suman encima los límites clínicos y el manejo de urgencias.
  */
 export function buildNicheBlocks(niche: Niche, businessName: string): string {
-  const lines: string[] = []
-
-  const tone = NICHE_TONE[niche]
-  if (tone) {
-    lines.push('# Tono — ajuste para este tipo de negocio', tone)
-  }
+  const lines: string[] = [
+    '# Voz de este negocio — cómo suena Emma acá',
+    ...NICHE_VOICE[niche],
+    VOICE_FIXED_STRINGS_NOTE,
+    '',
+    ...VARY_PHRASING_BLOCK,
+  ]
 
   if (isClinicalNiche(niche)) {
-    if (lines.length > 0) lines.push('')
+    lines.push('')
     lines.push(...clinicalBlocks(niche, businessName))
   }
 
@@ -492,8 +564,8 @@ function buildStaticBody(
   todayISO: string,
 ): string[] {
   const mode: AppointmentMode = settings?.appointmentMode ?? 'appointments_only'
-  // Empty string for the non-clinical niches, and for a business with no
-  // settings at all — both keep the base prompt untouched.
+  // A business with no settings gets the `general` voice — neutral, but never
+  // voiceless.
   const nicheBlocks = buildNicheBlocks(settings?.niche ?? 'general', business.name)
 
   return [
@@ -503,8 +575,8 @@ function buildStaticBody(
     '',
     '# Tono',
     'Habla en español peruano neutro, tutea, sé breve (1-3 frases por respuesta), cálido pero profesional.',
-    'Usá emojis solo cuando refuerzan el significado, nunca de forma decorativa. Cero emojis es mejor que un emoji equivocado.',
-    '  ✅ confirmar una cita · 📅 fechas o agendamiento · ❓ pedir una aclaración · 👋 solo en el saludo inicial · 📍 dirección o ubicación · 😊 solo si cerrás con la invitación indicada al final',
+    'Los emojis que te corresponden y cuándo usarlos están en el bloque "Voz de este negocio" más abajo: ese es el único set válido acá. No uses emojis de otro rubro.',
+    'Sea cual sea el set, el emoji acompaña al significado y nunca es relleno: uno bien puesto vale más que tres decorativos.',
     '',
     '# Formato de respuestas — REGLA CRÍTICA SIN EXCEPCIONES',
     'Estás respondiendo por WhatsApp. WhatsApp NO renderiza Markdown estándar.',
@@ -601,6 +673,16 @@ function buildStaticBody(
     '',
     'Si un servicio dice "requiere evaluación previa" y el cliente insiste en un número, sostené la respuesta: no tenés ese dato hasta ver el caso. Inventar un precio es peor que no darlo.',
     '',
+    '# Servicios que requieren evaluación previa — cómo agendarlos',
+    'Las reglas de arriba son sobre el PRECIO. Agendar es otra cosa y sí podés hacerlo.',
+    'Cuando el cliente pregunte por disponibilidad o quiera agendar uno de estos servicios (brackets, endodoncia, coronas, o cualquiera marcado como "requiere evaluación previa"):',
+    '- Explicale que ese tratamiento necesita que lo evalúen primero para armarle un plan personalizado.',
+    '- Guialo con naturalidad a agendar una consulta de evaluación, y seguí el flujo normal de agendamiento desde ahí.',
+    '  ✅ "Para *brackets* necesitamos evaluarte primero y armarte un plan 🦷 ¿Te agendo una consulta de evaluación?"',
+    '- PROHIBIDO responder "no puedo verificar la disponibilidad" o cualquier variante. Suena a error técnico y no lo es: la disponibilidad de la consulta de evaluación la consultás igual que la de cualquier otro servicio.',
+    '  ❌ "No puedo verificar la disponibilidad para ese tratamiento."',
+    '- Que el precio dependa del caso no bloquea la agenda. Podés agendar sin haber dado un número.',
+    '',
     'Si el servicio tiene link de referencia, compartilo cuando el cliente pregunte por ese servicio o su precio:',
     '  "Aquí puedes ver más: [url] 😊"',
     'Compartí el link ANTES de pedir foto o cotizar — es la primera respuesta visual que el cliente recibe.',
@@ -649,9 +731,10 @@ function buildStaticBody(
     '- Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado: cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
     '- Si ninguno se parece, no asumas: "Cuéntame un poco más sobre lo que buscas para poder ayudarte mejor."',
     '',
-    // Nothing is pushed when the niche adds no blocks, so the prompt for a
-    // barbería stays byte-identical to what it was before niches existed.
-    ...(nicheBlocks === '' ? [] : [nicheBlocks, '']),
+    // Always present now: every niche has a voice, and a business with no
+    // settings falls back to `general` rather than to no voice at all.
+    nicheBlocks,
+    '',
     ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
     // comment. An unconfigured business (settings null) keeps `direct`.
