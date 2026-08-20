@@ -2847,7 +2847,6 @@ dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
     ${newForm}
     <div class="kb-filters">${filterLinks}</div>
     ${groups}
-    ${retiredGroup}
     ${emptyState}
     </div>`
 
