@@ -193,9 +193,92 @@ function containsCallToAction(text: string): boolean {
   return [...CTA_VARIANTS, ...HYBRID_CTA_VARIANTS].some((variant) => text.includes(variant))
 }
 
+// Tools that mean the customer got what they came for. `check_availability` is
+// deliberately absent: browsing times is not the same as having an appointment.
+const BOOKING_COMPLETION_TOOLS = new Set(['book_appointment', 'confirm_pending_appointment'])
+
+function hasCompletedBooking(history: Message[]): boolean {
+  return history.some((m) => toolNamesIn(m).some((name) => BOOKING_COMPLETION_TOOLS.has(name)))
+}
+
+// Words that close a conversation. Split in two because most of them are
+// ambiguous on their own — "ok" and "dale" open just as many exchanges as they
+// end — so a farewell has to carry at least one word from the first set.
+const FAREWELL_WORDS = new Set([
+  'gracias',
+  'chau',
+  'chao',
+  'adios',
+  'bye',
+  'saludos',
+  'cuidate',
+  'igualmente',
+  'listo',
+  'lista',
+])
+
+const FAREWELL_FILLER = new Set([
+  'ok',
+  'oka',
+  'okey',
+  'okay',
+  'dale',
+  'perfecto',
+  'perfecta',
+  'genial',
+  'excelente',
+  'buenisimo',
+  'chevere',
+  'bacan',
+  'vale',
+  'bueno',
+  'muchas',
+  'mil',
+  'muy',
+  'amable',
+  'todo',
+  'bien',
+  'nos',
+  'vemos',
+  'hasta',
+  'luego',
+  'pronto',
+  'de',
+  'nada',
+  'y',
+  'ya',
+  'un',
+  'abrazo',
+  'tambien',
+])
+
+// Longer than this and it is not a sign-off, it is a message that happens to
+// start with "gracias".
+const FAREWELL_MAX_WORDS = 6
+
+/**
+ * Whether the customer is closing the conversation rather than continuing it.
+ *
+ * Requires EVERY word to be a known closer: "gracias, ¿y cuánto cuesta?" has to
+ * read as a question, not a goodbye.
+ */
+export function isFarewell(text: string): boolean {
+  const words = text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => w !== '')
+
+  if (words.length === 0 || words.length > FAREWELL_MAX_WORDS) return false
+  if (!words.some((w) => FAREWELL_WORDS.has(w))) return false
+  return words.every((w) => FAREWELL_WORDS.has(w) || FAREWELL_FILLER.has(w))
+}
+
 export type CallToActionDecision =
   | { include: true; text: string; reason: 'welcome' | 'stalled' }
-  | { include: false; reason: 'just_answered' | 'booking_flow' }
+  | { include: false; reason: 'just_answered' | 'booking_flow' | 'farewell' | 'booking_done' }
 
 /**
  * Decides whether this reply should end with an invitation.
@@ -217,6 +300,33 @@ export function decideCallToAction(
 
   if (isBookingFlowActive(history)) {
     return { include: false, reason: 'booking_flow' }
+  }
+
+  // A customer signing off is not a stalled conversation. Checked before the
+  // quiet-turn count because that count is exactly what used to fire here:
+  // during a booking Emma is told not to invite, so by the time the patient
+  // says "listo, gracias" several quiet turns have piled up and the stalled
+  // branch read them as an opening.
+  // Manual reverse scan: `findLast` needs lib es2023 and this tsconfig targets
+  // lower, which is not worth widening for one call.
+  let lastCustomerMessage: Message | undefined
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]
+    if (m && m.role === 'user') {
+      lastCustomerMessage = m
+      break
+    }
+  }
+  if (lastCustomerMessage && isFarewell(lastCustomerMessage.content)) {
+    return { include: false, reason: 'farewell' }
+  }
+
+  // Someone who already has an appointment does not need to be invited to make
+  // one. isBookingFlowActive only sees the last few messages, so the booking
+  // that just completed slides out of its window after a couple of replies —
+  // which is how a finished booking ended up looking like a stalled chat.
+  if (hasCompletedBooking(history)) {
+    return { include: false, reason: 'booking_done' }
   }
 
   // How many replies ago did we last invite? Counting from the end, the first
@@ -360,19 +470,23 @@ function renderDepositBlock(settings: BusinessSettings): string[] {
 const APPOINTMENTS_ONLY_AVAILABILITY_BLOCK = [
   '# Consultas de horario y disponibilidad',
   '- SIEMPRE llamá check_availability para el día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9:00 a 20:00").',
-  '- La herramienta te devuelve `availableBlocks`: tramos de tiempo corrido, cada uno con su frase lista en `range` y con todos sus horarios exactos en `slots`. Usalos en DOS PASOS, nunca los dos en el mismo mensaje.',
+  '- La herramienta te devuelve `availableBlocks`: tramos de tiempo corrido, cada uno con su frase lista en `range` y con todos sus horarios exactos en `slots`.',
+  '- Antes de responder, ubicá en cuál de estos tres casos estás. El orden importa: empezá por el ATAJO.',
   '',
-  'PASO 1 — primera vez que el cliente pregunta por disponibilidad:',
-  '  Presentá solo los TRAMOS, en lenguaje natural, y preguntale cuál le acomoda. NO listes horarios sueltos todavía.',
-  '  ✅ "Para mañana tengo disponible de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"',
-  '  ❌ "Tengo libre a las 8:00, 8:30, 9:00, 9:30, 10:00, 10:30..."  ← eso es el paso 2',
+  'ATAJO — el cliente dio una hora exacta ("a las 10", "10:30", "puede ser 3pm", "mañana a las 4"):',
+  '  No listes nada ni muestres tramos. Fijate si esa hora está en los `slots`.',
+  '  Si está, confirmá y avanzá al nombre. Si no está, decíselo y ofrecele el horario libre más cercano.',
+  '  ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?"',
+  '  ❌ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Cuál te acomoda?"  ← ya te dijo las 10',
   '',
   'PASO 2 — el cliente eligió un tramo o dio una preferencia ("en la mañana", "después de las 3", "temprano", "el segundo"):',
-  '  Recién ahí listá TODOS los horarios exactos de ese tramo. No recortes la lista ni ofrezcas solo dos.',
+  '  Listá TODOS los horarios exactos de ese tramo. No recortes la lista ni ofrezcas solo dos.',
   '  ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"',
   '',
-  'ATAJO — el cliente dio una hora exacta ("a las 10", "10:30", "puede ser 3pm"):',
-  '  No listes nada. Fijate si esa hora está en los `slots`. Si está, confirmá fecha + hora + servicio y agendá. Si no está, decíselo y ofrecele el horario libre más cercano de ese mismo tramo.',
+  'PASO 1 — el cliente preguntó por el día sin hora ni preferencia ("¿qué horarios tienes mañana?"):',
+  '  Solo acá presentás los TRAMOS, en lenguaje natural, y preguntás cuál le acomoda.',
+  '  ✅ "Para mañana tengo disponible de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"',
+  '  ❌ "Tengo libre a las 8:00, 8:30, 9:00, 9:30, 10:00, 10:30..."  ← eso es el paso 2',
   '',
   '- Si un tramo tiene un solo horario, decilo como hora puntual, no como rango.',
   '- Si `availableBlocks` viene vacío, no hay cupo ese día: decílo y ofrecé otra fecha.',
@@ -693,13 +807,32 @@ function buildStaticBody(
     '- NO uses book_appointment para una cita que ya existe como pendiente. Para esa está confirm_pending_appointment; book_appointment es solo para citas nuevas.',
     '- Si la tool te avisa que no hay ninguna cita pendiente, el "sí" del cliente era sobre otra cosa: seguí la conversación normal y no inventes una confirmación.',
     '',
-    '# Fluidez conversacional',
-    '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes", "esta semana"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
-    '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y mostrá los resultados, no repitas la pregunta.',
-    '- Si el cliente ya confirmó que quiere un servicio y da una fecha en el mismo mensaje, avanzá al paso siguiente sin preguntas redundantes.',
+    '# Fluidez conversacional — REGLAS ESTRICTAS',
+    'Lo que determina tu respuesta es CUÁNTO te dio el cliente. Ubicá el caso antes de contestar.',
+    '',
+    '1. El cliente pidió una HORA ESPECÍFICA ("¿tiene a las 10?", "¿para las 3pm?", "¿hay a las 11?"):',
+    '   Consultá disponibilidad y fijate si esa hora exacta está en los `slots`.',
+    '   - Si está libre: "Sí, tengo disponible a las 10:00am 😊 ¿A nombre de quién agendo la cita?"',
+    '   - Si está ocupada: "Lamentablemente las 10:00am ya está reservada. Tengo disponible a las 10:30am. ¿Te funciona?"',
+    '   - NUNCA muestres los rangos completos cuando el cliente ya te dio una hora específica.',
+    '',
+    '2. El cliente pidió un DÍA sin hora ("¿tiene para mañana?", "¿qué horarios tiene?"):',
+    '   Mostrá los tramos: "Para mañana tengo de 8:00am a 12:30pm y de 2:00pm a 5:00pm."',
+    '   Preguntale cuál le acomoda. Este es el ÚNICO caso donde presentás rangos.',
+    '',
+    '3. El cliente dio FECHA Y HORA juntas ("mañana a las 10", "el viernes a las 3pm"):',
+    '   Consultá esa hora exacta. Si está libre, avanzá al paso siguiente (el nombre) sin volver a preguntar la hora.',
+    '   NUNCA repitas la hora como pregunta si el cliente ya la eligió.',
+    '',
+    '4. NUNCA devuelvas como pregunta algo que el cliente ya te dijo.',
+    '   ❌ Cliente: "quiero a las 10am" → vos: "¿Te acomoda las 10:00am?"  ← ya te lo dijo',
+    '   ✅ Cliente: "quiero a las 10am" → vos: "¡Perfecto! ¿A nombre de quién agendo la cita?"',
+    '   ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día te gustaría?"  ← ya te dijo mañana',
+    '   ✅ Cliente: "¿tiene mañana a las 10?" → vos: "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo?"',
+    '',
+    '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
+    '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y respondé, no repitas la pregunta.',
     '- REGLA GENERAL: nunca preguntes algo que el cliente ya respondió en este mensaje o en los últimos 2 mensajes.',
-    '  ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día y hora te gustaría?"  ← ya te dijo mañana',
-    '  ✅ Cliente: "¿para mañana tienes horarios?" → llamá check_availability para mañana y presentá los tramos disponibles.',
     '',
     // NOTE: "# Conocimiento del negocio" used to sit right here. It was moved to
     // the very end of this body — see the comment at the bottom of the array.

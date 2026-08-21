@@ -136,10 +136,17 @@ interface AvailabilityBlock {
   slots: string[]
 }
 
+// Order matters more than wording here. This is the LAST thing the model reads
+// before composing, and it used to open with the unconditional "show the ranges
+// and ask which one suits you" — so a patient who had already said "a las 10"
+// got the whole day dumped back at them with a question attached. The condition
+// now comes first: decide which case you are in, THEN follow that branch.
 const AVAILABILITY_INSTRUCTION =
-  'NO listes los horarios de `slots` todavía. Respondé con los `range` de cada tramo en lenguaje natural ("Tengo disponible de 8:00am a 12:30pm y de 2:00pm a 5:00pm") y preguntá cuál le acomoda. ' +
-  'Listá los horarios exactos de un tramo SOLO cuando el cliente ya eligió ese tramo o dio una preferencia ("en la mañana", "después de las 3"). ' +
-  'Si el cliente pidió una hora puntual ("¿tienes a las 4?"), NO listes nada ni repitas la lista: fijate si esa hora está en `slots`, decile sí o no, y si está, confirmá y agendá.'
+  'PRIMERO decidí en qué caso estás. ' +
+  'CASO A — el cliente ya pidió una hora puntual ("¿tienes a las 4?", "mañana a las 10"): NO listes nada ni muestres rangos. Fijate si esa hora está en `slots`, decile sí o no, y si está, confirmá y avanzá al nombre. ' +
+  'CASO B — el cliente ya eligió un tramo o dio una preferencia ("en la mañana", "después de las 3"): listá los horarios exactos de ESE tramo. ' +
+  'CASO C — el cliente solo preguntó por el día, sin hora ni preferencia: recién ahí respondé con los `range` de cada tramo en lenguaje natural ("Tengo disponible de 8:00am a 12:30pm y de 2:00pm a 5:00pm") y preguntá cuál le acomoda. ' +
+  'Los rangos son SOLO para el caso C. En A y B mostrarlos es devolverle al cliente una pregunta que ya respondió.'
 
 // ── Horarios de hoy que ya pasaron ───────────────────────────────────────────
 //
