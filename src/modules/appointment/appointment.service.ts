@@ -781,7 +781,10 @@ async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
   const customer = await customerRepo.findById(params.businessId, conv.customerId)
   if (!customer) return
 
-  const who = customer.name?.trim()
+  // `?.trim()` alone yields undefined for a nameless customer, which the
+  // template below rendered literally as "Cliente: undefined". Escalations fire
+  // for people who never booked, so a missing name is normal here — say so.
+  const who = formatPersonName(customer.name) ?? '(sin nombre)'
   const phone = customer.phone ? `(${customer.phone})` : null
   const text = [
     '🔔 *Escalación pendiente*',

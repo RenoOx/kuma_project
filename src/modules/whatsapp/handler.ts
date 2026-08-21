@@ -25,6 +25,7 @@ import {
 } from '@/modules/whatsapp/messageKind.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
 const LLM_FALLBACK_REPLY =
@@ -649,7 +650,9 @@ async function processMessage(
 
     // Fire-and-forget owner notification so the dueño knows someone wrote
     // during the pause window. Failures are warn-logged inside notifyOwner.
-    const who = customer.name?.trim() || ''
+    // A nameless customer used to collapse this into "Cliente  - (+51...)",
+    // which reads as if the name were the literal word "Cliente".
+    const who = formatPersonName(customer.name) ?? '(sin nombre)'
     const phoneWho = phone
     const pausedText = [
       '⏸️ *Mensaje durante pausa*',
