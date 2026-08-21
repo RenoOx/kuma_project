@@ -56,6 +56,8 @@ const BARBERIA: DemoProfile = {
     niche: 'barberia',
     bookingMode: 'direct',
     forwardImages: false,
+    requiresDeposit: false,
+    depositPaymentMethods: [],
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 15,
     services: [
@@ -117,6 +119,9 @@ const CONSULTORIO: DemoProfile = {
     niche: 'dental',
     bookingMode: 'requires_approval',
     forwardImages: true,
+    requiresDeposit: true,
+    depositAmount: 'S/ 20',
+    depositPaymentMethods: [{ method: 'yape', number: '987654321', label: 'Dr. Pérez' }],
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
@@ -165,12 +170,6 @@ const CONSULTORIO: DemoProfile = {
     },
     {
       category: 'politicas',
-      title: 'Formas de pago',
-      content:
-        'Aceptamos pagos en efectivo, Yape y Plin. Para tratamientos que requieren adelanto, te indicaremos el monto y a dónde transferir. Mándanos la captura del pago para confirmar tu cita.',
-    },
-    {
-      category: 'politicas',
       title: 'Primera visita',
       content:
         'En tu primera cita el doctor hace una evaluación general, que puede incluir una radiografía si es necesario. Trae tu DNI. Si tomas algún medicamento o tienes alguna condición de salud, avísanos antes del tratamiento.',
@@ -208,6 +207,8 @@ const SPA: DemoProfile = {
     niche: 'estetica',
     bookingMode: 'direct',
     forwardImages: false,
+    requiresDeposit: false,
+    depositPaymentMethods: [],
     appointmentMode: 'appointments_only',
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,

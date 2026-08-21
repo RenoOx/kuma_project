@@ -18,6 +18,9 @@ import {
   type BusinessSettings,
   businessSettingsSchema,
   type DayKey,
+  DEPOSIT_METHOD_LABELS,
+  DEPOSIT_METHODS,
+  type DepositPaymentMethod,
   NICHE_LABELS,
   type Niche,
   type Service,
@@ -319,6 +322,32 @@ function renderServiceRows(services: Service[]): string {
   return services.map((s, i) => renderServiceRow(i, s)).join('')
 }
 
+// One payment method row. The number field is hidden for 'efectivo' — there is
+// no number to type — but kept in the DOM so switching back restores the value.
+function renderDepositMethodRow(i: number, m?: DepositPaymentMethod): string {
+  const method = m?.method ?? 'yape'
+  const number = m?.number ?? ''
+  const label = m?.label ?? ''
+  const options = DEPOSIT_METHODS.map(
+    (v) => `<option value="${v}" ${method === v ? 'selected' : ''}>${esc(DEPOSIT_METHOD_LABELS[v])}</option>`,
+  ).join('')
+
+  return `<div class="service-row deposit-row" id="deposit-row-${i}">
+    <select class="form-input form-select" name="deposit_method_${i}_method" data-field="method"
+      style="width:150px" onchange="toggleDepositNumber(this)">${options}</select>
+    <input type="text" class="form-input" name="deposit_method_${i}_number" data-field="number"
+      value="${esc(number)}" placeholder="ej. 987654321" style="width:160px"
+      ${method === 'efectivo' ? 'hidden' : ''}>
+    <input type="text" class="form-input" name="deposit_method_${i}_label" data-field="label"
+      value="${esc(label)}" placeholder="Nombre de referencia (ej. Dr. Pérez)" style="flex:1">
+    <button type="button" class="btn btn-ghost btn-sm" onclick="removeDepositMethod(this)">✕</button>
+  </div>`
+}
+
+function renderDepositMethodRows(methods: DepositPaymentMethod[]): string {
+  return methods.map((m, i) => renderDepositMethodRow(i, m)).join('')
+}
+
 type SpecialDayRow = { date: string; label?: string; hours: DayHours }
 
 function renderSpecialDayRow(i: number, s?: SpecialDayRow): string {
@@ -473,10 +502,31 @@ async function parseSettingsFromForm(
   // the value. No fallback needed: absent means false, which is the default.
   const forwardImages = formData.get('forwardImages')?.toString() === 'on'
 
+  const requiresDeposit = formData.get('requiresDeposit')?.toString() === 'on'
+  const depositAmount = optionalStringField(formData, 'depositAmount')
+  const methodCount = Number(formData.get('deposit_method_count') ?? 0)
+  const depositPaymentMethods: DepositPaymentMethod[] = []
+  for (let i = 0; i < methodCount; i++) {
+    const method = formData.get(`deposit_method_${i}_method`)?.toString()
+    // A row whose method never made it through is a row the owner removed or a
+    // malformed post — skipped rather than failing the whole save.
+    if (!method || !DEPOSIT_METHODS.includes(method as DepositPaymentMethod['method'])) continue
+    const number = optionalStringField(formData, `deposit_method_${i}_number`)
+    const label = optionalStringField(formData, `deposit_method_${i}_label`)
+    depositPaymentMethods.push({
+      method: method as DepositPaymentMethod['method'],
+      ...(number ? { number } : {}),
+      ...(label ? { label } : {}),
+    })
+  }
+
   const raw = {
     niche,
     bookingMode,
     forwardImages,
+    requiresDeposit,
+    depositPaymentMethods,
+    ...(depositAmount ? { depositAmount } : {}),
     operatingHours,
     slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
     services,
@@ -1515,8 +1565,14 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   const niche: Niche = raw?.niche ?? 'general'
   const bookingMode: BookingMode = raw?.bookingMode ?? 'direct'
   const forwardImages: boolean = raw?.forwardImages ?? false
+  const requiresDeposit: boolean = raw?.requiresDeposit ?? false
+  const depositAmount: string = raw?.depositAmount ?? ''
+  const depositMethods: DepositPaymentMethod[] = Array.isArray(raw?.depositPaymentMethods)
+    ? (raw.depositPaymentMethods as DepositPaymentMethod[])
+    : []
   const initialServiceCount = Math.max(services.length, 1)
   const initialSpecialDayCount = specialDays.length
+  const initialDepositMethodCount = depositMethods.length
 
   const hoursRows = DAYS.map(({ key, label }) =>
     renderDayRow(key, label, effectiveHours[key]),
@@ -1542,6 +1598,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         <a class="config-nav-item" data-section="seccion-horarios" href="#seccion-horarios">Horarios</a>
         <a class="config-nav-item" data-section="seccion-servicios" href="#seccion-servicios">Servicios</a>
         <a class="config-nav-item" data-section="seccion-citas" href="#seccion-citas">Citas y turnos</a>
+        <a class="config-nav-item" data-section="seccion-pagos" href="#seccion-pagos">Pagos</a>
         <a class="config-nav-item" data-section="seccion-conocimiento" href="#seccion-conocimiento">Conocimiento</a>
         <a class="config-nav-item" data-section="seccion-google" href="#seccion-google">Google Calendar</a>
         <a class="config-nav-item" data-section="seccion-peligro" href="#seccion-peligro">Zona de peligro</a>
@@ -1778,6 +1835,51 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           </div>
         </section>
 
+        <section id="seccion-pagos" class="config-section">
+          <div class="section-header">
+            <h2 class="section-title">Pagos</h2>
+            <p class="section-desc">
+              Si pedís adelanto, Emma no agenda hasta recibir la captura del pago.
+            </p>
+          </div>
+          <div class="subsection">
+            <label class="check-field" for="requiresDeposit">
+              <input type="checkbox" id="requiresDeposit" name="requiresDeposit"
+                ${requiresDeposit ? 'checked' : ''} onchange="toggleDeposit()">
+              ¿Requiere adelanto para confirmar cita?
+            </label>
+            <p class="form-hint">
+              Con esto activo, Emma le pide la captura al cliente antes de agendar y te
+              reenvía la imagen aunque el reenvío de imágenes esté desactivado.
+            </p>
+          </div>
+          <div id="deposit-fields" ${requiresDeposit ? '' : 'hidden'}>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="depositAmount">Monto del adelanto</label>
+                <input id="depositAmount" name="depositAmount" type="text" class="form-input"
+                  value="${esc(depositAmount)}" placeholder="ej. S/ 20">
+                <p class="form-hint">Texto libre: "S/ 20", "el 50%", "S/ 20 por persona"</p>
+              </div>
+            </div>
+            <div class="svc-head">
+              <span style="width:150px">Método</span>
+              <span style="width:160px">Número</span>
+              <span style="flex:1">Nombre de referencia</span>
+              <span style="width:32px"></span>
+            </div>
+            <div id="deposit-methods-container">
+              ${renderDepositMethodRows(depositMethods)}
+            </div>
+            <input type="hidden" name="deposit_method_count" id="deposit_method_count"
+              value="${initialDepositMethodCount}">
+            <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem"
+              onclick="addDepositMethod()">
+              + Agregar método de pago
+            </button>
+          </div>
+        </section>
+
       </form>
 
       <section id="seccion-conocimiento" class="config-section">
@@ -1951,6 +2053,58 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       });
       _svcCounter = rows.length;
       document.getElementById('service_count').value = _svcCounter;
+    }
+
+    let _depositCounter = ${initialDepositMethodCount};
+
+    function toggleDeposit() {
+      const on = document.getElementById('requiresDeposit').checked;
+      document.getElementById('deposit-fields').hidden = !on;
+    }
+
+    // 'efectivo' has no number to type. Hidden rather than removed so switching
+    // back to Yape restores whatever was already there.
+    function toggleDepositNumber(select) {
+      const row = select.closest('.deposit-row');
+      const number = row.querySelector('[data-field="number"]');
+      if (number) number.hidden = select.value === 'efectivo';
+    }
+
+    function addDepositMethod() {
+      const idx = _depositCounter++;
+      const row = document.createElement('div');
+      row.className = 'service-row deposit-row';
+      row.id = 'deposit-row-' + idx;
+      row.innerHTML =
+        '<select class="form-input form-select" name="deposit_method_' + idx + '_method"' +
+        ' data-field="method" style="width:150px" onchange="toggleDepositNumber(this)">' +
+        ${jsonForScript(
+          DEPOSIT_METHODS.map((v) => `<option value="${v}">${DEPOSIT_METHOD_LABELS[v]}</option>`).join(''),
+        )} +
+        '</select>' +
+        '<input type="text" class="form-input" name="deposit_method_' + idx + '_number"' +
+        ' data-field="number" placeholder="ej. 987654321" style="width:160px">' +
+        '<input type="text" class="form-input" name="deposit_method_' + idx + '_label"' +
+        ' data-field="label" placeholder="Nombre de referencia (ej. Dr. Pérez)" style="flex:1">' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeDepositMethod(this)">✕</button>';
+      document.getElementById('deposit-methods-container').appendChild(row);
+      document.getElementById('deposit_method_count').value = _depositCounter;
+    }
+
+    function removeDepositMethod(btn) {
+      btn.closest('.deposit-row').remove();
+      reindexDepositMethods();
+    }
+
+    function reindexDepositMethods() {
+      const rows = document.querySelectorAll('#deposit-methods-container .deposit-row');
+      rows.forEach(function(row, i) {
+        row.querySelector('[data-field="method"]').name = 'deposit_method_' + i + '_method';
+        row.querySelector('[data-field="number"]').name = 'deposit_method_' + i + '_number';
+        row.querySelector('[data-field="label"]').name = 'deposit_method_' + i + '_label';
+      });
+      _depositCounter = rows.length;
+      document.getElementById('deposit_method_count').value = _depositCounter;
     }
 
     let _specialCounter = ${initialSpecialDayCount};

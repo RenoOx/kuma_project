@@ -2,6 +2,10 @@ import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
+import {
+  type DepositPaymentMethod,
+  formatPaymentMethods,
+} from '@/modules/business/business.settings.js'
 import { expectImage } from '@/modules/whatsapp/imageExpectation.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
@@ -92,6 +96,23 @@ const MISSING_NAME_INSTRUCTION =
 // which "💕", "-", "." and "?" do not.
 function isUsableName(raw: string): boolean {
   return (raw.match(/\p{L}/gu) ?? []).length >= 2
+}
+
+// What the model reads when the deposit gate refuses. It carries the amount and
+// the payment details inline so the model can relay them without going back to
+// the knowledge base, which is no longer the source for this.
+function depositRequiredInstruction(
+  amount: string | undefined,
+  methods: DepositPaymentMethod[],
+): string {
+  const monto = amount?.trim() ? `de ${amount.trim()}` : 'previo'
+  return [
+    `Este negocio pide un adelanto ${monto} para confirmar la cita, y todavía no llegó ninguna captura de pago.`,
+    `NO agendaste nada. Decile al cliente cuánto es el adelanto y cómo pagarlo: ${formatPaymentMethods(methods)}.`,
+    'Después llamá request_image con purpose "payment" y pedile la captura.',
+    'No vuelvas a llamar book_appointment hasta que el cliente haya mandado la imagen.',
+    'NO le digas que su cita ya quedó agendada ni que la solicitud fue enviada: todavía no lo está.',
+  ].join(' ')
 }
 
 const UNKNOWN_SERVICE_INSTRUCTION =
@@ -303,6 +324,32 @@ export async function executeTool(
             instruction: MISSING_NAME_INSTRUCTION,
           }),
           error: 'missing_customer_name',
+        }
+      }
+
+      // The deposit gate. Enforced HERE and not in the prompt because the
+      // prompt version did not hold: Emma asked for the capture and filed the
+      // booking anyway, and the owner confirmed an appointment nobody paid for.
+      //
+      // A settings read failure leaves the gate OPEN on purpose: refusing every
+      // booking because the settings lookup blipped is the worse failure.
+      const settingsForDeposit = await businessService.getSettings(context.businessId)
+      if (settingsForDeposit.ok && settingsForDeposit.data.requiresDeposit) {
+        const paid = await appointmentService.hasRecentPaymentEvidence(
+          context.businessId,
+          context.conversationId,
+        )
+        if (!paid) {
+          const { depositAmount, depositPaymentMethods } = settingsForDeposit.data
+          return {
+            result: JSON.stringify({
+              error: 'deposit_required',
+              deposit_amount: depositAmount ?? null,
+              payment_methods: formatPaymentMethods(depositPaymentMethods),
+              instruction: depositRequiredInstruction(depositAmount, depositPaymentMethods),
+            }),
+            error: 'deposit_required',
+          }
         }
       }
 

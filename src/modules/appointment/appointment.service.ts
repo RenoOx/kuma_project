@@ -63,6 +63,27 @@ function normalizeServiceName(s: string): string {
 // wrecks the layout.
 const MAX_CUSTOMER_NAME_LENGTH = 80
 
+// How far back a photo still counts as "they just paid". Same window as the
+// image expectation TTL: long enough to switch to the bank app and back, short
+// enough that yesterday's photo does not unlock today's booking.
+export const PAYMENT_EVIDENCE_WINDOW_MS = 30 * 60 * 1000
+
+/**
+ * Whether this conversation shows a recent sign that the customer sent a
+ * payment capture.
+ *
+ * Deliberately NOT a validation of the payment: Emma cannot see the image, so
+ * any recent photo counts. The owner is the one who looks at it and decides.
+ * The gate exists to stop Emma from filing a booking with no evidence at all.
+ */
+export async function hasRecentPaymentEvidence(
+  businessId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const since = new Date(Date.now() - PAYMENT_EVIDENCE_WINDOW_MS)
+  return eventsRepo.existsSince(businessId, conversationId, 'customer_image_received', since)
+}
+
 function normalizeCustomerName(raw: string | undefined): string | null {
   if (!raw) return null
   const cleaned = raw.trim().replace(/\s+/g, ' ').slice(0, MAX_CUSTOMER_NAME_LENGTH)

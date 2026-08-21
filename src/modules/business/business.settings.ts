@@ -151,10 +151,35 @@ export const BOOKING_MODE_LABELS: Record<z.infer<typeof bookingModeSchema>, stri
 // already happened.
 const forwardImagesSchema = z.boolean().default(false)
 
+// Deposit ("adelanto") a customer pays to hold their slot. When required, Emma
+// refuses to file the booking until the customer has sent a photo — enforced in
+// the tool executor, not in the prompt, because the prompt alone did not hold.
+//
+// `depositAmount` is free text on purpose: "S/ 20", "el 50%" and "S/ 20 por
+// persona" are all things owners actually say, and parsing them into a number
+// would only force a shape the business does not have.
+export const DEPOSIT_METHODS = ['yape', 'plin', 'transferencia', 'efectivo'] as const
+
+export const DEPOSIT_METHOD_LABELS: Record<(typeof DEPOSIT_METHODS)[number], string> = {
+  yape: 'Yape',
+  plin: 'Plin',
+  transferencia: 'Transferencia',
+  efectivo: 'Efectivo',
+}
+
+const depositPaymentMethodSchema = z.object({
+  method: z.enum(DEPOSIT_METHODS),
+  number: z.string().optional(),
+  label: z.string().optional(),
+})
+
 export const businessSettingsSchema = z.object({
   niche: nicheSchema,
   bookingMode: bookingModeSchema,
   forwardImages: forwardImagesSchema,
+  requiresDeposit: z.boolean().default(false),
+  depositAmount: z.string().optional(),
+  depositPaymentMethods: z.array(depositPaymentMethodSchema).default([]),
   operatingHours: operatingHoursSchema,
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
@@ -181,7 +206,31 @@ export type AppointmentMode = z.infer<typeof appointmentModeSchema>
 export type Niche = z.infer<typeof nicheSchema>
 export type BookingMode = z.infer<typeof bookingModeSchema>
 export type ForwardImages = z.infer<typeof forwardImagesSchema>
+export type DepositPaymentMethod = z.infer<typeof depositPaymentMethodSchema>
 export type DayKey = keyof BusinessSettings['operatingHours']
+
+// A business that charges a deposit has to SEE the capture, otherwise it is
+// taking the customer's word for it — the exact hole the deposit gate exists to
+// close. So requiring a deposit implies forwarding, whatever the toggle says.
+// Read forwarding through here; never `settings.forwardImages` directly.
+export function shouldForwardImages(settings: BusinessSettings): boolean {
+  return settings.forwardImages || settings.requiresDeposit
+}
+
+// Renders the payment methods as one line, for the prompt and for the refusal
+// the model reads when the deposit gate blocks a booking.
+export function formatPaymentMethods(methods: DepositPaymentMethod[]): string {
+  if (methods.length === 0) return 'no hay formas de pago configuradas'
+  return methods
+    .map((m) => {
+      const name = DEPOSIT_METHOD_LABELS[m.method]
+      const number = m.number?.trim()
+      const label = m.label?.trim()
+      const detail = [number, label ? `(${label})` : null].filter(Boolean).join(' ')
+      return detail ? `${name}: ${detail}` : name
+    })
+    .join(' · ')
+}
 
 // Default lead time when the business hasn't set its own value.
 export const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 30

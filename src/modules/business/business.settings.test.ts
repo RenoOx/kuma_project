@@ -11,6 +11,8 @@ const BASE_SETTINGS: BusinessSettings = {
   niche: 'general',
   bookingMode: 'direct',
   forwardImages: false,
+  requiresDeposit: false,
+  depositPaymentMethods: [],
   appointmentMode: 'appointments_only',
   operatingHours: {
     monday: { open: '09:00', close: '19:00' },

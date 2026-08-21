@@ -8,7 +8,7 @@ import type {
   DayKey,
   Niche,
 } from '@/modules/business/business.settings.js'
-import { formatServicePrice } from '@/modules/business/business.settings.js'
+import { formatPaymentMethods, formatServicePrice } from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
@@ -329,7 +329,25 @@ function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): st
     renderSpecialDays(settings.specialDays, todayISO),
     '',
     `## Duración del slot por defecto: ${settings.slotDurationMinutes} minutos`,
+    ...renderDepositBlock(settings),
   ].join('\n')
+}
+
+// Lives with the operational config, NOT in the variable tail: the deposit is a
+// per-business fact that does not change between messages, so keeping it here
+// leaves it inside the cacheable prefix.
+function renderDepositBlock(settings: BusinessSettings): string[] {
+  if (!settings.requiresDeposit) return []
+  const amount = settings.depositAmount?.trim()
+  return [
+    '',
+    '## Adelanto para reservar',
+    amount
+      ? `Este negocio pide un adelanto de ${amount} para confirmar la cita.`
+      : 'Este negocio pide un adelanto para confirmar la cita.',
+    `Formas de pago: ${formatPaymentMethods(settings.depositPaymentMethods)}`,
+    'Esta es la ÚNICA fuente válida del adelanto. No la busques en el conocimiento del negocio.',
+  ]
 }
 
 // ── Availability block, one per appointment mode ─────────────────────────────
@@ -506,7 +524,8 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     `Mensaje al cliente antes de escalar: "Entiendo que es urgente. Voy a comunicarme con ${businessName} para que te atiendan lo antes posible."`,
     '',
     '# Pagos y comprobantes',
-    'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la información de formas de pago de tu conocimiento del negocio. Si no la tenés, decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias.',
+    'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la sección "Adelanto para reservar" de la configuración de arriba. Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
+    'Cuando el negocio pide adelanto, la captura del pago va ANTES de agendar. Si intentás agendar sin ella, la herramienta te lo va a rechazar y la cita NO se crea.',
     'Si el cliente dice que ya pagó, o que va a mandar el voucher, la captura o el comprobante:',
     '  1. Llamá request_image con purpose "payment".',
     '  2. Recién después pedile la captura con naturalidad: "Perfecto, ¿me mandas la captura del pago? 😊"',
@@ -636,7 +655,7 @@ function buildStaticBody(
     '  NUNCA saltes este paso. NUNCA uses el nombre de WhatsApp. Esperá a que el cliente te lo diga.',
     '',
     'PASO 4 — Adelanto (solo si el negocio lo pide)',
-    '  Fijate en tu conocimiento del negocio si hay una política de pago con adelanto o seña.',
+    '  Fijate si arriba aparece la sección "Adelanto para reservar". Si no aparece, este negocio NO pide adelanto.',
     '  Si SÍ requiere adelanto:',
     '    a. Decile el monto y cómo pagar, con los datos que figuren ahí: "Para confirmar tu cita necesitas un adelanto de [monto]. Puedes pagar por [método] al [número]. Mándame la captura cuando pagues 😊".',
     '    b. NO llames book_appointment todavía.',
@@ -792,7 +811,7 @@ function buildStaticBody(
     // whole prompt. Last position keeps ~3.7k tokens cacheable instead.
     '# Conocimiento del negocio',
     'Cubre políticas, preguntas frecuentes y promociones. NO es fuente de servicios, precios, horarios, dirección ni datos de contacto: para todo eso mandan los bloques de configuración de arriba, aunque acá abajo leas algo distinto.',
-    'ÚNICA EXCEPCIÓN — el adelanto: si acá figura una política de pago con adelanto o seña (monto, método, número de Yape/Plin), ESA es la fuente válida y la usás tal cual en el PASO 4 del flujo de reserva. El adelanto no es el precio del servicio: son dos montos distintos y nunca se reemplazan entre sí.',
+    'El adelanto tampoco sale de acá: si el negocio pide uno, está en "Adelanto para reservar" arriba. Si acá abajo aparece una forma de pago vieja que contradice esa sección, ignorala.',
     renderKnowledgeBase(knowledgeBase),
   ]
 }

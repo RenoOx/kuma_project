@@ -25,6 +25,7 @@ import {
 } from '@/modules/whatsapp/messageKind.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import { shouldForwardImages } from '@/modules/business/business.settings.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
@@ -263,7 +264,22 @@ async function handleCustomerImage(params: {
   const purpose = consumeImageExpectation(conversationId)
 
   const settingsResult = await businessService.getSettings(businessId)
-  const forwardImages = settingsResult.ok ? settingsResult.data.forwardImages : false
+  const forwardImages = settingsResult.ok ? shouldForwardImages(settingsResult.data) : false
+  const requiresDeposit = settingsResult.ok ? settingsResult.data.requiresDeposit : false
+
+  // The deposit gate in the tool executor reads this back: it is the only
+  // persisted trace that a photo ever arrived. Recorded BEFORE the forward so a
+  // failed relay cannot swallow the evidence and leave the customer stuck.
+  try {
+    await eventsRepo.create({
+      businessId,
+      conversationId,
+      type: 'customer_image_received',
+      payload: { purpose, hasCaption: caption !== null },
+    })
+  } catch (err) {
+    log.error({ err }, 'failed to record customer_image_received event')
+  }
 
   const pendingAppointment = await appointmentRepo.findPendingByCustomer(businessId, customer.id)
 
@@ -271,7 +287,12 @@ async function handleCustomerImage(params: {
   // without being asked: that photo is almost always the payment that unblocks
   // their appointment, and unlike the expectation above this signal survives a
   // deploy because it lives in the database.
-  const wanted = purpose !== null || pendingAppointment !== null
+  //
+  // `requiresDeposit` joins them for a reason the other two cannot cover: under
+  // the deposit gate there IS no pending appointment yet — the booking is
+  // blocked precisely until this photo lands — so without this the capture that
+  // unblocks it would be the one photo nobody forwards.
+  const wanted = purpose !== null || pendingAppointment !== null || requiresDeposit
 
   let forwarded = false
   if (forwardImages && wanted && business.ownerWhatsappNumber) {
