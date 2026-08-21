@@ -14,8 +14,29 @@
 
 export type ImagePurpose = 'payment' | 'reference'
 
-interface Expectation {
+/**
+ * The booking the customer is paying for, carried from the deposit gate.
+ *
+ * Needed because under that gate the appointment does NOT exist yet — it is
+ * blocked precisely until this photo lands — so `findPendingByCustomer` finds
+ * nothing and the owner would otherwise get a payment capture with no idea
+ * which appointment it belongs to.
+ */
+export interface PaymentContext {
+  service: string
+  /** ISO instant the customer asked for, as the model sent it. */
+  scheduledAtISO: string
+  /** Free-text deposit, e.g. "S/ 20". Null when the business set no amount. */
+  amount: string | null
+}
+
+export interface ImageExpectation {
   purpose: ImagePurpose
+  /** Set only by the deposit gate; null for plain request_image calls. */
+  payment: PaymentContext | null
+}
+
+interface Expectation extends ImageExpectation {
   expiresAt: number
 }
 
@@ -26,9 +47,14 @@ export const IMAGE_EXPECTATION_TTL_MS = 30 * 60 * 1000
 
 const expectations = new Map<string, Expectation>()
 
-export function expectImage(conversationId: string, purpose: ImagePurpose): void {
+export function expectImage(
+  conversationId: string,
+  purpose: ImagePurpose,
+  payment: PaymentContext | null = null,
+): void {
   expectations.set(conversationId, {
     purpose,
+    payment,
     expiresAt: Date.now() + IMAGE_EXPECTATION_TTL_MS,
   })
 }
@@ -39,11 +65,12 @@ export function expectImage(conversationId: string, purpose: ImagePurpose): void
  * Without the clear, a single "send me the capture" would relay every photo for
  * the next half hour.
  */
-export function consumeImageExpectation(conversationId: string): ImagePurpose | null {
+export function consumeImageExpectation(conversationId: string): ImageExpectation | null {
   const found = expectations.get(conversationId)
   if (!found) return null
   expectations.delete(conversationId)
-  return found.expiresAt > Date.now() ? found.purpose : null
+  if (found.expiresAt <= Date.now()) return null
+  return { purpose: found.purpose, payment: found.payment }
 }
 
 export function _resetImageExpectationsForTests(): void {

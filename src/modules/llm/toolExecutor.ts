@@ -341,6 +341,15 @@ export async function executeTool(
         )
         if (!paid) {
           const { depositAmount, depositPaymentMethods } = settingsForDeposit.data
+          // Armed HERE rather than left to the model calling request_image: the
+          // instruction below asks it to, but relying on that is the same bet
+          // this gate exists to stop making. The booking the customer is paying
+          // for rides along, because it does not exist in the database yet.
+          expectImage(context.conversationId, 'payment', {
+            service: parsed.data.service,
+            scheduledAtISO: parsed.data.datetime_iso,
+            amount: depositAmount?.trim() || null,
+          })
           return {
             result: JSON.stringify({
               error: 'deposit_required',

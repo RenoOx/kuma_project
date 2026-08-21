@@ -171,6 +171,11 @@ export const IMAGE_RECEIVED_REPLY =
 // when the customer asks for a person, which escalate_to_human already covers.
 export const IMAGE_FORWARDED_REPLY = '¡Recibí tu imagen! Dame un momentito y te confirmo 😊'
 
+// Payment captures earn their own line: "te confirmo" alone leaves the customer
+// unsure whether the thing being confirmed is the payment or the appointment.
+// Names nobody, for the same reason as the two above.
+export const PAYMENT_IMAGE_REPLY = '¡Recibí tu captura! Dame un momentito y te confirmo tu cita 😊'
+
 export function replyForFormat(
   _format: UnsupportedFormat,
   randomFn: () => number = Math.random,

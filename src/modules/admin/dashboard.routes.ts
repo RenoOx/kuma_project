@@ -329,7 +329,8 @@ function renderDepositMethodRow(i: number, m?: DepositPaymentMethod): string {
   const number = m?.number ?? ''
   const label = m?.label ?? ''
   const options = DEPOSIT_METHODS.map(
-    (v) => `<option value="${v}" ${method === v ? 'selected' : ''}>${esc(DEPOSIT_METHOD_LABELS[v])}</option>`,
+    (v) =>
+      `<option value="${v}" ${method === v ? 'selected' : ''}>${esc(DEPOSIT_METHOD_LABELS[v])}</option>`,
   ).join('')
 
   return `<div class="service-row deposit-row" id="deposit-row-${i}">
@@ -2079,7 +2080,9 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
         '<select class="form-input form-select" name="deposit_method_' + idx + '_method"' +
         ' data-field="method" style="width:150px" onchange="toggleDepositNumber(this)">' +
         ${jsonForScript(
-          DEPOSIT_METHODS.map((v) => `<option value="${v}">${DEPOSIT_METHOD_LABELS[v]}</option>`).join(''),
+          DEPOSIT_METHODS.map(
+            (v) => `<option value="${v}">${DEPOSIT_METHOD_LABELS[v]}</option>`,
+          ).join(''),
         )} +
         '</select>' +
         '<input type="text" class="form-input" name="deposit_method_' + idx + '_number"' +

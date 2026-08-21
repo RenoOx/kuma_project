@@ -4,6 +4,7 @@ import { logger } from '@/config/logger.js'
 import type { Business, Customer } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
+import { shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
@@ -12,7 +13,11 @@ import * as llmService from '@/modules/llm/llm.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
-import { consumeImageExpectation, type ImagePurpose } from '@/modules/whatsapp/imageExpectation.js'
+import {
+  consumeImageExpectation,
+  type ImagePurpose,
+  type PaymentContext,
+} from '@/modules/whatsapp/imageExpectation.js'
 import * as mediaForwarder from '@/modules/whatsapp/mediaForwarder.js'
 import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
@@ -20,12 +25,12 @@ import {
   describeFormat,
   IMAGE_FORWARDED_REPLY,
   IMAGE_RECEIVED_REPLY,
+  PAYMENT_IMAGE_REPLY,
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import { shouldForwardImages } from '@/modules/business/business.settings.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
@@ -261,7 +266,9 @@ async function handleCustomerImage(params: {
 
   // Consumed unconditionally: one request buys one forward, whether or not the
   // rest of the path succeeds. Leaving it armed would relay the next photo too.
-  const purpose = consumeImageExpectation(conversationId)
+  const expectation = consumeImageExpectation(conversationId)
+  const purpose = expectation?.purpose ?? null
+  const payment = expectation?.payment ?? null
 
   const settingsResult = await businessService.getSettings(businessId)
   const forwardImages = settingsResult.ok ? shouldForwardImages(settingsResult.data) : false
@@ -303,6 +310,7 @@ async function handleCustomerImage(params: {
       caption,
       pendingAppointment,
       purpose,
+      payment,
       log,
     })
   } else {
@@ -312,7 +320,30 @@ async function handleCustomerImage(params: {
     )
   }
 
-  const reply = forwarded ? IMAGE_FORWARDED_REPLY : IMAGE_RECEIVED_REPLY
+  // Images never reach the model, so without this the next turn shows Emma
+  // acknowledging a photo that appears nowhere in the history — and under the
+  // deposit gate she has no way to know the capture arrived and the booking can
+  // finally go through. A plain-text stand-in is what the model can read.
+  const marker = payment
+    ? `[El paciente envió una captura de pago para ${payment.service}${
+        payment.amount ? ` (adelanto de ${payment.amount})` : ''
+      }. Ya podés llamar book_appointment para ese horario.]`
+    : '[El paciente envió una imagen.]'
+  const markerPersisted = await messageService.append({
+    businessId,
+    conversationId,
+    role: 'user',
+    content: marker,
+  })
+  if (!markerPersisted.ok) {
+    log.error({ code: markerPersisted.error.code }, 'append image marker failed')
+  }
+
+  const reply = payment
+    ? PAYMENT_IMAGE_REPLY
+    : forwarded
+      ? IMAGE_FORWARDED_REPLY
+      : IMAGE_RECEIVED_REPLY
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -342,9 +373,10 @@ async function relayImage(params: {
   caption: string | null
   pendingAppointment: Awaited<ReturnType<typeof appointmentRepo.findPendingByCustomer>>
   purpose: ImagePurpose | null
+  payment: PaymentContext | null
   log: HandlerLogger
 }): Promise<boolean> {
-  const { raw, business, customer, caption, pendingAppointment, purpose, log } = params
+  const { raw, business, customer, caption, pendingAppointment, purpose, payment, log } = params
 
   const client = clientRegistry.getClient(business.id)
   if (!client) {
@@ -371,6 +403,7 @@ async function relayImage(params: {
     caption,
     pendingAppointment,
     purpose,
+    payment,
   })
   if (!sent.ok) {
     log.error(

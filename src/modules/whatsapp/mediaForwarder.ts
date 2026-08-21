@@ -5,7 +5,7 @@ import { AppError } from '@/shared/errors.js'
 import { formatPersonName } from '@/shared/name.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { WhatsappClient } from './baileys.client.js'
-import type { ImagePurpose } from './imageExpectation.js'
+import type { ImagePurpose, PaymentContext } from './imageExpectation.js'
 
 // Same JID shape ownerNotifier builds. Kept local rather than imported so this
 // module stays usable with any client, not only the registry-backed one.
@@ -31,6 +31,8 @@ export interface ForwardImageParams {
   pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt'> | null
   /** Set when this photo answers a request Emma made. */
   purpose: ImagePurpose | null
+  /** Set when the deposit gate asked for this capture. */
+  payment: PaymentContext | null
 }
 
 /**
@@ -47,11 +49,17 @@ export function buildOwnerCaption(params: {
   caption: string | null
   pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt'> | null
   purpose: ImagePurpose | null
+  payment: PaymentContext | null
 }): string {
   const who = formatPersonName(params.customer.name) ?? '(sin nombre)'
   const said = params.caption?.trim()
+  const { payment } = params
 
-  const lines = ['📷 *Imagen del paciente*', '', `👤 ${who} (${params.customer.phone})`]
+  const lines = [
+    payment ? '💰 *Captura de pago recibida*' : '📷 *Imagen del paciente*',
+    '',
+    `👤 ${who} (${params.customer.phone})`,
+  ]
 
   if (params.pendingAppointment) {
     lines.push(
@@ -60,12 +68,27 @@ export function buildOwnerCaption(params: {
         params.timezone,
       )}`,
     )
+  } else if (payment) {
+    // The booking does not exist yet — the deposit gate is holding it — so the
+    // slot the customer asked for comes from the expectation instead.
+    lines.push(
+      `📋 Quiere agendar: ${payment.service} — ${formatDateTimeForDisplay(
+        new Date(payment.scheduledAtISO),
+        params.timezone,
+      )}`,
+    )
   }
+  if (payment?.amount) lines.push(`💵 Adelanto pedido: ${payment.amount}`)
   if (params.purpose) lines.push(`ℹ️ ${PURPOSE_LINE[params.purpose]}`)
   if (said) lines.push('', `💬 "${said}"`)
 
   lines.push('')
-  if (params.pendingAppointment) {
+  if (payment) {
+    lines.push(
+      'Si el pago está bien, respondé que sí y le confirmo la cita.',
+      'Si no se ve bien, decime y le pido que la reenvíe.',
+    )
+  } else if (params.pendingAppointment) {
     lines.push(
       '¿Es un comprobante de pago? Puedes:',
       '· Confirmar la cita',
@@ -106,6 +129,7 @@ export async function forwardImageToOwner(params: ForwardImageParams): Promise<R
     caption: params.caption,
     pendingAppointment: params.pendingAppointment,
     purpose: params.purpose,
+    payment: params.payment,
   })
 
   try {
