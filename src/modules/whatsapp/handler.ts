@@ -412,6 +412,22 @@ async function bookFromPaymentCapture(params: {
   log: HandlerLogger
 }): Promise<Appointment | null> {
   const { businessId, customerId, payment, log } = params
+
+  // Logged in full BEFORE the attempt: this path leaves no trace of its own
+  // when it fails silently, and the frozen intent it books from — a service
+  // name and a time the model chose minutes earlier — is exactly what has to
+  // be inspected to explain a refusal.
+  log.info(
+    {
+      customerId,
+      service: payment.service,
+      datetimeISO: payment.scheduledAtISO,
+      customerName: payment.customerName,
+      amount: payment.amount,
+    },
+    'booking appointment from payment capture',
+  )
+
   try {
     const result = await appointmentService.bookAppointment({
       businessId,
@@ -420,14 +436,38 @@ async function bookFromPaymentCapture(params: {
       datetimeISO: payment.scheduledAtISO,
       customerName: payment.customerName,
     })
-    if (result.ok) return result.data
+    if (result.ok) {
+      log.info(
+        { appointmentId: result.data.id, status: result.data.status },
+        'booked appointment from payment capture',
+      )
+      return result.data
+    }
     log.error(
-      { code: result.error.code, context: result.error.logContext, service: payment.service },
+      {
+        code: result.error.code,
+        // The class name separates a ValidationError from a NotConfiguredError
+        // at a glance; `code` alone does not.
+        errorName: result.error.constructor.name,
+        message: result.error.message,
+        context: result.error.logContext,
+        service: payment.service,
+        datetimeISO: payment.scheduledAtISO,
+        customerName: payment.customerName,
+      },
       'failed to book appointment from payment capture',
     )
     return null
   } catch (err) {
-    log.error({ err, service: payment.service }, 'bookAppointment threw on payment capture path')
+    log.error(
+      {
+        err,
+        service: payment.service,
+        datetimeISO: payment.scheduledAtISO,
+        customerName: payment.customerName,
+      },
+      'bookAppointment threw on payment capture path',
+    )
     return null
   }
 }
