@@ -126,6 +126,57 @@ describe('toolExecutor deposit gate', () => {
     })
   })
 
+  it('survives the request_image call that follows the refusal', async () => {
+    // The sequence the gate itself used to prescribe, and which destroyed its
+    // own intent: refuse -> ask for the photo -> capture arrives with nothing
+    // to book. Both calls go through executeTool so the wiring is covered, not
+    // just the helper underneath it.
+    const context = {
+      businessId: seed.businessA.id,
+      conversationId: conversationA.id,
+      customerId: customerA.id,
+    }
+    await executeTool(
+      'book_appointment',
+      { datetime_iso: SLOT_ISO, service: 'corte', customer_name: 'Renzo Romero' },
+      context,
+    )
+
+    await executeTool('request_image', { purpose: 'payment' }, context)
+
+    expect(consumeImageExpectation(conversationA.id)?.payment).toEqual({
+      service: 'corte',
+      scheduledAtISO: SLOT_ISO,
+      amount: 'S/ 50',
+      customerName: 'Renzo Romero',
+    })
+  })
+
+  it('re-arms with the new slot when the customer changes their mind', async () => {
+    // Patient picks 10:00, then moves to 11:00. Whatever the capture books has
+    // to be the second one.
+    const context = {
+      businessId: seed.businessA.id,
+      conversationId: conversationA.id,
+      customerId: customerA.id,
+    }
+    const laterSlot = `${MONDAY_ISO}T11:00:00-05:00`
+    await executeTool(
+      'book_appointment',
+      { datetime_iso: SLOT_ISO, service: 'corte', customer_name: 'Renzo Romero' },
+      context,
+    )
+
+    await executeTool(
+      'book_appointment',
+      { datetime_iso: laterSlot, service: 'corte', customer_name: 'Renzo Romero' },
+      context,
+    )
+    await executeTool('request_image', { purpose: 'payment' }, context)
+
+    expect(consumeImageExpectation(conversationA.id)?.payment?.scheduledAtISO).toBe(laterSlot)
+  })
+
   it('lets the booking through once a capture was recorded', async () => {
     // `customer_image_received` is the persisted evidence the gate reads back.
     await eventsRepo.create({

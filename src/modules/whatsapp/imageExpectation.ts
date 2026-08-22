@@ -67,6 +67,36 @@ export function expectImage(
 }
 
 /**
+ * Arms the gate for a photo the model just asked for, WITHOUT discarding the
+ * booking a live payment expectation is already carrying.
+ *
+ * The two halves are armed from different places: the deposit gate stores the
+ * booking when it refuses, and `request_image` fires afterwards to ask for the
+ * photo. Routing that second call through plain `expectImage` overwrote the
+ * booking with null, so the capture landed with nothing to book and the
+ * appointment was never created — the gate destroyed its own intent by
+ * following its own instruction.
+ *
+ * Only a `payment` request inherits the context. A reference shot must NOT, or
+ * the photo answering it would file an appointment nobody paid for.
+ */
+export function expectImageKeepingPayment(conversationId: string, purpose: ImagePurpose): void {
+  expectImage(
+    conversationId,
+    purpose,
+    purpose === 'payment' ? readLivePayment(conversationId) : null,
+  )
+}
+
+// Non-consuming read that still honours the TTL, so a stale context cannot be
+// resurrected by a request_image arriving long after it lapsed.
+function readLivePayment(conversationId: string): PaymentContext | null {
+  const found = expectations.get(conversationId)
+  if (!found || found.expiresAt <= Date.now()) return null
+  return found.payment
+}
+
+/**
  * Reads the pending request and clears it — one request buys one forward.
  *
  * Without the clear, a single "send me the capture" would relay every photo for

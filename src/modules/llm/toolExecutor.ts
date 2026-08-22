@@ -6,7 +6,7 @@ import {
   type DepositPaymentMethod,
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
-import { expectImage } from '@/modules/whatsapp/imageExpectation.js'
+import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
 
@@ -109,8 +109,9 @@ function depositRequiredInstruction(
   return [
     `Este negocio pide un adelanto ${monto} para confirmar la cita, y todavía no llegó ninguna captura de pago.`,
     `NO agendaste nada. Decile al cliente cuánto es el adelanto y cómo pagarlo: ${formatPaymentMethods(methods)}.`,
-    'Después llamá request_image con purpose "payment" y pedile la captura.',
-    'No vuelvas a llamar book_appointment hasta que el cliente haya mandado la imagen.',
+    'Después pedile la captura directamente, sin preguntarle si quiere mandarla.',
+    'Este rechazo es lo esperado, no es un error: dejó registrado el horario, el servicio y el nombre, y la cita se crea sola en cuanto llegue la captura.',
+    'No vuelvas a llamar book_appointment por tu cuenta. Única excepción: si el cliente cambia de horario o de servicio, llamala de nuevo con los datos nuevos — te la voy a rechazar igual, y así lo que queda registrado es lo último que el cliente eligió.',
     'NO le digas que su cita ya quedó agendada ni que la solicitud fue enviada: todavía no lo está.',
   ].join(' ')
 }
@@ -506,7 +507,11 @@ export async function executeTool(
 
       // Arms the forwarding gate. Nothing is sent here — the model still has to
       // ask for the photo in its own words on the reply that follows.
-      expectImage(context.conversationId, parsed.data.purpose)
+      //
+      // Keeps any payment context the deposit gate already stored: this call
+      // routinely lands right after that refusal, and clobbering it would drop
+      // the booking the capture is meant to unblock.
+      expectImageKeepingPayment(context.conversationId, parsed.data.purpose)
       return {
         result: JSON.stringify({
           status: 'expecting_image',
