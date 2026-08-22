@@ -356,6 +356,7 @@ export async function executeTool(
             service: parsed.data.service,
             scheduledAtISO: parsed.data.datetime_iso,
             amount: depositAmount?.trim() || null,
+            customerName: parsed.data.customer_name,
           })
           return {
             result: JSON.stringify({

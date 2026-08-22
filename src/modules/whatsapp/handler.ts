@@ -1,8 +1,9 @@
 import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
-import type { Business, Customer } from '@/db/schema/index.js'
+import type { Appointment, Business, Customer } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
+import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
@@ -25,6 +26,8 @@ import {
   describeFormat,
   IMAGE_FORWARDED_REPLY,
   IMAGE_RECEIVED_REPLY,
+  PAYMENT_BOOKED_CONFIRMED_REPLY,
+  PAYMENT_BOOKED_PENDING_REPLY,
   PAYMENT_IMAGE_REPLY,
   replyForFormat,
   type UnsupportedFormat,
@@ -320,14 +323,31 @@ async function handleCustomerImage(params: {
     )
   }
 
+  // The capture is the last thing the deposit gate was waiting for, so the
+  // booking is filed HERE. Nothing else would: images never reach the model, so
+  // leaving it to the next turn means no appointment exists until the customer
+  // happens to send another text — and often they never do. The owner then gets
+  // a payment capture for a booking that was never created.
+  const booked = payment
+    ? await bookFromPaymentCapture({ businessId, customerId: customer.id, payment, log })
+    : null
+
   // Images never reach the model, so without this the next turn shows Emma
   // acknowledging a photo that appears nowhere in the history — and under the
   // deposit gate she has no way to know the capture arrived and the booking can
   // finally go through. A plain-text stand-in is what the model can read.
+  //
+  // When the booking already went through, the marker says so and forbids the
+  // retry: otherwise the model reads "ya podés llamar book_appointment" on the
+  // customer's next message and files the same appointment twice.
   const marker = payment
-    ? `[El paciente envió una captura de pago para ${payment.service}${
-        payment.amount ? ` (adelanto de ${payment.amount})` : ''
-      }. Ya podés llamar book_appointment para ese horario.]`
+    ? booked
+      ? `[El paciente envió la captura de pago para ${payment.service} y su cita ya quedó ${
+          booked.status === 'pending' ? 'registrada como solicitud pendiente' : 'agendada'
+        }. NO llames book_appointment de nuevo para ese horario.]`
+      : `[El paciente envió una captura de pago para ${payment.service}${
+          payment.amount ? ` (adelanto de ${payment.amount})` : ''
+        }. Ya podés llamar book_appointment para ese horario.]`
     : '[El paciente envió una imagen.]'
   const markerPersisted = await messageService.append({
     businessId,
@@ -339,11 +359,17 @@ async function handleCustomerImage(params: {
     log.error({ code: markerPersisted.error.code }, 'append image marker failed')
   }
 
-  const reply = payment
-    ? PAYMENT_IMAGE_REPLY
-    : forwarded
-      ? IMAGE_FORWARDED_REPLY
-      : IMAGE_RECEIVED_REPLY
+  // A failed booking falls back to the old wording on purpose: it promises
+  // nothing, and the marker above still tells the model to retry next turn.
+  const reply = booked
+    ? booked.status === 'pending'
+      ? PAYMENT_BOOKED_PENDING_REPLY
+      : PAYMENT_BOOKED_CONFIRMED_REPLY
+    : payment
+      ? PAYMENT_IMAGE_REPLY
+      : forwarded
+        ? IMAGE_FORWARDED_REPLY
+        : IMAGE_RECEIVED_REPLY
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -358,6 +384,51 @@ async function handleCustomerImage(params: {
     await sendWithPresence({ businessId, jid, text: reply, send })
   } catch (err) {
     log.error({ err, jid }, 'failed to acknowledge customer image')
+  }
+}
+
+/**
+ * Files the appointment the deposit gate held back, now that its evidence
+ * arrived. Never throws: the customer is waiting on an acknowledgement for the
+ * photo they just sent, and a booking failure must not turn into silence.
+ *
+ * Calls the service directly, bypassing the tool executor's deposit gate on
+ * purpose — the capture that gate demands landed and was persisted as
+ * `customer_image_received` before this runs.
+ *
+ * The status is NOT forced: `bookAppointment` derives it from the business's
+ * bookingMode, so a `requires_approval` business gets a pending row plus the
+ * owner notification it already sends, and a `direct` one gets a confirmed
+ * booking. The owner has seen the capture either way — the forward above
+ * carried it with the service and time attached.
+ *
+ * Only ever reached with a live `PaymentContext`, and that expectation is
+ * consumed on read, so a customer sending two captures back to back books once.
+ */
+async function bookFromPaymentCapture(params: {
+  businessId: string
+  customerId: string
+  payment: PaymentContext
+  log: HandlerLogger
+}): Promise<Appointment | null> {
+  const { businessId, customerId, payment, log } = params
+  try {
+    const result = await appointmentService.bookAppointment({
+      businessId,
+      customerId,
+      service: payment.service,
+      datetimeISO: payment.scheduledAtISO,
+      customerName: payment.customerName,
+    })
+    if (result.ok) return result.data
+    log.error(
+      { code: result.error.code, context: result.error.logContext, service: payment.service },
+      'failed to book appointment from payment capture',
+    )
+    return null
+  } catch (err) {
+    log.error({ err, service: payment.service }, 'bookAppointment threw on payment capture path')
+    return null
   }
 }
 

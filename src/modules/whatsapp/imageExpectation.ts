@@ -28,6 +28,13 @@ export interface PaymentContext {
   scheduledAtISO: string
   /** Free-text deposit, e.g. "S/ 20". Null when the business set no amount. */
   amount: string | null
+  /**
+   * The name the customer gave Emma, carried because the booking this unblocks
+   * is filed from the image handler, not from the model. The gate blocked
+   * book_appointment, so the rename it performs never ran and the customer row
+   * may still hold the WhatsApp push name.
+   */
+  customerName: string
 }
 
 export interface ImageExpectation {

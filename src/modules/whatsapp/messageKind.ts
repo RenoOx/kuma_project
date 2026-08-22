@@ -176,6 +176,17 @@ export const IMAGE_FORWARDED_REPLY = '¡Recibí tu imagen! Dame un momentito y t
 // Names nobody, for the same reason as the two above.
 export const PAYMENT_IMAGE_REPLY = '¡Recibí tu captura! Dame un momentito y te confirmo tu cita 😊'
 
+// Sent when the capture actually unblocked the booking and the row was filed.
+// Split in two because "quedó agendada" is a promise Emma must not make for a
+// business whose bookingMode still puts a human between the request and the
+// calendar — there the appointment is a request, and saying otherwise is the
+// exact overpromise the deposit gate was added to stop.
+export const PAYMENT_BOOKED_PENDING_REPLY =
+  '¡Recibí tu captura! Tu solicitud de cita ya quedó registrada ✅ Te confirmo en un momentito 😊'
+
+export const PAYMENT_BOOKED_CONFIRMED_REPLY =
+  '¡Recibí tu captura! Tu cita ya quedó agendada ✅ Te espero 😊'
+
 export function replyForFormat(
   _format: UnsupportedFormat,
   randomFn: () => number = Math.random,
