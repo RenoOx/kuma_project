@@ -115,7 +115,9 @@ describe('llm.service.generateReply', () => {
     assert(callArgs)
     expect(callArgs.model).toBe('gpt-4o-mini')
     expect(callArgs.tools).toBeDefined()
-    expect(callArgs.tools.length).toBe(3)
+    // Tracks the customer tool catalogue: check_availability, book_appointment,
+    // confirm_pending_appointment, request_image, escalate_to_human. Bump when adding tools.
+    expect(callArgs.tools.length).toBe(5)
     expect(callArgs.tool_choice).toBe('auto')
 
     // Assistant message was persisted by the service.

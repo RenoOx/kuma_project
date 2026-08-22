@@ -76,8 +76,9 @@ describe('ownerAssistant.service.handle', () => {
     const callArgs = mockCreate.mock.calls[0]?.[0]
     assert(callArgs)
     // Tracks the ownerTools catalogue: 5 originales + 5 de gestión de
-    // solicitudes (list/confirm/reject/reschedule/cancel). Bumpear al sumar tools.
-    expect(callArgs.tools.length).toBe(10)
+    // solicitudes (list/confirm/reject/reschedule/cancel) + reply_to_customer.
+    // Bumpear al sumar tools.
+    expect(callArgs.tools.length).toBe(11)
     expect(callArgs.tool_choice).toBe('auto')
     // The system prompt should reference the owner by name.
     expect(callArgs.messages[0].content).toContain('TestOwner')
