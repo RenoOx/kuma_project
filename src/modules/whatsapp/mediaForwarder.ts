@@ -51,14 +51,23 @@ export function buildOwnerCaption(params: {
   purpose: ImagePurpose | null
   payment: PaymentContext | null
 }): string {
-  const who = formatPersonName(params.customer.name) ?? '(sin nombre)'
   const said = params.caption?.trim()
   const { payment } = params
+
+  // Under the deposit gate `customer.name` is still whatever WhatsApp put on the
+  // profile ("Rem"): the rename lives inside bookAppointment, which only runs
+  // once the capture lands — after this forward. The name the customer actually
+  // gave Emma rides in the payment context, so it wins whenever there is one.
+  const who = payment
+    ? formatPersonName(payment.customerName)
+    : formatPersonName(params.customer.name)
 
   const lines = [
     payment ? '💰 *Captura de pago recibida*' : '📷 *Imagen del paciente*',
     '',
-    `👤 ${who} (${params.customer.phone})`,
+    // No name worth showing is better than a push name the owner cannot place:
+    // the phone is the one identifier that is always true.
+    who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
   ]
 
   if (params.pendingAppointment) {
