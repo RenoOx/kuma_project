@@ -24,6 +24,14 @@ export interface ToolExecutionResult {
   // Set when the tool returned a Result.err or threw. Used for logs / metrics
   // but NOT what we send back to the LLM (that goes in `result`).
   error?: string
+  // What just happened, in the state machine's vocabulary. This layer only
+  // NAMES it: it never reads or writes conversation.state. llm.service applies
+  // it, and conversation.service is the only thing that writes.
+  //
+  // Keyed on the OUTCOME, not on success — the deposit gate's refusal below is
+  // an error result and still the most important transition in the booking flow.
+  // Absent means nothing moved.
+  trigger?: string
 }
 
 const checkAvailabilityArgs = z.object({
@@ -315,6 +323,8 @@ export async function executeTool(
               ? `${leadTimeNote(r.data.minNoticeMinutes)} ${AVAILABILITY_INSTRUCTION}`
               : AVAILABILITY_INSTRUCTION,
         }),
+        // A closed or fully booked day still counts: the customer asked.
+        trigger: 'asks_availability',
       }
     }
 
@@ -367,6 +377,7 @@ export async function executeTool(
               instruction: depositRequiredInstruction(depositAmount, depositPaymentMethods),
             }),
             error: 'deposit_required',
+            trigger: 'deposit_required',
           }
         }
       }
@@ -447,6 +458,9 @@ export async function executeTool(
                   'La hora en scheduled_at ya está en la zona horaria del negocio y en formato 12h. Confirmásela al cliente tal cual, sin convertirla ni pasarla a 24h.',
               }),
         }),
+        // Fires for a 'pending' row too: from the flow's point of view the
+        // booking step is done either way, and what is left is the owner's call.
+        trigger: 'appointment_booked',
       }
     }
 
@@ -498,6 +512,7 @@ export async function executeTool(
           scheduled_at: r.data.scheduledAtDisplay,
           instruction: CONFIRMED_INSTRUCTION,
         }),
+        trigger: 'appointment_booked',
       }
     }
 
@@ -520,6 +535,12 @@ export async function executeTool(
               ? 'Listo. Ahora pedile la captura del pago con naturalidad ("¿Me mandas la captura del pago?"). NO le digas que se la vas a reenviar a nadie ni menciones al doctor o al encargado: para el cliente esta conversación la resolvés vos.'
               : 'Listo. Ahora pedile la foto de referencia con naturalidad. NO le digas que se la vas a reenviar a nadie ni menciones al doctor o al encargado.',
         }),
+        // No trigger, on either purpose. Arming the expectation is not a move in
+        // the flow: the deposit gate emits deposit_required itself, at the moment
+        // it actually refuses a booking and freezes the payment context. The model
+        // can reach for this tool on its own, and letting that walk the
+        // conversation into await_payment strands it there with no booking to pay
+        // for and no capture on the way.
       }
     }
 

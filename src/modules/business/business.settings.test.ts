@@ -14,6 +14,15 @@ const BASE_SETTINGS: BusinessSettings = {
   requiresDeposit: false,
   depositPaymentMethods: [],
   appointmentMode: 'appointments_only',
+  flowType: 'appointments',
+  collectDataFields: [],
+  postBooking: {
+    reminders: false,
+    confirmationReply: false,
+    postCareFollowUp: false,
+    recallAfterDays: null,
+    followUpAbandoned: false,
+  },
   operatingHours: {
     monday: { open: '09:00', close: '19:00' },
     tuesday: { open: '09:00', close: '19:00' },

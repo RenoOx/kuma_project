@@ -7,6 +7,11 @@ export interface GenerateReplyParams {
   businessId: string
   conversationId: string
   userMessage: string
+  // Conversation state this reply starts from — it decides which tools the
+  // model is offered and what the step adds to the system prompt.
+  // Optional: when the caller omits it, the service falls back to the value
+  // stored on the conversation row, which it loads anyway.
+  state?: string
 }
 
 export interface ExecutedToolCall {
