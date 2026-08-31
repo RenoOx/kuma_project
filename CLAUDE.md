@@ -3,9 +3,14 @@
 ## Qué es este repo
 
 Emma es un asistente de WhatsApp multi-tenant por Vamvu Labs, para negocios 
-de servicios con citas (peluquerías, dentales, vets, barberías). Cada 
-`business_id` tiene su knowledge base, su número de WhatsApp, sus clientes 
-y citas. Un solo deploy atiende N negocios.
+de servicios. Cada `business_id` tiene su knowledge base, su número de 
+WhatsApp, sus clientes y configuración. Un solo deploy atiende N negocios.
+
+Soporta dos tipos de flujo según el negocio:
+- **appointments**: clínicas dentales, centros estéticos, consultorios (agendar citas)
+- **sales**: certificaciones, cursos, ventas por campañas (informar, cobrar, recolectar datos)
+
+El tipo de flujo se define en `business.settings.flowType`.
 
 ## Identidad del producto
 
@@ -47,43 +52,113 @@ npm run check            # lint + typecheck + test (ejecutar antes de commit)
 
 **Antes de cualquier commit a main: `npm run check` debe pasar.**
 
+## Arquitectura del flujo de mensajes (6 capas)
+
+Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
+
+1. **Filtrado** (handler.ts): deduplicación (`claimMessageId`), extracción 
+   de teléfono (`extractPhone`), clasificación de tipo, debounce de mensajes 
+   rápidos (`bufferMessage`), serialización por remitente (`withSenderLock`)
+2. **Enrutamiento** (handler.ts): `samePhone()` compara con 
+   `business.ownerWhatsappNumber` → flujo owner o flujo customer
+3. **Flujo cliente** (handler.ts): compuertas en orden: ¿pausado? → ¿imagen? 
+   → ¿formato no soportado? → ¿escalado? → pasa todo → LLM
+4. **Cerebro** (llm.service.ts): `generateReply` carga contexto completo 
+   (business, settings, KB, historial, citas pendientes), construye system 
+   prompt, entra en loop de hasta 5 iteraciones con GPT-4o-mini
+5. **Herramientas** (toolExecutor.ts + tools.ts): el LLM invoca tools, el 
+   executor valida (gates, permisos por estado) y ejecuta. Resultado vuelve 
+   al loop
+6. **Config** (business.settings.ts): todo es config-driven. Un motor, 
+   templates por nicho. Validación con Zod
+
+### Patrones clave de arquitectura
+
+- **Result<T>**: todas las funciones que pueden fallar retornan 
+  `{ ok: true, data: T } | { ok: false, error: AppError }`. NUNCA throw 
+  en lógica de negocio
+- **Prompt caching**: system prompt dividido en cuerpo estático (cacheable, 
+  ~3700 tokens) + cola variable (fecha, cita pendiente, CTA). El cuerpo 
+  estático SIEMPRE va primero para aprovechar el caché de OpenAI
+- **Gate de depósito**: `toolExecutor` rechaza `book_appointment` si 
+  `requiresDeposit=true` y no hay evidencia de pago reciente. El rechazo 
+  congela el contexto de pago en la expectativa de imagen
+- **Expectativa de imagen**: mecanismo de señalización LLM ↔ handler. 
+  `request_image` arma una expectativa; `handleCustomerImage` la consume. 
+  La foto NUNCA llega al LLM
+- **Anti-ban**: `humanDelay` + `sendWithPresence` simulan comportamiento 
+  humano antes de enviar
+
+## Archivos críticos (leer antes de cambiar)
+
+| Archivo | Qué controla |
+|---------|-------------|
+| `src/modules/whatsapp/handler.ts` | Flujo principal, capas 1-3 |
+| `src/modules/llm/llm.service.ts` | Cerebro, loop de tools, carga de contexto |
+| `src/modules/llm/toolExecutor.ts` | Ejecución de herramientas + gates |
+| `src/modules/llm/tools.ts` | Definición de herramientas del LLM |
+| `src/modules/llm/prompts.ts` | System prompt (estático + variable) |
+| `src/modules/business/business.settings.ts` | Config por negocio (Zod) |
+| `src/modules/conversation/stateMachine.ts` | Estados y transiciones por flujo |
+
+## Máquina de estados
+
+Cada conversación tiene un campo `state` que controla en qué paso está.
+El flujo NO lo decide el LLM — lo controla el código.
+
+### Conceptos
+
+- **Estado**: dónde está la conversación (campo `conversation.state` en BD). 
+  Ejemplo: `idle`, `informing`, `await_payment`, `confirmed`
+- **Trigger**: qué pasó. Puede venir del LLM (intención detectada), del 
+  código (imagen recibida, datos completos), o del tiempo (24h sin respuesta)
+- **Transición**: regla que dice: estado actual + trigger → estado nuevo
+- **Tools por estado**: en cada estado, el LLM solo puede usar las tools 
+  permitidas para ese estado. Si intenta otra, se ignora
+
+### Flujos
+
+- `flowType: "appointments"`: idle → greeting → informing → show_availability 
+  → choose_time → await_payment (si depósito) → confirmed
+- `flowType: "sales"`: idle → greeting → informing → send_offer → 
+  await_payment → collect_data → confirmed
+
+Definiciones en `src/modules/conversation/stateMachine.ts`.
+
+### Módulos post-booking (opcionales, config-driven)
+
+Se activan por negocio en `business.settings.postBooking`:
+- `reminders`: recordatorios 24h y 2h antes de cita
+- `confirmationReply`: confirmación bidireccional
+- `postCareFollowUp`: seguimiento post-cita
+- `recallAfterDays`: reactivación automática en N días
+- `followUpAbandoned`: seguimiento a leads que no completaron
+
 ## Estructura
+
+```
 src/
-app.ts              # Hono app + middleware setup
-config/             # env (zod-validated), logger, db client, redis client
-modules/
-whatsapp/         # Baileys integration, webhook handlers, message parsing
-llm/              # Claude client, prompt builders, tool definitions
-business/         # tenant management, knowledge base CRUD
-customer/         # customer records, long-term memory
-appointment/      # Google Calendar integration, slot logic
-conversation/     # conversation state, short-term memory window
-db/
-schema/           # Drizzle schemas (one file per table)
-migrations/
-workers/            # BullMQ workers for async jobs
-shared/             # utils, types, errors
-tests/
-unit/
-integration/
-src/
-app.ts              # Hono app + middleware setup
-config/             # env (zod-validated), logger, db client, redis client
-modules/
-whatsapp/         # Baileys integration, webhook handlers, message parsing
-llm/              # Claude client, prompt builders, tool definitions
-business/         # tenant management, knowledge base CRUD
-customer/         # customer records, long-term memory
-appointment/      # Google Calendar integration, slot logic
-conversation/     # conversation state, short-term memory window
-db/
-schema/           # Drizzle schemas (one file per table)
-migrations/
-workers/            # BullMQ workers for async jobs
-shared/             # utils, types, errors
-tests/
-unit/
-integration/
+  app.ts              # Hono app + middleware setup
+  config/             # env (zod-validated), logger, db client, redis client
+  modules/
+    whatsapp/         # Baileys integration, webhook handlers, message parsing
+    llm/              # LLM client, prompt builders, tool definitions
+    business/         # tenant management, knowledge base CRUD
+    customer/         # customer records, long-term memory
+    appointment/      # Google Calendar integration, slot logic
+    conversation/     # conversation state, state machine, short-term memory
+    ownerAssistant/   # owner flow, tools, notifications
+    demo/             # demo mode
+    admin/            # admin routes
+    events/           # event logging
+    google/           # Google Calendar integration
+    knowledgeBase/    # KB search by category
+  db/
+    schema/           # Drizzle schemas (one file per table)
+    migrations/
+  workers/            # BullMQ workers for async jobs (reminders)
+  shared/             # utils, types, errors
+```
 
 Detalle por módulo: ver `docs/architecture.md`. NO lo cargues completo al 
 inicio — léelo solo cuando trabajes en ese módulo.
@@ -95,7 +170,8 @@ Tablas core (cada una con `business_id` excepto `businesses`):
 - `businesses` — tenants
 - `knowledge_base` — info estática del negocio
 - `customers` — clientes finales del negocio (key: `business_id + phone`)
-- `conversations` — sesiones de chat (status: open, closed, escalated)
+- `conversations` — sesiones de chat (status: open, closed, escalated; 
+  state: idle, greeting, informing, etc.)
 - `messages` — historial completo
 - `appointments` — citas agendadas
 - `events` — log auditable de acciones (tool calls, escalations, errores)
@@ -113,6 +189,14 @@ negocio sin configuración" del system prompt (responder con honestidad, NO
 inventar, NO escalar por consultas informativas; escalar solo si el cliente 
 quiere agendar). Esto es feature, no bug — el bot no inventa información 
 operativa del negocio.
+
+Campos clave de settings:
+- `flowType`: "appointments" | "sales" — define qué flujo de estados aplica
+- `niche`: dental, barberia, estetica, salud, general — define la voz
+- `bookingMode`: direct | requires_approval
+- `requiresDeposit`: boolean — activa el gate de depósito
+- `collectDataFields`: string[] — campos a recolectar en flujo sales
+- `postBooking`: objeto con switches de módulos opcionales
 
 Cada día puede tener un break opcional (`start`/`end`). Si el negocio necesita 
 múltiples breaks o descansos complejos, es feature de V1.1.
@@ -157,7 +241,7 @@ Kuma tiene dos roles según el remitente del mensaje:
 
 - Si `phone !== ownerWhatsappNumber` → flujo `customer` (vendedor)
   * System prompt vendedor cálido
-  * Tools: `check_availability`, `book_appointment`, `escalate_to_human`
+  * Tools: filtradas por estado actual de la conversación (ver stateMachine.ts)
   * `conversation.type='customer'`
 
 Cuando `business.settings.botPaused.paused === true`:
@@ -193,11 +277,8 @@ producción habrá que reemplazar el Map por algo centralizado (Día 11+).
 Cada cita `scheduled` recibe 2 recordatorios automáticos al cliente:
 
 - **24h antes** de `scheduled_at`: recordatorio cálido con día y hora 
-  completos (`👋 ¡Hola {nombre}!\n\nTe recuerdo tu cita 📅 *{día de 
-  semana} {día} de {mes} a las {hora}* en {business}.`)
-- **2h antes** de `scheduled_at`: recordatorio último con `hoy a las X 
-  (en 2 horas)` (`⏰ ¡Hola {nombre}!\n\nTu cita en {business} es *hoy 
-  a las {hora}* (en 2 horas).`)
+  completos
+- **2h antes** de `scheduled_at`: recordatorio último
 
 El worker `sendDueReminders` corre cada 15 min vía `setInterval` en 
 `server.ts`. Idempotencia: cada appointment tiene `reminder_24h_sent_at` 
@@ -212,11 +293,8 @@ hora 12h sin espacio (`11:00am`, `2:30pm`). Helpers de formato en
 `workers/reminderTexts.ts`.
 
 Si el cliente responde al recordatorio queriendo reprogramar/cancelar, 
-Emma escala automáticamente al dueño (vía system prompt sección "Manejo 
-de cancelaciones y reprogramaciones" + tool `escalate_to_human`). NO 
-maneja la reprogramación sola.
-
-Migración a BullMQ con Redis queda para V1.5.
+Emma escala automáticamente al dueño (vía system prompt + tool 
+`escalate_to_human`). NO maneja la reprogramación sola.
 
 ## Reglas de código no-negociables
 
@@ -243,6 +321,9 @@ Migración a BullMQ con Redis queda para V1.5.
     repo. Los repos reciben `(exec: Executor = db)` como último parámetro 
     opcional. Los services nunca ejecutan queries directamente sobre `db` 
     o `tx`.
+12. **Estado de conversación:** toda transición de estado pasa por 
+    `stateMachine.ts`. NUNCA cambiar `conversation.state` directamente 
+    en otro archivo.
 
 ## Autonomía esperada
 
@@ -266,8 +347,10 @@ Pregunta ANTES de:
 
 1. **Explora.** Lee los archivos relevantes, corre tests existentes, mira 
    el schema. Usa bash si necesitas info del filesystem.
-2. **Planea.** Lista pasos en respuesta antes de tocar código. SIEMPRE espera OK explícito al plan antes de implementar — sin excepción. No hay umbral de archivos que exima de esto. Si no recibes "OK", "adelante" o "procede", no escribas código.
-   toca más de 3 archivos, espera mi OK al plan.
+2. **Planea.** Lista pasos en respuesta antes de tocar código. SIEMPRE espera 
+   OK explícito al plan antes de implementar — sin excepción. No hay umbral 
+   de archivos que exima de esto. Si no recibes "OK", "adelante" o "procede", 
+   no escribas código.
 3. **Implementa incrementalmente.** Un commit por unidad lógica, no megacommits.
 4. **Verifica.** Corre `npm run check` antes de decir que terminaste.
 5. **Reporta.** Resume qué hiciste, qué archivos tocaste, qué falta. Si 
@@ -282,20 +365,22 @@ Una tarea está hecha cuando:
 - [ ] No hay `console.log`, `TODO` sin issue link, ni código comentado
 - [ ] El commit message describe el cambio en imperativo presente en inglés
 - [ ] Si tocó multi-tenancy: hay test que verifica aislamiento por `business_id`
+- [ ] Si tocó estados: las transiciones están definidas en stateMachine.ts
 
-## Lo que NO está en V1 (no me dejes agregarlo)
+## Lo que NO está en scope actual (no me dejes agregarlo)
 
-- Pagos, links de pago, carritos
-- Audio, imágenes, videos, llamadas en WhatsApp
-- Recordatorios automáticos previos a la cita (eso es V1.5)
+- Links de pago automáticos, pasarelas, carritos
+- Audio, videos, llamadas en WhatsApp
 - Múltiples sucursales por negocio
 - Integraciones con CRM, POS, ERP
-- Panel admin web (eso es V1.5, después del primer cliente pagando)
-- Soporte multi-idioma (solo español de Perú en V1)
+- Panel admin web (después del primer cliente pagando)
+- Soporte multi-idioma (solo español de Perú)
 - App móvil
+- Canvas visual para diseño de flujos (los flujos se configuran en JSON)
+- Multicanal (Instagram, Facebook, TikTok)
 
-Si yo te pido alguno de estos: respóndeme "esto está fuera del V1 según 
-CLAUDE.md. ¿Confirmas que cambia el scope del DoD, o lo dejamos para V1.5?"
+Si yo te pido alguno de estos: respóndeme "esto está fuera del scope actual 
+según CLAUDE.md. ¿Confirmas que cambia el alcance, o lo dejamos para después?"
 
 ## Cuando te equivoques
 
