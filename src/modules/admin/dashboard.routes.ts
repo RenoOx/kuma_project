@@ -2284,11 +2284,16 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     })
   }
 
-  // Preserve existing botPaused state (managed by the bot, not by this form)
+  // Preserve settings the bot or an operator manages outside this form.
   const existingRaw = business.settings as Partial<BusinessSettings>
   const newSettings = {
     ...parsed.data,
     botPaused: existingRaw?.botPaused ?? null,
+    // Not rendered by the form yet — set by hand in Drizzle Studio. Without
+    // this a save would silently reset them to their schema defaults.
+    ...(existingRaw?.flowType ? { flowType: existingRaw.flowType } : {}),
+    ...(existingRaw?.collectDataFields ? { collectDataFields: existingRaw.collectDataFields } : {}),
+    ...(existingRaw?.postBooking ? { postBooking: existingRaw.postBooking } : {}),
   }
 
   await businessRepo.update(businessId, { settings: newSettings as Record<string, unknown> })

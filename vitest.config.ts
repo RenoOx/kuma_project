@@ -16,9 +16,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
     },
-    // Tests share a single Postgres DB; serialize them to avoid races
-    // on TRUNCATE/seed between concurrent test files.
-    fileParallelism: false,
+    // No test touches a database any more, so files are free to run in
+    // parallel. Restore fileParallelism: false if DB-backed tests come back.
     hookTimeout: 30_000,
     testTimeout: 30_000,
   },

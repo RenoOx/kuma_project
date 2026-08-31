@@ -59,6 +59,15 @@ const BARBERIA: DemoProfile = {
     requiresDeposit: false,
     depositPaymentMethods: [],
     appointmentMode: 'appointments_only',
+    flowType: 'appointments',
+    collectDataFields: [],
+    postBooking: {
+      reminders: false,
+      confirmationReply: false,
+      postCareFollowUp: false,
+      recallAfterDays: null,
+      followUpAbandoned: false,
+    },
     slotDurationMinutes: 15,
     services: [
       service('corte clásico', 45, { min: 25, max: 25 }),
@@ -123,6 +132,15 @@ const CONSULTORIO: DemoProfile = {
     depositAmount: 'S/ 20',
     depositPaymentMethods: [{ method: 'yape', number: '987654321', label: 'Dr. Pérez' }],
     appointmentMode: 'appointments_only',
+    flowType: 'appointments',
+    collectDataFields: [],
+    postBooking: {
+      reminders: false,
+      confirmationReply: false,
+      postCareFollowUp: false,
+      recallAfterDays: null,
+      followUpAbandoned: false,
+    },
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [
@@ -210,6 +228,15 @@ const SPA: DemoProfile = {
     requiresDeposit: false,
     depositPaymentMethods: [],
     appointmentMode: 'appointments_only',
+    flowType: 'appointments',
+    collectDataFields: [],
+    postBooking: {
+      reminders: false,
+      confirmationReply: false,
+      postCareFollowUp: false,
+      recallAfterDays: null,
+      followUpAbandoned: false,
+    },
     slotDurationMinutes: 30,
     minBookingNoticeMinutes: 60,
     services: [

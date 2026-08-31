@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { index, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core'
 import { nanoid } from 'nanoid'
 import { businesses } from './businesses.js'
 import { customers } from './customers.js'
@@ -27,6 +27,7 @@ export const conversations = pgTable(
     customerId: text('customer_id').references(() => customers.id, { onDelete: 'cascade' }),
     type: text('type').notNull().default('customer').$type<ConversationType>(),
     status: text('status').notNull().default('open').$type<ConversationStatus>(),
+    state: varchar('state', { length: 50 }).notNull().default('idle'),
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

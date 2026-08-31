@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "state" varchar(50) DEFAULT 'idle' NOT NULL;

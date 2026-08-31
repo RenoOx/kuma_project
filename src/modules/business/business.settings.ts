@@ -115,6 +115,43 @@ const botPausedSchema = z.object({
 // existed keep their exact behaviour without a data migration.
 const appointmentModeSchema = z.enum(['appointments_only', 'hybrid']).default('appointments_only')
 
+// Which conversation flow the business runs, and therefore which state machine
+// and which per-state tools apply:
+//   - appointments → book a slot (clinics, barbershops, aesthetics)
+//   - sales        → inform, charge, collect data (courses, certifications)
+// Defaults to appointments so businesses configured before this field existed
+// keep their exact behaviour without a data migration.
+// NOTE: does not replace appointmentMode yet — both coexist. appointmentMode is
+// still the field prompts.ts reads for the call-to-action decision.
+const flowTypeSchema = z.enum(['appointments', 'sales']).default('appointments')
+
+// Fields Emma must collect from the customer before closing, in the sales flow.
+// Free-form on purpose: each business names its own ("nombre", "DNI", "correo").
+// Empty by default — the appointments flow collects nothing extra.
+const collectDataFieldsSchema = z.array(z.string().min(1)).default([])
+
+// Optional post-booking modules, switched per business. All off by default:
+// every one of these sends a proactive message to the customer, which is the
+// owner's call to make, not a default they discover after it already went out
+// (same reasoning as forwardImages).
+//
+// recallAfterDays: null = never recall; a positive integer = days after the
+// appointment to reactivate the customer.
+//
+// .prefault({}) rather than .default({}): in Zod 4 `.default()` takes the OUTPUT
+// type, so it would demand the full literal here and duplicate every inner
+// default. `.prefault()` takes the INPUT type, so `{}` gets parsed and the inner
+// defaults fill it in — they stay the single source of truth.
+const postBookingSchema = z
+  .object({
+    reminders: z.boolean().default(false),
+    confirmationReply: z.boolean().default(false),
+    postCareFollowUp: z.boolean().default(false),
+    recallAfterDays: z.number().int().positive().nullable().default(null),
+    followUpAbandoned: z.boolean().default(false),
+  })
+  .prefault({})
+
 // Business category. Will condition prompt behaviour, KB keyword detection and
 // niche-specific rules (not yet wired — this is the structural field only).
 // Defaults to 'general' so businesses configured before this field existed
@@ -184,6 +221,9 @@ export const businessSettingsSchema = z.object({
   slotDurationMinutes: z.number().int().positive(),
   services: z.array(serviceSchema).min(1, 'at least one service is required'),
   appointmentMode: appointmentModeSchema,
+  flowType: flowTypeSchema,
+  collectDataFields: collectDataFieldsSchema,
+  postBooking: postBookingSchema,
   // Optional + nullable so the owner can both leave it unset and explicitly
   // clear it back to null via `resume_bot`.
   botPaused: botPausedSchema.nullable().optional(),
@@ -203,6 +243,8 @@ export type Service = z.infer<typeof serviceSchema>
 export type BotPausedState = z.infer<typeof botPausedSchema>
 export type SpecialDay = z.infer<typeof specialDaySchema>
 export type AppointmentMode = z.infer<typeof appointmentModeSchema>
+export type FlowType = z.infer<typeof flowTypeSchema>
+export type PostBookingSettings = z.infer<typeof postBookingSchema>
 export type Niche = z.infer<typeof nicheSchema>
 export type BookingMode = z.infer<typeof bookingModeSchema>
 export type ForwardImages = z.infer<typeof forwardImagesSchema>

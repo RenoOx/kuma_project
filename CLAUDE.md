@@ -423,3 +423,8 @@ Al terminar la ejecución, reporta:
 - Qué cambios aplicaste
 - Qué queda pendiente si algo
 - Sin correr tests salvo que yo lo pida
+
+## Pendiente de implementar
+- flowType (appointments | sales) reemplazará appointmentMode
+- stateMachine.ts se creará en src/modules/conversation/
+- conversation.state se agregará como campo en la tabla conversations

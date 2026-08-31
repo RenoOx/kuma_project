@@ -1,12 +1,12 @@
 // scripts/run-with-db.mjs
-// Helper to set DATABASE_URL from a source env var (TEST_DATABASE_URL or
-// PROD_DATABASE_URL) and then exec the given command. Lets us swap DBs
-// for drizzle-kit without fighting Windows shell quoting.
+// Helper to set DATABASE_URL from a source env var (PROD_DATABASE_URL) and
+// then exec the given command. Lets us swap DBs for drizzle-kit without
+// fighting Windows shell quoting.
 import { spawn } from 'node:child_process'
 
 const sourceVar = process.env.DATABASE_URL_FROM
 if (!sourceVar) {
-  console.error('DATABASE_URL_FROM not set. Expected TEST_DATABASE_URL or PROD_DATABASE_URL.')
+  console.error('DATABASE_URL_FROM not set. Expected PROD_DATABASE_URL.')
   process.exit(1)
 }
 

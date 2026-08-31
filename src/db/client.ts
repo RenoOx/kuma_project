@@ -5,14 +5,15 @@ import { logger } from '../config/logger.js'
 import * as schema from './schema/index.js'
 
 const isDev = env.NODE_ENV === 'development'
-const isTest = env.NODE_ENV === 'test'
 
-const databaseUrl = isTest ? env.TEST_DATABASE_URL : env.DATABASE_URL
+// Single source for every environment. There is no separate test database:
+// the DB-backed suite was removed, so nothing here runs against a throwaway
+// DB any more. A test that imports this module would connect to whatever
+// DATABASE_URL points at — write one only if that is what you mean.
+const databaseUrl = env.DATABASE_URL
 
 if (!databaseUrl) {
-  throw new Error(
-    `Missing ${isTest ? 'TEST_DATABASE_URL' : 'DATABASE_URL'} for NODE_ENV=${env.NODE_ENV}`,
-  )
+  throw new Error(`Missing DATABASE_URL for NODE_ENV=${env.NODE_ENV}`)
 }
 
 export const queryClient = postgres(databaseUrl, {
