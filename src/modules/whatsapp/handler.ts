@@ -6,6 +6,7 @@ import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { shouldForwardImages } from '@/modules/business/business.settings.js'
+import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
@@ -331,6 +332,29 @@ async function handleCustomerImage(params: {
   const booked = payment
     ? await bookFromPaymentCapture({ businessId, customerId: customer.id, payment, log })
     : null
+
+  // await_payment has no other way out. Images never reach the model, so the
+  // tool executor never sees the payment that this state exists to wait for,
+  // and a conversation stuck there is not even offered check_availability.
+  //
+  // Only once the booking actually exists: a failed one has to keep waiting,
+  // which is exactly what the marker below tells the model to retry.
+  if (payment && booked) {
+    const conversation = await conversationRepo.findById(businessId, conversationId)
+    if (conversation) {
+      const flowType = settingsResult.ok ? settingsResult.data.flowType : 'appointments'
+      const applied = await conversationService.applyTrigger({
+        businessId,
+        conversationId,
+        flowType,
+        currentState: conversation.state,
+        trigger: 'payment_received',
+      })
+      if (!applied.ok) {
+        log.warn({ code: applied.error.code }, 'could not apply payment_received transition')
+      }
+    }
+  }
 
   // Images never reach the model, so without this the next turn shows Emma
   // acknowledging a photo that appears nowhere in the history — and under the
@@ -902,6 +926,7 @@ async function processMessage(
     businessId,
     conversationId: conversation.id,
     userMessage: text,
+    state: conversation.state,
   })
 
   let replyText: string

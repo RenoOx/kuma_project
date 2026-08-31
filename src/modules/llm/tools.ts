@@ -111,10 +111,10 @@ export const kumaTools: ChatCompletionTool[] = [
 ]
 
 export const KUMA_TOOL_NAMES = [
-  'check_availability',
-  'book_appointment',
-  'confirm_pending_appointment',
-  'request_image',
-  'escalate_to_human',
+  'check_availability', //revisar horarios
+  'book_appointment', // reserrvar
+  'confirm_pending_appointment', //confirmar cita pendeinte
+  'request_image', // pedir imagen
+  'escalate_to_human', //escalar a humano
 ] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]

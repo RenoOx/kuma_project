@@ -8,8 +8,10 @@ import { logger } from '@/config/logger.js'
 import type { Message } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
+import * as conversationService from '@/modules/conversation/conversation.service.js'
+import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
@@ -121,6 +123,59 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     )
   }
 
+  // 3b. Conversation state. The flow belongs to the code, not to the model:
+  // this service reads the state to decide what the model is allowed to reach
+  // for, and never decides the state itself.
+  //
+  // `params.state` wins when the caller passes one; otherwise we use the value
+  // the row already carries (loaded above, so no extra query). Settings can be
+  // null for an unconfigured business — falling back to 'appointments' mirrors
+  // the Zod default, so that business behaves exactly as it did before.
+  const currentState = params.state ?? conversation.state
+  const flowType: FlowType = settings?.flowType ?? 'appointments'
+
+  // Every trigger of this turn goes through here. A failed write costs the
+  // transition, never the reply: we log it and carry on from where we were.
+  const applyTriggerOrKeep = async (from: string, trigger: string): Promise<string> => {
+    const applied = await conversationService.applyTrigger({
+      businessId: params.businessId,
+      conversationId: params.conversationId,
+      flowType,
+      currentState: from,
+      trigger,
+    })
+    if (applied.ok) return applied.data
+    log.warn({ code: applied.error.code, trigger, from }, 'could not apply state transition')
+    return from
+  }
+
+  // The turn's opening trigger, applied BEFORE the tools are picked so a first
+  // message gets the tools of the state it lands in. This is what lifts a
+  // conversation off 'idle': no tool can, because 'idle' offers none that
+  // produces a trigger. In every other state it matches nothing and writes
+  // nothing.
+  let effectiveState = await applyTriggerOrKeep(currentState, 'customer_message')
+  const stateConfig = getStateConfig(flowType, effectiveState)
+
+  // A tool the state does not list is not refused — it is never offered, so the
+  // model never considers it. Different layer from the executor's gates, which
+  // judge the calls that do come through: the deposit gate stays the authority
+  // over book_appointment.
+  const allowedToolNames = new Set(stateConfig.tools)
+  const stateTools = kumaTools.filter(
+    (t) => t.type === 'function' && allowedToolNames.has(t.function.name),
+  )
+  // Every state defines at least one tool today, so this is never empty. The
+  // guard is here because OpenAI rejects `tools: []` with a 400 — a state added
+  // later without tools should degrade to a plain completion, not an error.
+  const toolsParam = stateTools.length > 0 ? stateTools : undefined
+  const toolChoiceParam = stateTools.length > 0 ? ('auto' as const) : undefined
+
+  log.debug(
+    { flowType, stateIn: currentState, state: effectiveState, allowedTools: stateConfig.tools },
+    'conversation state resolved for this reply',
+  )
+
   // 4. Knowledge base — selective, not the whole table. The customer message
   // routes to a category; `always` entries and matching `trigger_based` entries
   // come along regardless. See knowledgeBaseSearch.service.
@@ -183,13 +238,19 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   // History drives the call-to-action decision (see decideCallToAction): the
   // model no longer judges whether it already invited recently.
-  const systemPrompt = buildSystemPrompt(
+  const basePrompt = buildSystemPrompt(
     business,
     kbResult.data.entries,
     settings,
     historyResult.data,
     pending,
   )
+  // The state's instruction goes last, after the variable tail — the static
+  // body has to stay first for the prompt cache. An empty promptAddition (both
+  // flows' 'idle') adds nothing at all, not even the header.
+  const systemPrompt = stateConfig.promptAddition
+    ? [basePrompt, '', '# Paso actual de la conversación', stateConfig.promptAddition].join('\n')
+    : basePrompt
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...convertHistoryToChatMessages(historyResult.data),
@@ -207,8 +268,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         {
           model: MODEL,
           messages: chatMessages,
-          tools: kumaTools,
-          tool_choice: 'auto',
+          tools: toolsParam,
+          tool_choice: toolChoiceParam,
           temperature: TEMPERATURE,
           max_tokens: MAX_TOKENS,
         },
@@ -285,6 +346,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       log.info(
         {
           iteration,
+          flowType,
+          stateIn: currentState,
+          state: effectiveState,
+          allowedTools: stateConfig.tools,
           tokensInput: totalTokensInput,
           tokensOutput: totalTokensOutput,
           toolsExecuted: executedTools.length,
@@ -350,6 +415,14 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         error: toolResult.error,
       })
 
+      // Folded over the turn's own variable rather than re-read from the row:
+      // when the model calls two tools in one iteration, the second has to be
+      // evaluated against the state the first one left behind. Persisted at the
+      // moment of the change so a later error return cannot take it down with it.
+      if (toolResult.trigger) {
+        effectiveState = await applyTriggerOrKeep(effectiveState, toolResult.trigger)
+      }
+
       if (call.function.name === 'escalate_to_human' && !toolResult.error) {
         escalated = true
       }
@@ -375,6 +448,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   log.warn(
     {
       maxIterations: MAX_TOOL_ITERATIONS,
+      flowType,
+      stateIn: currentState,
+      state: effectiveState,
+      allowedTools: stateConfig.tools,
       toolsExecuted: executedTools.length,
     },
     'llm hit max tool iterations, auto-escalating',

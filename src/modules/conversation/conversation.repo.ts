@@ -165,6 +165,21 @@ export async function updateStatus(
     .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
 }
 
+// The state machine's write. Kept beside updateStatus because they are the same
+// shape, but they are different columns with different owners: status is set
+// from several places, state only ever from conversation.service.applyTrigger.
+export async function updateState(
+  businessId: string,
+  id: string,
+  state: string,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(conversations)
+    .set({ state, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
+}
+
 export async function updateLastMessageAt(
   businessId: string,
   id: string,
