@@ -35,6 +35,7 @@ import {
 } from '@/modules/whatsapp/messageKind.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
@@ -547,6 +548,13 @@ async function relayImage(params: {
     )
     return false
   }
+
+  // The card the owner just read carries the patient's phone, service and slot.
+  // Recorded in their thread so that answering it — "dile que no se ve bien" —
+  // reaches the assistant with the phone already in context instead of making
+  // it ask the owner for a number Emma herself sent seconds earlier.
+  await recordOwnerNotification(business.id, sent.data.caption)
+
   return true
 }
 

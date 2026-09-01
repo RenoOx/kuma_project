@@ -115,9 +115,13 @@ export function buildOwnerCaption(params: {
  * Relays a customer's photo to the business owner.
  *
  * Returns err when the owner cannot be reached, so the caller can fall back to
- * the text-only path instead of leaving the photo nowhere.
+ * the text-only path instead of leaving the photo nowhere. On success it hands
+ * back the caption it built: the caller records that text in the owner thread,
+ * and rebuilding it there would mean duplicating this module's formatting.
  */
-export async function forwardImageToOwner(params: ForwardImageParams): Promise<Result<void>> {
+export async function forwardImageToOwner(
+  params: ForwardImageParams,
+): Promise<Result<{ caption: string }>> {
   const { business } = params
 
   if (!business.ownerWhatsappNumber) {
@@ -153,7 +157,7 @@ export async function forwardImageToOwner(params: ForwardImageParams): Promise<R
       },
       'forwarded customer image to owner',
     )
-    return ok(undefined)
+    return ok({ caption })
   } catch (cause) {
     return err(
       new AppError({

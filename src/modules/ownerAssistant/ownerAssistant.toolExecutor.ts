@@ -198,7 +198,13 @@ async function resumeBot(ctx: OwnerContext): Promise<OwnerToolExecutionResult> {
 
 async function sendDailyReportNow(ctx: OwnerContext): Promise<OwnerToolExecutionResult> {
   const reportText = await generateDailyReportText(ctx.businessId)
-  const sent = await ownerNotifier.notifyOwner(ctx.businessId, reportText)
+  // Not recorded in the owner thread: this runs inside the assistant's tool
+  // loop, so the row would land between the assistant turn carrying the
+  // tool_calls and its tool result and make the next request invalid. The
+  // report still reaches the transcript through this tool's own result.
+  const sent = await ownerNotifier.notifyOwner(ctx.businessId, reportText, {
+    recordInOwnerThread: false,
+  })
   if (!sent.ok) {
     return {
       result: JSON.stringify({
