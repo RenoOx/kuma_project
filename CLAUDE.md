@@ -119,11 +119,29 @@ El flujo NO lo decide el LLM — lo controla el código.
 ### Flujos
 
 - `flowType: "appointments"`: idle → greeting → informing → show_availability 
-  → choose_time → await_payment (si depósito) → confirmed
+  → choose_time → await_payment (si depósito) → await_payment_verification
+  → confirmed
 - `flowType: "sales"`: idle → greeting → informing → send_offer → 
   await_payment → collect_data → confirmed
 
 Definiciones en `src/modules/conversation/stateMachine.ts`.
+
+### Verificación de pago (solo si `requiresDeposit`)
+
+Cuando el negocio pide adelanto, la captura del cliente NO crea la cita. El
+flujo es:
+
+1. La captura llega a `handleCustomerImage`: se reenvía al dueño y se abre una
+   fila en `payment_verifications` con la intención congelada (servicio,
+   horario, monto, nombre). El estado pasa a `await_payment_verification`.
+2. El dueño responde en su hilo. `approve_payment` crea la cita y confirma;
+   `reject_payment` no crea nada y le pide al cliente que reenvíe, volviendo el
+   estado a `await_payment`.
+
+Con `requiresDeposit` activo, el gate del `toolExecutor` rechaza SIEMPRE
+`book_appointment` del lado del cliente: la única vía a una cita con adelanto es
+la aprobación del dueño. Sin adelanto, nada de esto aplica y la captura agenda
+directo como antes.
 
 ### Módulos post-booking (opcionales, config-driven)
 

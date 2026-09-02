@@ -206,6 +206,51 @@ export const ownerTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'approve_payment',
+      description:
+        'El dueño miró el comprobante de un paciente y lo da por bueno. Recién ACÁ se crea la cita: se agenda en el horario que el paciente había pedido y él recibe la confirmación. Usar cuando, después de una tarjeta 💰 de captura de pago, el dueño dice "ok", "confirmado", "está bien", "dale", "listo". NO uses confirm_appointment para esto: mientras el pago está en verificación no existe ninguna cita que confirmar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_phone: {
+            type: 'string',
+            description:
+              'Teléfono del paciente en formato internacional, tal como aparece en la tarjeta 💰 de la captura. Ej: +51987654321',
+          },
+        },
+        required: ['customer_phone'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reject_payment',
+      description:
+        'El dueño miró el comprobante y NO lo da por bueno. No se crea ninguna cita y al paciente se le pide que reenvíe la captura. Usar cuando, después de una tarjeta 💰, el dueño dice "no se ve bien", "rechazado", "está borrosa", "no me llegó nada", "que la mande de nuevo".',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_phone: {
+            type: 'string',
+            description:
+              'Teléfono del paciente en formato internacional, tal como aparece en la tarjeta 💰 de la captura. Ej: +51987654321',
+          },
+          reason: {
+            type: 'string',
+            description:
+              'Motivo breve que se le comunica al paciente, opcional. Ej: "no se alcanza a ver el monto". Redactalo con TU voz, sin nombrar al dueño.',
+          },
+        },
+        required: ['customer_phone'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'reply_to_customer',
       description:
         'Le envía un mensaje de texto a un paciente por WhatsApp, en su misma conversación. Usar cuando el dueño te dice qué responderle a alguien: "dile que se ve bien", "respóndele que sí", "pídele que mande la foto de nuevo". El mensaje le llega al paciente como parte de la conversación normal.',

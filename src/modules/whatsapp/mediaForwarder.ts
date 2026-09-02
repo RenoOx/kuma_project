@@ -33,6 +33,14 @@ export interface ForwardImageParams {
   purpose: ImagePurpose | null
   /** Set when the deposit gate asked for this capture. */
   payment: PaymentContext | null
+  /**
+   * True when the booking is being withheld until the owner rules on this
+   * capture — the deposit case. The card then has to say so out loud: the owner
+   * used to read "respondé que sí y le confirmo la cita" about an appointment
+   * that had already been created behind their back, so a "no" cost them a
+   * cancellation instead of costing nothing.
+   */
+  awaitsVerification: boolean
 }
 
 /**
@@ -50,6 +58,7 @@ export function buildOwnerCaption(params: {
   pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt'> | null
   purpose: ImagePurpose | null
   payment: PaymentContext | null
+  awaitsVerification: boolean
 }): string {
   const said = params.caption?.trim()
   const { payment } = params
@@ -92,7 +101,14 @@ export function buildOwnerCaption(params: {
   if (said) lines.push('', `💬 "${said}"`)
 
   lines.push('')
-  if (payment) {
+  if (params.awaitsVerification) {
+    lines.push(
+      '⏳ *La cita todavía NO está creada.* Queda esperando tu visto bueno.',
+      '',
+      'Respondé *ok* y la agendo y le confirmo.',
+      'Respondé *no se ve bien* y le pido que la reenvíe.',
+    )
+  } else if (payment) {
     lines.push(
       'Si el pago está bien, respondé que sí y le confirmo la cita.',
       'Si no se ve bien, decime y le pido que la reenvíe.',
@@ -143,6 +159,7 @@ export async function forwardImageToOwner(
     pendingAppointment: params.pendingAppointment,
     purpose: params.purpose,
     payment: params.payment,
+    awaitsVerification: params.awaitsVerification,
   })
 
   try {

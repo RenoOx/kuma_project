@@ -140,20 +140,47 @@ export const appointmentsFlow: FlowDefinition = {
     tools: ['request_image', 'book_appointment', ESCALATE],
     promptAddition: 'Pide el comprobante de pago. No hables de horarios ni servicios.',
     transitions: {
-      payment_received: 'confirmed',
+      // The capture lands and the booking is NOT filed — it waits for the owner
+      // to look at the money. This used to be `payment_received: 'confirmed'`,
+      // which treated a photo as proof of payment: Emma cannot see the image,
+      // so all it ever proved was that something had been sent.
+      payment_capture_received: 'await_payment_verification',
       // book_appointment is offered above, so its success needs somewhere to
       // land — same rule as greeting. It fires whenever the gate is open: the
       // customer already has recent payment evidence, or the owner turned
       // requiresDeposit off while the thread sat here.
       appointment_booked: 'confirmed',
-      // Rescue exit. The payment expectation lives in memory with a 30 min TTL
-      // and does not survive a deploy, so a late capture carries no
-      // PaymentContext, books nothing and never produces payment_received.
-      // Without a way back the thread is stranded in a state whose own prompt
-      // forbids talking about times. check_availability deliberately stays out
-      // of this state's tools: the way back opens when the flow asks for
-      // availability again, not by this state going looking for it.
+      // Rescue exit, for a capture that reaches the handler with no booking
+      // intent to attach to — no live expectation and no verification row for
+      // this conversation either. Without a way back the thread is stranded in
+      // a state whose own prompt forbids talking about times.
+      // check_availability deliberately stays out of this state's tools: the
+      // way back opens when the flow asks for availability again, not by this
+      // state going looking for it.
       asks_availability: 'show_availability',
+      inactive_24h: 'idle',
+    },
+  },
+  await_payment_verification: {
+    // Only ESCALATE, and the exclusions are the point of the state.
+    //
+    // book_appointment is out because nothing the customer says should be able
+    // to close a booking whose payment a person has not looked at yet. The
+    // deposit gate refuses it here too, so this is the second of two locks on
+    // the same door — the state never offers the tool, and the executor would
+    // turn it down anyway. PENDING_CONFIRM is out for the reason it is out of
+    // await_payment: it does not pass that gate at all. request_image is out
+    // because the capture already arrived; asking for another one is how a
+    // customer ends up sending the same screenshot three times.
+    //
+    // The way out is not the customer's to take: only the owner's approve /
+    // reject moves this state.
+    tools: [ESCALATE],
+    promptAddition:
+      'El paciente ya envió su comprobante y el pago está en verificación. NO confirmes la cita, NO hables de horarios y NO le pidas otra captura. Si pregunta, decile que su comprobante se está verificando y que le confirmás en un momento.',
+    transitions: {
+      payment_approved: 'confirmed',
+      payment_rejected: 'await_payment',
       inactive_24h: 'idle',
     },
   },

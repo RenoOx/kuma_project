@@ -187,6 +187,20 @@ export const PAYMENT_BOOKED_PENDING_REPLY =
 export const PAYMENT_BOOKED_CONFIRMED_REPLY =
   '¡Recibí tu captura! Tu cita ya quedó agendada ✅ Te espero 😊'
 
+// Sent when the business charges a deposit: the capture is in, the booking is
+// NOT, and it will not be until the owner has looked at the money.
+//
+// This is the one customer-facing line that names a human on purpose, and it
+// breaks the "never mention the doctor or the encargado" rule that governs
+// every other reply. The reason it earns the exception: the wait is real and
+// unbounded here — it lasts until a person answers their WhatsApp — and
+// "dame un momentito" for something that may take an hour is a promise Emma
+// cannot keep. Naming the check is what makes the wait make sense.
+// prompts.ts carries the matching carve-out so she does not contradict this
+// two messages later.
+export const PAYMENT_VERIFICATION_REPLY =
+  '¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo 😊'
+
 export function replyForFormat(
   _format: UnsupportedFormat,
   randomFn: () => number = Math.random,

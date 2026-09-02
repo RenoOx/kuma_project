@@ -63,27 +63,6 @@ function normalizeServiceName(s: string): string {
 // wrecks the layout.
 const MAX_CUSTOMER_NAME_LENGTH = 80
 
-// How far back a photo still counts as "they just paid". Same window as the
-// image expectation TTL: long enough to switch to the bank app and back, short
-// enough that yesterday's photo does not unlock today's booking.
-export const PAYMENT_EVIDENCE_WINDOW_MS = 30 * 60 * 1000
-
-/**
- * Whether this conversation shows a recent sign that the customer sent a
- * payment capture.
- *
- * Deliberately NOT a validation of the payment: Emma cannot see the image, so
- * any recent photo counts. The owner is the one who looks at it and decides.
- * The gate exists to stop Emma from filing a booking with no evidence at all.
- */
-export async function hasRecentPaymentEvidence(
-  businessId: string,
-  conversationId: string,
-): Promise<boolean> {
-  const since = new Date(Date.now() - PAYMENT_EVIDENCE_WINDOW_MS)
-  return eventsRepo.existsSince(businessId, conversationId, 'customer_image_received', since)
-}
-
 function normalizeCustomerName(raw: string | undefined): string | null {
   if (!raw) return null
   const cleaned = raw.trim().replace(/\s+/g, ' ').slice(0, MAX_CUSTOMER_NAME_LENGTH)
@@ -991,7 +970,7 @@ function wrongStatus(
  * "gracias, ahí estaré" to a message Emma has no memory of sending, and her
  * next reply reads as a non sequitur.
  */
-async function messagePatient(params: {
+export async function messagePatient(params: {
   businessId: string
   customerId: string
   phone: string
@@ -1088,6 +1067,64 @@ function actionResult(appointment: Appointment, notified: Result<void>): Appoint
   }
 }
 
+/**
+ * The card a patient reads when their appointment becomes a commitment.
+ *
+ * Shared by the owner's confirm_appointment and by the deposit flow's payment
+ * approval, because both turn a request into a booking. Two wordings for the
+ * same event is how a patient starts asking which message is the real one.
+ */
+function buildConfirmationText(params: {
+  customer: { name: string | null }
+  service: string
+  scheduledAt: Date
+  timezone: string
+  niche: Niche
+}): string {
+  return [
+    `${patientGreeting(params.customer)} Tu cita ha sido confirmada 📋`,
+    '',
+    `${NICHE_SERVICE_EMOJI[params.niche]} ${params.service}`,
+    `📅 ${formatRequestDateTime(params.scheduledAt, params.timezone)}`,
+    '',
+    'Te esperamos. Si necesitas reprogramar, escríbenos con anticipación.',
+  ].join('\n')
+}
+
+/**
+ * Sends that same card for an appointment that is ALREADY scheduled.
+ *
+ * bookAppointment stays silent on purpose: in the normal flow Emma is answering
+ * the customer in that very turn, so a push would double up. The payment
+ * verification flow has no such turn - the booking is filed from the OWNER's
+ * thread, minutes or hours after the patient last heard anything - so somebody
+ * has to tell them.
+ */
+export async function notifyPatientOfConfirmedAppointment(params: {
+  businessId: string
+  appointmentId: string
+}): Promise<Result<AppointmentActionResult>> {
+  const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
+  if (!ctx.ok) return ctx
+  const { appointment, business, customer } = ctx.data
+
+  const niche = await nicheOf(params.businessId)
+  const notified = await messagePatient({
+    businessId: params.businessId,
+    customerId: customer.id,
+    phone: customer.phone,
+    text: buildConfirmationText({
+      customer,
+      service: appointment.service,
+      scheduledAt: appointment.scheduledAt,
+      timezone: business.timezone,
+      niche,
+    }),
+  })
+
+  return ok(actionResult(appointment, notified))
+}
+
 export async function confirmAppointment(params: {
   businessId: string
   appointmentId: string
@@ -1119,14 +1156,13 @@ export async function confirmAppointment(params: {
     }
 
     const niche = await nicheOf(params.businessId)
-    const text = [
-      `${patientGreeting(customer)} Tu cita ha sido confirmada 📋`,
-      '',
-      `${NICHE_SERVICE_EMOJI[niche]} ${appointment.service}`,
-      `📅 ${formatRequestDateTime(appointment.scheduledAt, business.timezone)}`,
-      '',
-      'Te esperamos. Si necesitas reprogramar, escríbenos con anticipación.',
-    ].join('\n')
+    const text = buildConfirmationText({
+      customer,
+      service: appointment.service,
+      scheduledAt: appointment.scheduledAt,
+      timezone: business.timezone,
+      niche,
+    })
 
     const notified = await messagePatient({
       businessId: params.businessId,

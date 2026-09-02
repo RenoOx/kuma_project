@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { logger } from '@/config/logger.js'
+import type { Customer, PaymentVerification } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
+import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import type { BotPausedState } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
@@ -49,6 +51,11 @@ const rescheduleArgs = z.object({
 const replyToCustomerArgs = z.object({
   customer_phone: z.string().min(1),
   message: z.string().min(1),
+})
+
+const paymentDecisionArgs = z.object({
+  customer_phone: z.string().min(1),
+  reason: z.string().optional(),
 })
 
 // Every patient name the owner reads goes through here. A null means WhatsApp
@@ -366,6 +373,156 @@ async function cancel(
   }
 }
 
+// ── Verificación de pagos ────────────────────────────────────────────────────
+//
+// The owner's half of the deposit flow. A capture arrives, the booking is
+// withheld, and one of these two turns that hold into a decision.
+//
+// Keyed on the patient's PHONE rather than on a verification id, for the same
+// reason reply_to_customer is: the phone is what the 💰 card put in front of
+// the owner, and it is what the model can read back out of its own thread. An
+// id would have to be shown to the owner first, which is the one thing the
+// prompt tells it never to do.
+
+/**
+ * Resolves "the capture this owner is talking about" from a phone number.
+ *
+ * Both failure modes are answered in words the model can pass on, because both
+ * are things the owner can act on: a wrong number, or a decision that arrived
+ * after the request was already closed.
+ */
+async function loadOpenVerification(
+  ctx: OwnerContext,
+  rawPhone: string,
+): Promise<
+  | { ok: true; verification: PaymentVerification; customer: Customer }
+  | { ok: false; failure: OwnerToolExecutionResult }
+> {
+  const phone = normalizePhone(rawPhone)
+  if (!phone) {
+    return {
+      ok: false,
+      failure: {
+        result: JSON.stringify({
+          error: 'invalid_phone',
+          instruction: 'Ese teléfono no es válido. Pedile al dueño de qué paciente se trata.',
+        }),
+        error: 'invalid_phone',
+      },
+    }
+  }
+
+  const customer = await customerRepo.findByPhone(ctx.businessId, phone)
+  if (!customer) {
+    return {
+      ok: false,
+      failure: {
+        result: JSON.stringify({
+          error: 'customer_not_found',
+          instruction:
+            'No encontré a ningún paciente con ese número en este negocio. Decíselo al dueño y pedile que confirme el teléfono.',
+        }),
+        error: 'customer_not_found',
+      },
+    }
+  }
+
+  const conversation = await conversationService.getOrCreateOpen(ctx.businessId, customer.id)
+  if (!conversation.ok) {
+    return {
+      ok: false,
+      failure: {
+        result: JSON.stringify({
+          error: conversation.error.code,
+          instruction: 'No pude abrir la conversación con ese paciente. Avisale al dueño.',
+        }),
+        error: conversation.error.code,
+      },
+    }
+  }
+
+  const verification = await paymentVerificationService.findOpenByConversation(
+    ctx.businessId,
+    conversation.data.id,
+  )
+  if (!verification) {
+    return {
+      ok: false,
+      failure: {
+        result: JSON.stringify({
+          error: 'no_pending_verification',
+          instruction:
+            'Ese paciente no tiene ningún comprobante esperando verificación ahora mismo. Decíselo al dueño en una línea; si igual quiere mandarle un mensaje, usá reply_to_customer.',
+        }),
+        error: 'no_pending_verification',
+      },
+    }
+  }
+
+  return { ok: true, verification, customer }
+}
+
+async function approvePayment(
+  ctx: OwnerContext,
+  args: { customer_phone: string },
+): Promise<OwnerToolExecutionResult> {
+  const loaded = await loadOpenVerification(ctx, args.customer_phone)
+  if (!loaded.ok) return loaded.failure
+
+  const result = await paymentVerificationService.approve({
+    businessId: ctx.businessId,
+    verificationId: loaded.verification.id,
+  })
+  if (!result.ok) {
+    return {
+      result: JSON.stringify({ error: result.error.code, instruction: result.error.userMessage }),
+      error: result.error.code,
+    }
+  }
+
+  const { appointment } = result.data
+  return {
+    result: JSON.stringify({
+      status: 'approved',
+      customer_name: displayName(loaded.customer.name),
+      service: appointment?.service ?? loaded.verification.service,
+      when: readableSlot(
+        appointment?.scheduledAt ?? loaded.verification.scheduledAt,
+        ctx.businessTimezone,
+      ),
+      instruction: `Pago aprobado y cita agendada. ${notifyWarning(result.data)} Confirmáselo al dueño en una línea, nombrando al paciente y el horario.`,
+    }),
+  }
+}
+
+async function rejectPayment(
+  ctx: OwnerContext,
+  args: { customer_phone: string; reason?: string },
+): Promise<OwnerToolExecutionResult> {
+  const loaded = await loadOpenVerification(ctx, args.customer_phone)
+  if (!loaded.ok) return loaded.failure
+
+  const result = await paymentVerificationService.reject({
+    businessId: ctx.businessId,
+    verificationId: loaded.verification.id,
+    ...(args.reason ? { reason: args.reason } : {}),
+  })
+  if (!result.ok) {
+    return {
+      result: JSON.stringify({ error: result.error.code, instruction: result.error.userMessage }),
+      error: result.error.code,
+    }
+  }
+
+  return {
+    result: JSON.stringify({
+      status: 'rejected',
+      customer_name: displayName(loaded.customer.name),
+      instruction: `Comprobante rechazado, no se agendó nada y ya le pedí al paciente que la reenvíe. ${notifyWarning(result.data)}`,
+    }),
+  }
+}
+
 /**
  * Relays the owner's words to a patient, as Emma.
  *
@@ -526,6 +683,16 @@ export async function executeOwnerTool(
       const parsed = appointmentIdArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
       return await cancel(ctx, parsed.data)
+    }
+    if (name === 'approve_payment') {
+      const parsed = paymentDecisionArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+      return await approvePayment(ctx, parsed.data)
+    }
+    if (name === 'reject_payment') {
+      const parsed = paymentDecisionArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+      return await rejectPayment(ctx, parsed.data)
     }
     if (name === 'reply_to_customer') {
       const parsed = replyToCustomerArgs.safeParse(args)

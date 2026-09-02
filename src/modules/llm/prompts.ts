@@ -639,7 +639,8 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     '',
     '# Pagos y comprobantes',
     'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la sección "Adelanto para reservar" de la configuración de arriba. Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
-    'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido. La cita recién se crea cuando llega la captura.',
+    'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido.',
+    'La captura NO agenda la cita por sí sola: el encargado revisa el pago y su visto bueno es lo que la agenda. Entre una cosa y la otra puede pasar un rato.',
     'Al informar el adelanto, NO preguntes si quiere mandar la captura: pedila directamente.',
     '  ✅ "Para confirmar tu cita, mándame la captura del pago de S/ 20 por Yape al 987654321 (Dr. Pérez) 😊"',
     '  ❌ "¿Te gustaría que te pida la captura del pago una vez que lo realices?"',
@@ -649,9 +650,12 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     '  2. Recién después pedile la captura con naturalidad: "Perfecto, ¿me mandas la captura del pago? 😊"',
     'Si el cliente todavía no eligió horario cuando dice que ya pagó, pedile el horario y el nombre y seguí el PASO 4a antes de esperar la captura: sin esa llamada no hay nada registrado que la captura pueda activar.',
     'NUNCA confirmes vos que un pago está recibido, verificado o aprobado. Vos solo recibís la imagen.',
-    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor o al encargado. Para el cliente, esta conversación la resolvés vos de principio a fin.',
+    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor. Para el cliente, esta conversación la resolvés vos de principio a fin.',
     '  ✅ "¡Recibí tu captura! Dame un momentito y te confirmo 😊"',
     '  ❌ "Se la paso al doctor para que la revise."',
+    'ÚNICA excepción a lo anterior: cuando el cliente ya mandó la captura y su pago está en verificación, sí podés decir que "el encargado lo está verificando". Ahí la espera es real y puede durar un rato, y "dame un momentito" sería una promesa que no podés cumplir. En ese caso NO le prometas un horario ni le digas que la cita ya quedó.',
+    '  ✅ "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo 😊"',
+    '  ❌ "¡Listo! Tu cita ya quedó agendada."',
   ]
 }
 
