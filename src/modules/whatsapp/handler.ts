@@ -4,6 +4,7 @@ import { logger } from '@/config/logger.js'
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
+import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
@@ -30,11 +31,13 @@ import {
   PAYMENT_BOOKED_CONFIRMED_REPLY,
   PAYMENT_BOOKED_PENDING_REPLY,
   PAYMENT_IMAGE_REPLY,
+  PAYMENT_VERIFICATION_REPLY,
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
@@ -294,6 +297,26 @@ async function handleCustomerImage(params: {
 
   const pendingAppointment = await appointmentRepo.findPendingByCustomer(businessId, customer.id)
 
+  // The booking this capture pays for, resolved BEFORE the forward so the card
+  // the owner reads names the service and the slot even when the intent came
+  // from the row rather than from memory.
+  //
+  // The in-memory expectation is the fast path; the verification row behind it
+  // is what survives a rejected capture, a restart, or an owner who answers an
+  // hour later.
+  //
+  // The row is only consulted from await_payment — the one state that means "we
+  // asked for a capture and nobody has accepted it yet". Reading it from
+  // anywhere else would make an unrelated photo, sent weeks after the booking
+  // was confirmed, look like payment for it all over again.
+  const conversation = await conversationRepo.findById(businessId, conversationId)
+  const flowType = settingsResult.ok ? settingsResult.data.flowType : 'appointments'
+  const intent =
+    payment ??
+    (conversation?.state === 'await_payment'
+      ? await paymentVerificationService.findLatestBooking(businessId, conversationId)
+      : null)
+
   // A customer waiting on the owner's approval is the one case worth relaying
   // without being asked: that photo is almost always the payment that unblocks
   // their appointment, and unlike the expectation above this signal survives a
@@ -314,7 +337,8 @@ async function handleCustomerImage(params: {
       caption,
       pendingAppointment,
       purpose,
-      payment,
+      payment: intent,
+      awaitsVerification: intent !== null && requiresDeposit,
       log,
     })
   } else {
@@ -324,54 +348,85 @@ async function handleCustomerImage(params: {
     )
   }
 
-  // The capture is the last thing the deposit gate was waiting for, so the
-  // booking is filed HERE. Nothing else would: images never reach the model, so
-  // leaving it to the next turn means no appointment exists until the customer
-  // happens to send another text — and often they never do. The owner then gets
-  // a payment capture for a booking that was never created.
-  const booked = payment
-    ? await bookFromPaymentCapture({ businessId, customerId: customer.id, payment, log })
-    : null
+  // THE SPLIT. With a deposit, the capture buys a review, not a booking: Emma
+  // cannot see the image, so filing the appointment here was taking the
+  // customer's word for the money and handing the owner a fait accompli they
+  // could only undo by cancelling on a patient Emma had already congratulated.
+  //
+  // Without a deposit there is nobody to review anything and the old path
+  // stands: the capture is the last thing the gate was waiting for, and nothing
+  // else would file the booking — images never reach the model, so leaving it
+  // to the next turn means no appointment until the customer writes again, and
+  // often they never do.
+  const verification =
+    intent && requiresDeposit
+      ? await paymentVerificationService.openVerification({
+          businessId,
+          conversationId,
+          customerId: customer.id,
+          booking: intent,
+        })
+      : null
+  if (verification && !verification.ok) {
+    log.error(
+      { code: verification.error.code, context: verification.error.logContext },
+      'could not open payment verification for this capture',
+    )
+  }
+  const awaitingVerification = verification?.ok === true
+
+  const booked =
+    intent && !requiresDeposit
+      ? await bookFromPaymentCapture({
+          businessId,
+          customerId: customer.id,
+          payment: intent,
+          log,
+        })
+      : null
 
   // await_payment has no other way out. Images never reach the model, so the
-  // tool executor never sees the payment that this state exists to wait for,
+  // tool executor never sees the capture that this state exists to wait for,
   // and a conversation stuck there is not even offered check_availability.
   //
-  // Only once the booking actually exists: a failed one has to keep waiting,
-  // which is exactly what the marker below tells the model to retry.
-  if (payment && booked) {
-    const conversation = await conversationRepo.findById(businessId, conversationId)
-    if (conversation) {
-      const flowType = settingsResult.ok ? settingsResult.data.flowType : 'appointments'
-      const applied = await conversationService.applyTrigger({
-        businessId,
-        conversationId,
-        flowType,
-        currentState: conversation.state,
-        trigger: 'payment_received',
-      })
-      if (!applied.ok) {
-        log.warn({ code: applied.error.code }, 'could not apply payment_received transition')
-      }
+  // Only once something actually happened: a failed open or a failed booking
+  // has to keep waiting, which is what the marker below tells the model.
+  const trigger = awaitingVerification
+    ? 'payment_capture_received'
+    : booked
+      ? 'payment_received'
+      : null
+  if (trigger && conversation) {
+    const applied = await conversationService.applyTrigger({
+      businessId,
+      conversationId,
+      flowType,
+      currentState: conversation.state,
+      trigger,
+    })
+    if (!applied.ok) {
+      log.warn({ code: applied.error.code, trigger }, 'could not apply capture transition')
     }
   }
 
   // Images never reach the model, so without this the next turn shows Emma
   // acknowledging a photo that appears nowhere in the history — and under the
-  // deposit gate she has no way to know the capture arrived and the booking can
-  // finally go through. A plain-text stand-in is what the model can read.
+  // deposit gate she has no way to know the capture arrived at all. A
+  // plain-text stand-in is what the model can read.
   //
-  // When the booking already went through, the marker says so and forbids the
-  // retry: otherwise the model reads "ya podés llamar book_appointment" on the
-  // customer's next message and files the same appointment twice.
-  const marker = payment
-    ? booked
-      ? `[El paciente envió la captura de pago para ${payment.service} y su cita ya quedó ${
-          booked.status === 'pending' ? 'registrada como solicitud pendiente' : 'agendada'
-        }. NO llames book_appointment de nuevo para ese horario.]`
-      : `[El paciente envió una captura de pago para ${payment.service}${
-          payment.amount ? ` (adelanto de ${payment.amount})` : ''
-        }. Ya podés llamar book_appointment para ese horario.]`
+  // Every payment variant forbids book_appointment, for two different reasons:
+  // once the booking exists, calling it again files the same appointment twice;
+  // while the capture is under review, calling it books what nobody approved.
+  const marker = intent
+    ? awaitingVerification
+      ? `[El paciente envió la captura de pago para ${intent.service}. La cita NO está creada: el pago está en verificación. NO llames book_appointment ni le confirmes la cita.]`
+      : booked
+        ? `[El paciente envió la captura de pago para ${intent.service} y su cita ya quedó ${
+            booked.status === 'pending' ? 'registrada como solicitud pendiente' : 'agendada'
+          }. NO llames book_appointment de nuevo para ese horario.]`
+        : `[El paciente envió una captura de pago para ${intent.service}${
+            intent.amount ? ` (adelanto de ${intent.amount})` : ''
+          }, pero no pude registrarla. NO llames book_appointment ni le confirmes la cita: decile que la estás revisando.]`
     : '[El paciente envió una imagen.]'
   const markerPersisted = await messageService.append({
     businessId,
@@ -383,17 +438,20 @@ async function handleCustomerImage(params: {
     log.error({ code: markerPersisted.error.code }, 'append image marker failed')
   }
 
-  // A failed booking falls back to the old wording on purpose: it promises
-  // nothing, and the marker above still tells the model to retry next turn.
-  const reply = booked
-    ? booked.status === 'pending'
-      ? PAYMENT_BOOKED_PENDING_REPLY
-      : PAYMENT_BOOKED_CONFIRMED_REPLY
-    : payment
-      ? PAYMENT_IMAGE_REPLY
-      : forwarded
-        ? IMAGE_FORWARDED_REPLY
-        : IMAGE_RECEIVED_REPLY
+  // A failed open or a failed booking falls back to the old wording on purpose:
+  // it promises nothing, which is the only honest thing to say when we do not
+  // know whether this capture is going anywhere.
+  const reply = awaitingVerification
+    ? PAYMENT_VERIFICATION_REPLY
+    : booked
+      ? booked.status === 'pending'
+        ? PAYMENT_BOOKED_PENDING_REPLY
+        : PAYMENT_BOOKED_CONFIRMED_REPLY
+      : intent
+        ? PAYMENT_IMAGE_REPLY
+        : forwarded
+          ? IMAGE_FORWARDED_REPLY
+          : IMAGE_RECEIVED_REPLY
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -509,6 +567,7 @@ async function relayImage(params: {
   pendingAppointment: Awaited<ReturnType<typeof appointmentRepo.findPendingByCustomer>>
   purpose: ImagePurpose | null
   payment: PaymentContext | null
+  awaitsVerification: boolean
   log: HandlerLogger
 }): Promise<boolean> {
   const { raw, business, customer, caption, pendingAppointment, purpose, payment, log } = params
@@ -539,6 +598,7 @@ async function relayImage(params: {
     pendingAppointment,
     purpose,
     payment,
+    awaitsVerification: params.awaitsVerification,
   })
   if (!sent.ok) {
     log.error(
@@ -547,6 +607,13 @@ async function relayImage(params: {
     )
     return false
   }
+
+  // The card the owner just read carries the patient's phone, service and slot.
+  // Recorded in their thread so that answering it — "dile que no se ve bien" —
+  // reaches the assistant with the phone already in context instead of making
+  // it ask the owner for a number Emma herself sent seconds earlier.
+  await recordOwnerNotification(business.id, sent.data.caption)
+
   return true
 }
 

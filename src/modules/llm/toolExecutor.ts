@@ -118,7 +118,8 @@ function depositRequiredInstruction(
     `Este negocio pide un adelanto ${monto} para confirmar la cita, y todavía no llegó ninguna captura de pago.`,
     `NO agendaste nada. Decile al cliente cuánto es el adelanto y cómo pagarlo: ${formatPaymentMethods(methods)}.`,
     'Después pedile la captura directamente, sin preguntarle si quiere mandarla.',
-    'Este rechazo es lo esperado, no es un error: dejó registrado el horario, el servicio y el nombre, y la cita se crea sola en cuanto llegue la captura.',
+    'Este rechazo es lo esperado, no es un error: dejó registrado el horario, el servicio y el nombre, esperando la captura.',
+    'Cuando la captura llegue, la cita NO se crea sola: el encargado revisa el pago y recién su visto bueno la agenda. Vos no tenés que hacer nada más en ese paso.',
     'No vuelvas a llamar book_appointment por tu cuenta. Única excepción: si el cliente cambia de horario o de servicio, llamala de nuevo con los datos nuevos — te la voy a rechazar igual, y así lo que queda registrado es lo último que el cliente eligió.',
     'NO le digas que su cita ya quedó agendada ni que la solicitud fue enviada: todavía no lo está.',
   ].join(' ')
@@ -353,32 +354,40 @@ export async function executeTool(
       // booking because the settings lookup blipped is the worse failure.
       const settingsForDeposit = await businessService.getSettings(context.businessId)
       if (settingsForDeposit.ok && settingsForDeposit.data.requiresDeposit) {
-        const paid = await appointmentService.hasRecentPaymentEvidence(
-          context.businessId,
-          context.conversationId,
-        )
-        if (!paid) {
-          const { depositAmount, depositPaymentMethods } = settingsForDeposit.data
-          // Armed HERE rather than left to the model calling request_image: the
-          // instruction below asks it to, but relying on that is the same bet
-          // this gate exists to stop making. The booking the customer is paying
-          // for rides along, because it does not exist in the database yet.
-          expectImage(context.conversationId, 'payment', {
-            service: parsed.data.service,
-            scheduledAtISO: parsed.data.datetime_iso,
-            amount: depositAmount?.trim() || null,
-            customerName: parsed.data.customer_name,
-          })
-          return {
-            result: JSON.stringify({
-              error: 'deposit_required',
-              deposit_amount: depositAmount ?? null,
-              payment_methods: formatPaymentMethods(depositPaymentMethods),
-              instruction: depositRequiredInstruction(depositAmount, depositPaymentMethods),
-            }),
+        // Refused unconditionally, with no evidence check any more.
+        //
+        // The gate used to open as soon as a photo had been recorded in the
+        // last 30 minutes. That was the best proxy available while the capture
+        // itself filed the booking — but it is a proxy for "something arrived",
+        // never for "the money is there", and Emma cannot tell the two apart
+        // because she cannot see the image.
+        //
+        // Now a person can: the capture opens a payment_verification and the
+        // owner rules on it, and THEIR approval is what books. So the one
+        // customer-side path into a deposit booking is closed. Leaving it ajar
+        // for "recent evidence" would hand back exactly the hole this whole
+        // flow exists to close — the photo lands, the evidence check passes,
+        // and the model books before anyone has looked at the money.
+        const { depositAmount, depositPaymentMethods } = settingsForDeposit.data
+        // Armed HERE rather than left to the model calling request_image: the
+        // instruction below asks it to, but relying on that is the same bet
+        // this gate exists to stop making. The booking the customer is paying
+        // for rides along, because it does not exist in the database yet.
+        expectImage(context.conversationId, 'payment', {
+          service: parsed.data.service,
+          scheduledAtISO: parsed.data.datetime_iso,
+          amount: depositAmount?.trim() || null,
+          customerName: parsed.data.customer_name,
+        })
+        return {
+          result: JSON.stringify({
             error: 'deposit_required',
-            trigger: 'deposit_required',
-          }
+            deposit_amount: depositAmount ?? null,
+            payment_methods: formatPaymentMethods(depositPaymentMethods),
+            instruction: depositRequiredInstruction(depositAmount, depositPaymentMethods),
+          }),
+          error: 'deposit_required',
+          trigger: 'deposit_required',
         }
       }
 

@@ -100,7 +100,7 @@ export const ownerTools: ChatCompletionTool[] = [
     function: {
       name: 'list_pending_appointments',
       description:
-        'SOLO las solicitudes sin aprobar (status pendiente), no la agenda. Usar únicamente cuando el dueño habla explícitamente de SOLICITUDES o PENDIENTES ("¿hay solicitudes?", "¿qué está pendiente de aprobar?"), o antes de confirmar/rechazar cuando no está claro a cuál se refiere. Si el dueño pregunta por sus CITAS o su AGENDA de un día, usá get_appointments, no esta.',
+        'SOLO lo que está esperando una decisión del dueño, no la agenda. Devuelve DOS listas: `pending` (solicitudes de cita ya creadas, se resuelven con confirm_appointment por `id`) y `pending_payments` (capturas de pago esperando el visto bueno, todavía SIN cita creada, se resuelven con approve_payment o reject_payment por `customer_phone`). Usar cuando el dueño habla de SOLICITUDES, PENDIENTES o COMPROBANTES ("¿hay solicitudes?", "¿qué está pendiente de aprobar?"), y SIEMPRE antes de confirmar o rechazar cuando no está claro a cuál se refiere. Si el dueño pregunta por sus CITAS o su AGENDA de un día, usá get_appointments, no esta.',
       parameters: {
         type: 'object',
         properties: {},
@@ -199,6 +199,61 @@ export const ownerTools: ChatCompletionTool[] = [
           },
         },
         required: ['appointment_id'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'approve_payment',
+      description:
+        'El dueño miró el comprobante de un paciente y lo da por bueno. Recién ACÁ se crea la cita: se agenda en el horario que el paciente había pedido y él recibe la confirmación. Usar cuando, después de una tarjeta 💰 de captura de pago, el dueño dice "ok", "confirmado", "está bien", "dale", "listo". NO uses confirm_appointment para esto: mientras el pago está en verificación no existe ninguna cita que confirmar. Si hay más de una tarjeta 💰 sin resolver, NO adivines: llamá list_pending_appointments y preguntale al dueño a cuál se refiere.',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_phone: {
+            type: 'string',
+            description:
+              'Teléfono del paciente en formato internacional, tal como aparece en la tarjeta 💰 de la captura. Ej: +51987654321',
+          },
+          customer_name: {
+            type: 'string',
+            description:
+              'Nombre del paciente TAL COMO lo dijo el dueño, si lo nombró ("confirma la de Juan" → "Juan"). Se verifica contra el comprobante antes de aprobar nada, así que mandalo siempre que el dueño haya dicho un nombre. Omitilo si no dijo ninguno — no lo inventes ni lo saques de la tarjeta.',
+          },
+        },
+        required: ['customer_phone'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'reject_payment',
+      description:
+        'El dueño miró el comprobante y NO lo da por bueno. No se crea ninguna cita y al paciente se le pide que reenvíe la captura. Usar cuando, después de una tarjeta 💰, el dueño dice "no se ve bien", "rechazado", "está borrosa", "no me llegó nada", "que la mande de nuevo".',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_phone: {
+            type: 'string',
+            description:
+              'Teléfono del paciente en formato internacional, tal como aparece en la tarjeta 💰 de la captura. Ej: +51987654321',
+          },
+          customer_name: {
+            type: 'string',
+            description:
+              'Nombre del paciente TAL COMO lo dijo el dueño, si lo nombró ("rechaza la de Juan" → "Juan"). Se verifica contra el comprobante antes de rechazar nada. Omitilo si no dijo ninguno — no lo inventes ni lo saques de la tarjeta.',
+          },
+          reason: {
+            type: 'string',
+            description:
+              'Motivo breve que se le comunica al paciente, opcional. Ej: "no se alcanza a ver el monto". Redactalo con TU voz, sin nombrar al dueño.',
+          },
+        },
+        required: ['customer_phone'],
         additionalProperties: false,
       },
     },

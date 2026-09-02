@@ -19,7 +19,11 @@ import type { OwnerContext, OwnerReply } from './ownerAssistant.types.js'
 const MODEL = 'gpt-4o-mini'
 const TEMPERATURE = 0.3
 const MAX_TOKENS = 400
-const HISTORY_LIMIT = 10
+// Counts ROWS, not turns: one question answered with two tools burns five of
+// them (user + assistant with tool_calls + two tool results + the final reply).
+// At 10 the owner's memory was roughly two exchanges, and proactive
+// notifications now take rows of their own.
+const HISTORY_LIMIT = 20
 const MAX_TOOL_ITERATIONS = 5
 const OPENAI_TIMEOUT_MS = 30_000
 const FALLBACK_TEXT = 'Disculpá, no pude procesar esa consulta. Probá de nuevo.'
@@ -48,32 +52,84 @@ function dayOfWeekInTimezone(timezone: string): string {
   }
 }
 
+/**
+ * Rebuilds the OpenAI payload from stored rows, repairing tool sequences the
+ * transcript cannot guarantee are intact.
+ *
+ * A tool result is only valid immediately after the assistant turn that asked
+ * for it, and every tool_call needs an answer. Three things break that here:
+ * HISTORY_LIMIT counts rows rather than turns, so the window routinely cuts
+ * through the middle of a sequence; the 48h cleanup deletes by age, so it can
+ * take the assistant parent and leave the tool child; and a proactive
+ * notification can land between the two when a customer writes while the owner
+ * is mid tool loop. Any of those made OpenAI reject the whole request and the
+ * owner read the fallback line instead of an answer.
+ *
+ * So: tool_calls with no stored answer are dropped, orphan tool rows are
+ * dropped, and anything that would land inside an open sequence is held back
+ * until it closes.
+ */
 function convertHistory(history: Message[]): ChatCompletionMessageParam[] {
+  // Which calls actually got an answer in this window. Read up front because a
+  // sequence has to be judged before its assistant turn is emitted.
+  const answered = new Set<string>()
+  for (const m of history) {
+    if (m.role === 'tool' && m.toolCallId) answered.add(m.toolCallId)
+  }
+
   const out: ChatCompletionMessageParam[] = []
+  const deferred: ChatCompletionMessageParam[] = []
+  let awaiting = new Set<string>()
+
+  const flushDeferred = (): void => {
+    out.push(...deferred)
+    deferred.length = 0
+  }
+  const emit = (msg: ChatCompletionMessageParam): void => {
+    if (awaiting.size > 0) deferred.push(msg)
+    else out.push(msg)
+  }
+
   for (const m of history) {
     if (m.role === 'system') continue
+
     if (m.role === 'tool') {
-      if (!m.toolCallId) continue
+      // Not awaited means orphaned: its assistant turn fell out of the window,
+      // was deleted by the cleanup, or this is a duplicate id.
+      if (!m.toolCallId || !awaiting.has(m.toolCallId)) continue
       out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content })
+      awaiting.delete(m.toolCallId)
+      if (awaiting.size === 0) flushDeferred()
       continue
     }
+
     if (m.role === 'assistant') {
       const stored = m.toolCalls as ChatCompletionMessageToolCall[] | null | undefined
-      if (stored && stored.length > 0) {
+      const usable = stored?.filter((c) => answered.has(c.id)) ?? []
+      if (usable.length > 0) {
+        // Opens a sequence, so it goes out directly — deferring it would put it
+        // after the very tool results it has to precede.
         out.push({
           role: 'assistant',
           content: m.content === '' ? null : m.content,
-          tool_calls: stored,
+          tool_calls: usable,
         })
-      } else {
-        out.push({ role: 'assistant', content: m.content })
+        awaiting = new Set(usable.map((c) => c.id))
+        continue
       }
+      // Nothing left once unanswered calls are dropped: keep it only if it also
+      // said something to the owner.
+      if (m.content !== '') emit({ role: 'assistant', content: m.content })
       continue
     }
+
     if (m.role === 'user') {
-      out.push({ role: 'user', content: m.content })
+      emit({ role: 'user', content: m.content })
     }
   }
+
+  // A sequence left open at the tail keeps its held messages out of `out`.
+  flushDeferred()
   return out
 }
 

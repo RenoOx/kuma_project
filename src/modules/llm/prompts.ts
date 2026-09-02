@@ -460,6 +460,29 @@ function renderDepositBlock(settings: BusinessSettings): string[] {
   ]
 }
 
+// ── Availability freshness — global rule ─────────────────────────────────────
+//
+// Applies in BOTH appointment modes and in every conversation state, which is
+// why it lives here and not in a state's promptAddition.
+//
+// The prompt already said "always call check_availability for the day asked",
+// but nothing forbade reusing the slots from an earlier call — and the
+// "Memoria de contexto" block actively tells the model to reuse prior context.
+// Slots go stale between two messages: another customer books one in between.
+//
+// Placed BEFORE the per-mode blocks on purpose so they can excuse themselves —
+// hybrid's step 3 explicitly tells the model NOT to call the tool when the
+// customer would rather walk in. Same ordering rule as REQUIRES_APPROVAL_BLOCK:
+// whatever needs to override comes after.
+const AVAILABILITY_FRESHNESS_BLOCK = [
+  '# Disponibilidad — SIEMPRE de la tool, NUNCA del historial',
+  'Los horarios libres cambian entre un mensaje y el siguiente: otro cliente puede haber reservado hace un minuto.',
+  '- NUNCA afirmes qué horarios hay libres, ni que una hora puntual está disponible, sin haber llamado check_availability en ESTE MISMO turno.',
+  '- NUNCA reutilices horarios de una llamada anterior ni los que vos mismo listaste antes en esta conversación: esa información ya venció.',
+  '- Si el cliente pregunta por disponibilidad y todavía no llamaste check_availability en este turno, llamala ANTES de responder.',
+  'Esto NO aplica al horario general de atención (apertura y cierre, que sale de la configuración de arriba), ni a los casos donde un bloque de abajo te dice explícitamente que no llames la tool.',
+]
+
 // ── Availability block, one per appointment mode ─────────────────────────────
 //
 // These are mutually exclusive: exactly one reaches the model. In
@@ -639,7 +662,8 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     '',
     '# Pagos y comprobantes',
     'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la sección "Adelanto para reservar" de la configuración de arriba. Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
-    'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido. La cita recién se crea cuando llega la captura.',
+    'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido.',
+    'La captura NO agenda la cita por sí sola: el encargado revisa el pago y su visto bueno es lo que la agenda. Entre una cosa y la otra puede pasar un rato.',
     'Al informar el adelanto, NO preguntes si quiere mandar la captura: pedila directamente.',
     '  ✅ "Para confirmar tu cita, mándame la captura del pago de S/ 20 por Yape al 987654321 (Dr. Pérez) 😊"',
     '  ❌ "¿Te gustaría que te pida la captura del pago una vez que lo realices?"',
@@ -649,9 +673,12 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     '  2. Recién después pedile la captura con naturalidad: "Perfecto, ¿me mandas la captura del pago? 😊"',
     'Si el cliente todavía no eligió horario cuando dice que ya pagó, pedile el horario y el nombre y seguí el PASO 4a antes de esperar la captura: sin esa llamada no hay nada registrado que la captura pueda activar.',
     'NUNCA confirmes vos que un pago está recibido, verificado o aprobado. Vos solo recibís la imagen.',
-    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor o al encargado. Para el cliente, esta conversación la resolvés vos de principio a fin.',
+    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor. Para el cliente, esta conversación la resolvés vos de principio a fin.',
     '  ✅ "¡Recibí tu captura! Dame un momentito y te confirmo 😊"',
     '  ❌ "Se la paso al doctor para que la revise."',
+    'ÚNICA excepción a lo anterior: cuando el cliente ya mandó la captura y su pago está en verificación, sí podés decir que "el encargado lo está verificando". Ahí la espera es real y puede durar un rato, y "dame un momentito" sería una promesa que no podés cumplir. En ese caso NO le prometas un horario ni le digas que la cita ya quedó.',
+    '  ✅ "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo 😊"',
+    '  ❌ "¡Listo! Tu cita ya quedó agendada."',
   ]
 }
 
@@ -678,6 +705,34 @@ export function buildNicheBlocks(niche: Niche, businessName: string): string {
 
   return lines.join('\n')
 }
+
+// The services list is a CLOSED catalog, and that is what separates this from
+// general rule 2: a payment method the config never mentions is a MISSING fact,
+// so denying it would be inventing. A service that is not in settings.services
+// is not missing data — the business listed what it does, and everything else
+// is what it does not do.
+//
+// Step 1 is the old block kept whole: "permanente" at a shop that files it as
+// "alisado de pelo" is a naming mismatch, and denying there loses a real sale.
+// Step 2 is what was missing — nothing told the model that a treatment common
+// to the niche may simply not be offered HERE, so it answered yes to whatever
+// sounded plausible and only failed later, when the tool rejected the name.
+const UNRECOGNIZED_SERVICE_BLOCK = [
+  '# Servicios no reconocidos',
+  'La lista de "Servicios disponibles" de arriba es el catálogo COMPLETO de este negocio: no existe ningún servicio fuera de esa lista.',
+  'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista:',
+  '',
+  '1. Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado, sin darlo por hecho:',
+  '   Cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
+  '',
+  '2. Si no se parece a ninguno, o el cliente confirma que es otro tratamiento distinto, decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
+  '   ✅ "No manejamos ortodoncia 😊 Lo que sí hacemos es limpieza y blanqueamiento dental. ¿Te interesa alguno?"',
+  '   ❌ "¡Claro! ¿Te agendo para ortodoncia?"',
+  '',
+  'NUNCA asumas que un servicio existe solo porque es común en este rubro. Que sea un tratamiento habitual NO significa que ESTE negocio lo haga.',
+  'NUNCA inventes precio ni duración, ni llames check_availability o book_appointment con un servicio que no está en la lista.',
+  'Negar un servicio no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
+]
 
 const NOT_CONFIGURED_BLOCK = [
   '# ATENCIÓN — negocio sin configuración operativa',
@@ -910,7 +965,7 @@ function buildStaticBody(
     '',
     '# Reglas generales',
     '1. Solo respondés con información que está en tu conocimiento o en la configuración operativa de arriba. Nunca inventes precios, horarios ni servicios.',
-    '2. Si te preguntan algo que no está ahí (método de pago, estacionamiento, servicio a domicilio, o cualquier dato operativo no listado), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo no confirmado (no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés el dato: eso es inventar tanto como dar un dato falso).',
+    '2. Si te preguntan algo que no está ahí (método de pago, estacionamiento, servicio a domicilio, o cualquier dato operativo no listado), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo no confirmado (no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés el dato: eso es inventar tanto como dar un dato falso). ÚNICA excepción: los SERVICIOS sí son lista cerrada. Si un servicio no está en "Servicios disponibles", el negocio no lo hace y ahí sí lo negás — ver "# Servicios no reconocidos".',
     '3. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
     '4. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
     '5. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.',
@@ -930,16 +985,17 @@ function buildStaticBody(
     '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, quieres agendar una cita o tienes otra consulta? ❓"',
     '- Si ya hay historial, adaptá la pregunta al contexto previo en lugar de repetir el saludo.',
     '',
-    '# Servicios no reconocidos',
-    'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista configurada:',
-    '- NUNCA digas que no existe ni que no lo ofrecen — puede que el cliente lo llame distinto.',
-    '- NUNCA inventes precio o duración, ni llames check_availability o book_appointment con ese nombre, hasta que el cliente confirme a cuál servicio configurado se refiere.',
-    '- Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado: cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
-    '- Si ninguno se parece, no asumas: "Cuéntame un poco más sobre lo que buscas para poder ayudarte mejor."',
+    // Only when the business HAS settings: with none there is no "Servicios
+    // disponibles" section to check a name against, and denying every service a
+    // customer names would be the exact hallucination this block exists to
+    // stop. That case belongs to NOT_CONFIGURED_BLOCK.
+    ...(settings ? UNRECOGNIZED_SERVICE_BLOCK : []),
     '',
     // Always present now: every niche has a voice, and a business with no
     // settings falls back to `general` rather than to no voice at all.
     nicheBlocks,
+    '',
+    ...AVAILABILITY_FRESHNESS_BLOCK,
     '',
     ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
