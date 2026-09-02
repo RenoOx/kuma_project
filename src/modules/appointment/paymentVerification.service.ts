@@ -112,6 +112,52 @@ export async function findOpenByConversation(
   return paymentVerificationRepo.findOpenByConversation(businessId, conversationId)
 }
 
+export interface OpenVerificationSummary {
+  id: string
+  service: string
+  scheduledAt: Date
+  depositAmount: string | null
+  customerName: string
+  customerPhone: string
+}
+
+/**
+ * Every capture in this business still waiting on the owner.
+ *
+ * Under the deposit gate this is the ONLY record of a request: no appointment
+ * row exists until the owner approves, so listing pending appointments alone
+ * told the owner "no hay solicitudes pendientes" with two captures sitting in
+ * their thread. It is also what lets the assistant ask WHICH one the owner
+ * means instead of picking the newest 💰 card it can still see.
+ */
+export async function listOpenByBusiness(
+  businessId: string,
+): Promise<Result<OpenVerificationSummary[]>> {
+  try {
+    const rows = await paymentVerificationRepo.findOpenByBusiness(businessId)
+    return ok(
+      rows.map((r) => ({
+        id: r.id,
+        service: r.service,
+        scheduledAt: r.scheduledAt,
+        depositAmount: r.depositAmount,
+        customerName: r.customerName,
+        customerPhone: r.customerPhone,
+      })),
+    )
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'list_open_verifications_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pude leer los comprobantes pendientes.',
+        logContext: { businessId },
+        cause,
+      }),
+    )
+  }
+}
+
 export interface ResolvedPayment {
   verification: PaymentVerification
   /** Set on approval. Null on rejection: no booking was filed. */

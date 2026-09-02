@@ -1,6 +1,7 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
+  customers,
   type NewPaymentVerification,
   type PaymentVerification,
   type PaymentVerificationStatus,
@@ -48,6 +49,54 @@ export async function findOpenByConversation(
     .orderBy(desc(paymentVerifications.createdAt))
     .limit(1)
   return row ?? null
+}
+
+// One open verification, joined with the customer who sent the capture.
+export interface OpenVerificationWithCustomer {
+  id: string
+  conversationId: string
+  service: string
+  scheduledAt: Date
+  depositAmount: string | null
+  customerName: string
+  customerPhone: string
+  createdAt: Date
+}
+
+// Every capture in this business still waiting on the owner's call, oldest
+// first.
+//
+// `findOpenByConversation` cannot answer this: it is scoped to one customer's
+// conversation, and the owner thread is ONE per business. Two customers' 💰
+// cards land in the same thread, so "the open one" stops being well defined
+// there and the owner has to be shown both.
+//
+// Joined with customers because the phone is what tells two open requests
+// apart — it is the key approve_payment and reject_payment take.
+export async function findOpenByBusiness(
+  businessId: string,
+  exec: Executor = db,
+): Promise<OpenVerificationWithCustomer[]> {
+  return await exec
+    .select({
+      id: paymentVerifications.id,
+      conversationId: paymentVerifications.conversationId,
+      service: paymentVerifications.service,
+      scheduledAt: paymentVerifications.scheduledAt,
+      depositAmount: paymentVerifications.depositAmount,
+      customerName: paymentVerifications.customerName,
+      customerPhone: customers.phone,
+      createdAt: paymentVerifications.createdAt,
+    })
+    .from(paymentVerifications)
+    .innerJoin(customers, eq(customers.id, paymentVerifications.customerId))
+    .where(
+      and(
+        eq(paymentVerifications.businessId, businessId),
+        eq(paymentVerifications.status, 'pending'),
+      ),
+    )
+    .orderBy(asc(paymentVerifications.createdAt))
 }
 
 // The last one of ANY status, which is where a resent capture reads its booking

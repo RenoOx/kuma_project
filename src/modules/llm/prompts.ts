@@ -460,6 +460,29 @@ function renderDepositBlock(settings: BusinessSettings): string[] {
   ]
 }
 
+// ── Availability freshness — global rule ─────────────────────────────────────
+//
+// Applies in BOTH appointment modes and in every conversation state, which is
+// why it lives here and not in a state's promptAddition.
+//
+// The prompt already said "always call check_availability for the day asked",
+// but nothing forbade reusing the slots from an earlier call — and the
+// "Memoria de contexto" block actively tells the model to reuse prior context.
+// Slots go stale between two messages: another customer books one in between.
+//
+// Placed BEFORE the per-mode blocks on purpose so they can excuse themselves —
+// hybrid's step 3 explicitly tells the model NOT to call the tool when the
+// customer would rather walk in. Same ordering rule as REQUIRES_APPROVAL_BLOCK:
+// whatever needs to override comes after.
+const AVAILABILITY_FRESHNESS_BLOCK = [
+  '# Disponibilidad — SIEMPRE de la tool, NUNCA del historial',
+  'Los horarios libres cambian entre un mensaje y el siguiente: otro cliente puede haber reservado hace un minuto.',
+  '- NUNCA afirmes qué horarios hay libres, ni que una hora puntual está disponible, sin haber llamado check_availability en ESTE MISMO turno.',
+  '- NUNCA reutilices horarios de una llamada anterior ni los que vos mismo listaste antes en esta conversación: esa información ya venció.',
+  '- Si el cliente pregunta por disponibilidad y todavía no llamaste check_availability en este turno, llamala ANTES de responder.',
+  'Esto NO aplica al horario general de atención (apertura y cierre, que sale de la configuración de arriba), ni a los casos donde un bloque de abajo te dice explícitamente que no llames la tool.',
+]
+
 // ── Availability block, one per appointment mode ─────────────────────────────
 //
 // These are mutually exclusive: exactly one reaches the model. In
@@ -944,6 +967,8 @@ function buildStaticBody(
     // Always present now: every niche has a voice, and a business with no
     // settings falls back to `general` rather than to no voice at all.
     nicheBlocks,
+    '',
+    ...AVAILABILITY_FRESHNESS_BLOCK,
     '',
     ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
