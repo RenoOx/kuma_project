@@ -11,7 +11,10 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import { getStateConfig } from '@/modules/conversation/stateMachine.js'
+import {
+  getStateConfig,
+  type TransitionEvidence,
+} from '@/modules/conversation/stateMachine.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
@@ -136,13 +139,18 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   // Every trigger of this turn goes through here. A failed write costs the
   // transition, never the reply: we log it and carry on from where we were.
-  const applyTriggerOrKeep = async (from: string, trigger: string): Promise<string> => {
+  const applyTriggerOrKeep = async (
+    from: string,
+    trigger: string,
+    evidence?: TransitionEvidence,
+  ): Promise<string> => {
     const applied = await conversationService.applyTrigger({
       businessId: params.businessId,
       conversationId: params.conversationId,
       flowType,
       currentState: from,
       trigger,
+      evidence,
     })
     if (applied.ok) return applied.data
     log.warn({ code: applied.error.code, trigger, from }, 'could not apply state transition')
@@ -420,7 +428,14 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // evaluated against the state the first one left behind. Persisted at the
       // moment of the change so a later error return cannot take it down with it.
       if (toolResult.trigger) {
-        effectiveState = await applyTriggerOrKeep(effectiveState, toolResult.trigger)
+        // The evidence rides along with the trigger that produced it: the
+        // executor is the only layer that can prove a target state's entry
+        // guard, and it has already gone by the time this state is persisted.
+        effectiveState = await applyTriggerOrKeep(
+          effectiveState,
+          toolResult.trigger,
+          toolResult.evidence,
+        )
       }
 
       if (call.function.name === 'escalate_to_human' && !toolResult.error) {

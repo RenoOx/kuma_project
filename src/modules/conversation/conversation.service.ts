@@ -4,7 +4,7 @@ import type { FlowType } from '@/modules/business/business.settings.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as conversationRepo from './conversation.repo.js'
-import { getNextState } from './stateMachine.js'
+import { getNextState, type TransitionEvidence } from './stateMachine.js'
 
 // How long an escalated thread still counts as "the conversation this customer
 // is in". Past this, a new message is a new conversation.
@@ -94,6 +94,11 @@ export async function findOrCreateOwnerThread(businessId: string): Promise<Resul
  * flowType and currentState come from the caller rather than being loaded here:
  * both callers already hold them, and a service that hides queries inside a
  * hot path is how a per-message read turns into three.
+ *
+ * `evidence` travels with the trigger for the same reason: only the emitter can
+ * prove a target state's entry guard, and the proof is worth nothing if this
+ * layer has to go looking for it afterwards. Omitting it satisfies no guard,
+ * which is what makes the guard hold for emitters that do not know about it.
  */
 export async function applyTrigger(params: {
   businessId: string
@@ -101,12 +106,15 @@ export async function applyTrigger(params: {
   flowType: FlowType
   currentState: string
   trigger: string
+  evidence?: TransitionEvidence
 }): Promise<Result<string>> {
-  const { businessId, conversationId, flowType, currentState, trigger } = params
-  const nextState = getNextState(flowType, currentState, trigger)
+  const { businessId, conversationId, flowType, currentState, trigger, evidence } = params
+  const nextState = getNextState(flowType, currentState, trigger, evidence)
 
   // The common case: the flow defines no transition for this trigger, so the
   // conversation stays where it is. No UPDATE for a write that changes nothing.
+  // A transition refused by an entry guard lands here too, already logged by
+  // stateMachine — from this layer's side the two are the same non-event.
   if (nextState === currentState) return ok(currentState)
 
   try {

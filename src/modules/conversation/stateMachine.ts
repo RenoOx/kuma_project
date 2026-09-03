@@ -15,6 +15,31 @@ import type { FlowType } from '@/modules/business/business.settings.js'
 // ('asks_availability'), something the code observed ('payment_received') or
 // elapsed time ('inactive_24h'). Kept as plain strings so a new trigger is a
 // data change here, not a type change across the codebase.
+// What a state can demand of whatever is trying to enter it.
+//
+// 'booking_intent' means: a service, a slot and a name were frozen for this
+// conversation and the emitter can prove it. Only the deposit gate can, because
+// freezing them is what it does (toolExecutor's book_appointment branch) — and
+// that is precisely the precondition await_payment exists on.
+export type EntryGuard = 'booking_intent'
+
+// Proof an emitter hands along with its trigger. A missing field reads as
+// false: a caller that knows nothing satisfies no guard, which is the point of
+// having one.
+export interface TransitionEvidence {
+  bookingIntent?: boolean
+}
+
+// Written as a switch over the closed union so that adding a guard breaks the
+// build here rather than silently refusing every transition into its state —
+// same reasoning as getFlowDefinition's ternary below.
+function satisfiesGuard(guard: EntryGuard, evidence: TransitionEvidence | undefined): boolean {
+  switch (guard) {
+    case 'booking_intent':
+      return evidence?.bookingIntent === true
+  }
+}
+
 export interface StateConfig {
   // Tool names the LLM may call while in this state. Anything else it tries is
   // ignored by the executor. Order is not significant.
@@ -26,6 +51,9 @@ export interface StateConfig {
   promptAddition: string
   // trigger → next state. A trigger absent from this map means "stay put".
   transitions: Record<string, string>
+  // Refuses entry unless the trigger arrives with evidence that satisfies this.
+  // Absent — the common case — means anything routing here gets in.
+  entryGuard?: EntryGuard
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -138,6 +166,17 @@ export const appointmentsFlow: FlowDefinition = {
     // exact thing this state exists to wait for. book_appointment stays: it is
     // the one path that closes a booking AND goes through the gate.
     tools: ['request_image', 'book_appointment', ESCALATE],
+    // Nothing enters here without a frozen booking intent behind it. The state
+    // means "we are waiting on the capture that pays for a specific slot", and
+    // a customer parked here without one is unrecoverable: the prompt forbids
+    // talking about times, images never reach the model, and the capture that
+    // does arrive has no intent to attach to — so the owner gets a photo and
+    // nothing to approve.
+    //
+    // Today the only emitter of deposit_required is the deposit gate, which
+    // freezes service + slot + name before it refuses (toolExecutor). This
+    // guard is what keeps that true for the next emitter as well.
+    entryGuard: 'booking_intent',
     promptAddition: 'Pide el comprobante de pago. No hables de horarios ni servicios.',
     transitions: {
       // The capture lands and the booking is NOT filed — it waits for the owner
@@ -296,8 +335,28 @@ export function getFlowDefinition(flowType: FlowType): FlowDefinition {
 //
 // Pure lookup by design: persisting the answer is conversation.service's job,
 // and it is the only place allowed to write conversation.state.
-export function getNextState(flowType: FlowType, currentState: string, trigger: string): string {
-  return getStateConfig(flowType, currentState).transitions[trigger] ?? currentState
+export function getNextState(
+  flowType: FlowType,
+  currentState: string,
+  trigger: string,
+  evidence?: TransitionEvidence,
+): string {
+  const nextState = getStateConfig(flowType, currentState).transitions[trigger] ?? currentState
+  if (nextState === currentState) return currentState
+
+  // A refused transition stays put, which is the same answer as "this state
+  // defines no transition for that trigger" — so callers need no new branch and
+  // no new error path for it.
+  const guard = getStateConfig(flowType, nextState).entryGuard
+  if (guard && !satisfiesGuard(guard, evidence)) {
+    logger.warn(
+      { component: 'stateMachine', flowType, currentState, trigger, nextState, guard },
+      'entry guard blocked transition',
+    )
+    return currentState
+  }
+
+  return nextState
 }
 
 export function getStateConfig(flowType: FlowType, currentState: string): StateConfig {
