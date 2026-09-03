@@ -58,10 +58,16 @@ export const kumaTools: ChatCompletionTool[] = [
     function: {
       name: 'confirm_pending_appointment',
       description:
-        'Confirma la cita pendiente del cliente. Usar SOLO cuando el cliente acepta un horario que el dueño/encargado le propuso ("sí", "dale", "perfecto", "me parece bien"). Busca sola la cita pendiente, no necesita argumentos. NO la uses para agendar una cita nueva: para eso está book_appointment.',
+        'Confirma la cita pendiente del cliente. Usar SOLO cuando el cliente acepta un horario que el dueño/encargado le propuso ("sí", "dale", "perfecto", "me parece bien"). Busca sola la cita pendiente. NO la uses para agendar una cita nueva: para eso está book_appointment.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          customer_name: {
+            type: 'string',
+            description:
+              'Nombre completo del paciente/cliente tal como lo dio en la conversación. Mandalo si lo tenés: un horario propuesto por el encargado suele no tener nombre en ficha. Si no lo pediste todavía, omití este campo. NO uses el nombre de WhatsApp ni lo inventes.',
+          },
+        },
         required: [],
         additionalProperties: false,
       },

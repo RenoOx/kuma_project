@@ -28,6 +28,18 @@ export const appointments = pgTable(
       .notNull()
       .references(() => customers.id, { onDelete: 'cascade' }),
     service: text('service').notNull(),
+    // The name the appointment was booked under, frozen at creation.
+    //
+    // customers.name answers "what is this person called today" and gets
+    // overwritten every time someone gives Emma a new one — including when a
+    // patient books for a relative. Reading a booking's name off that join made
+    // past appointments silently change name, and left every booking the
+    // deposit gate held back showing the WhatsApp push name.
+    //
+    // Nullable because rows predating this column have no snapshot, and an
+    // owner-proposed slot legitimately has no name yet: readers fall back to
+    // customers.name, so no backfill is needed.
+    customerName: text('customer_name'),
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
     durationMinutes: integer('duration_minutes').notNull().default(30),
     status: text('status').notNull().default('scheduled').$type<AppointmentStatus>(),

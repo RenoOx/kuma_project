@@ -2,7 +2,7 @@ import { logger } from '@/config/logger.js'
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { AppError } from '@/shared/errors.js'
-import { formatPersonName } from '@/shared/name.js'
+import { appointmentName, formatPersonName } from '@/shared/name.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { WhatsappClient } from './baileys.client.js'
 import type { ImagePurpose, PaymentContext } from './imageExpectation.js'
@@ -28,7 +28,7 @@ export interface ForwardImageParams {
   image: Buffer
   caption: string | null
   /** Set when the customer has a request still waiting on the owner's call. */
-  pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt'> | null
+  pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt' | 'customerName'> | null
   /** Set when this photo answers a request Emma made. */
   purpose: ImagePurpose | null
   /** Set when the deposit gate asked for this capture. */
@@ -55,7 +55,7 @@ export function buildOwnerCaption(params: {
   customer: Pick<Customer, 'name' | 'phone'>
   timezone: string
   caption: string | null
-  pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt'> | null
+  pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt' | 'customerName'> | null
   purpose: ImagePurpose | null
   payment: PaymentContext | null
   awaitsVerification: boolean
@@ -63,13 +63,19 @@ export function buildOwnerCaption(params: {
   const said = params.caption?.trim()
   const { payment } = params
 
-  // Under the deposit gate `customer.name` is still whatever WhatsApp put on the
-  // profile ("Rem"): the rename lives inside bookAppointment, which only runs
-  // once the capture lands — after this forward. The name the customer actually
-  // gave Emma rides in the payment context, so it wins whenever there is one.
-  const who = payment
-    ? formatPersonName(payment.customerName)
-    : formatPersonName(params.customer.name)
+  // Three sources, most specific first. Under the deposit gate `customer.name`
+  // is still whatever WhatsApp put on the profile ("Rem"): the rename lives
+  // inside bookAppointment, which only runs once the capture lands — after this
+  // forward. The name the customer actually gave Emma rides in the payment
+  // context, so it wins whenever there is one; failing that, a booking already
+  // on file carries the name it was made under.
+  const who = formatPersonName(
+    payment
+      ? payment.customerName
+      : params.pendingAppointment
+        ? appointmentName(params.pendingAppointment, params.customer)
+        : params.customer.name,
+  )
 
   const lines = [
     payment ? '💰 *Captura de pago recibida*' : '📷 *Imagen del paciente*',

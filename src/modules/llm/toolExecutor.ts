@@ -52,6 +52,10 @@ const bookAppointmentArgs = z.object({
   customer_name: z.string(),
 })
 
+const confirmPendingArgs = z.object({
+  customer_name: z.string().optional(),
+})
+
 const requestImageArgs = z.object({
   purpose: z.enum(['payment', 'reference']),
 })
@@ -486,11 +490,21 @@ export async function executeTool(
     }
 
     if (name === 'confirm_pending_appointment') {
-      // No arguments by design: the appointment is found from the conversation's
-      // own customer, so the model has nothing to get wrong.
+      // The appointment itself is found from the conversation's own customer, so
+      // the model has nothing to get wrong there. The one optional argument is
+      // the name: a slot the OWNER proposed is filed before anybody asked for
+      // one, and without this the booking would keep reading as the WhatsApp
+      // push name for the rest of its life.
+      const parsed = confirmPendingArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      // Same bar as book_appointment: a placeholder is worse than no name,
+      // because a null still falls back to whatever the customer row knows.
+      const offeredName = parsed.data.customer_name
       const r = await appointmentService.confirmPendingForCustomer({
         businessId: context.businessId,
         customerId: context.customerId,
+        ...(offeredName && isUsableName(offeredName) ? { customerName: offeredName } : {}),
       })
       if (!r.ok) {
         if (r.error.code === 'no_pending_appointment') {
