@@ -7,6 +7,7 @@ import {
   googleCredentials,
   messages,
 } from '@/db/schema/index.js'
+import { appointmentName } from '@/shared/name.js'
 
 export async function getGoogleConnectedEmail(businessId: string): Promise<string | null> {
   const rows = await db
@@ -126,7 +127,8 @@ export async function getBusinessDetail(businessId: string): Promise<BusinessDet
           service: appointments.service,
           scheduledAt: appointments.scheduledAt,
           status: appointments.status,
-          customerName: customers.name,
+          bookedName: appointments.customerName,
+          currentName: customers.name,
           customerPhone: customers.phone,
         })
         .from(appointments)
@@ -166,7 +168,9 @@ export async function getBusinessDetail(businessId: string): Promise<BusinessDet
       service: r.service,
       scheduledAt: r.scheduledAt,
       status: r.status,
-      customerName: r.customerName ?? null,
+      // The frozen name wins over the customer's current one: renaming a
+      // customer must not rewrite what their past appointments were booked as.
+      customerName: appointmentName({ customerName: r.bookedName }, { name: r.currentName }),
       customerPhone: r.customerPhone ?? '',
     })),
     messagesToday: Number(todayRow?.n ?? 0),

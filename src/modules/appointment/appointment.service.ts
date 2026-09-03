@@ -29,7 +29,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '@/shared/errors.js'
-import { formatPersonName } from '@/shared/name.js'
+import { appointmentName, formatPersonName } from '@/shared/name.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as appointmentRepo from './appointment.repo.js'
 
@@ -528,6 +528,12 @@ export async function bookAppointment(params: BookAppointmentParams): Promise<Re
       businessId: params.businessId,
       customerId: params.customerId,
       service: params.service,
+      // Frozen here, and never read back off the customer again: the rename
+      // above keeps customers.name current, but this booking has to keep
+      // reading as the name it was filed under even after the next one changes
+      // it. Falls back to the customer's current name so a booking filed
+      // without one is not left blank.
+      customerName: providedName ?? customer?.name?.trim() ?? null,
       scheduledAt: datetime,
       durationMinutes: serviceDurationMinutes,
       status: requiresApproval ? 'pending' : 'scheduled',
@@ -546,6 +552,7 @@ export async function bookAppointment(params: BookAppointmentParams): Promise<Re
         scheduledAt: datetime,
         timezone: business.timezone,
         customer,
+        displayName: appointmentName(created, customer),
       }).catch((err) => {
         logger.warn(
           { err, businessId: params.businessId, appointmentId: created.id },
@@ -643,7 +650,8 @@ async function mirrorToGoogleCalendar(params: {
   customer: CustomerContact | null
 }): Promise<string | null> {
   const { businessId, appointment, customer } = params
-  const customerLabel = customer?.name?.trim() || customer?.phone || appointment.customerId
+  const customerLabel =
+    appointmentName(appointment, customer) || customer?.phone || appointment.customerId
 
   const result = await googleCalendarService.createEvent({
     businessId,
@@ -742,8 +750,9 @@ async function notifyOwnerOfPendingRequest(params: {
   scheduledAt: Date
   timezone: string
   customer: { name: string | null; phone: string } | null
+  displayName: string | null
 }): Promise<void> {
-  const who = formatPersonName(params.customer?.name) ?? '(sin nombre)'
+  const who = formatPersonName(params.displayName) ?? '(sin nombre)'
   const phone = params.customer?.phone ?? '(sin teléfono)'
 
   const text = [
@@ -905,6 +914,12 @@ interface AppointmentContext {
   appointment: Appointment
   business: Business
   customer: CustomerContact & { id: string }
+  /**
+   * Who this booking is for. Resolved once, here, so no caller has to remember
+   * that the customer row is the fallback and not the source. See
+   * `appointmentName`.
+   */
+  displayName: string | null
 }
 
 // Loads everything the transitions below need, with the tenant check built in:
@@ -943,6 +958,7 @@ async function loadAppointmentContext(
     appointment,
     business: businessResult.data,
     customer: { id: customer.id, name: customer.name, phone: customer.phone },
+    displayName: appointmentName(appointment, customer),
   })
 }
 
@@ -1001,8 +1017,8 @@ export async function messagePatient(params: {
 // Same shape as the reminder greeting, so a patient who gets a 24h reminder and
 // then a confirmation hears one consistent voice. No name on file → a bare
 // "¡Hola!", never "¡Hola null!" or a dangling space.
-function patientGreeting(customer: { name: string | null }): string {
-  const name = formatPersonName(customer.name)
+function patientGreeting(rawName: string | null): string {
+  const name = formatPersonName(rawName)
   return name ? `¡Hola ${name}!` : '¡Hola!'
 }
 
@@ -1075,14 +1091,14 @@ function actionResult(appointment: Appointment, notified: Result<void>): Appoint
  * same event is how a patient starts asking which message is the real one.
  */
 function buildConfirmationText(params: {
-  customer: { name: string | null }
+  displayName: string | null
   service: string
   scheduledAt: Date
   timezone: string
   niche: Niche
 }): string {
   return [
-    `${patientGreeting(params.customer)} Tu cita ha sido confirmada 📋`,
+    `${patientGreeting(params.displayName)} Tu cita ha sido confirmada 📋`,
     '',
     `${NICHE_SERVICE_EMOJI[params.niche]} ${params.service}`,
     `📅 ${formatRequestDateTime(params.scheduledAt, params.timezone)}`,
@@ -1106,7 +1122,7 @@ export async function notifyPatientOfConfirmedAppointment(params: {
 }): Promise<Result<AppointmentActionResult>> {
   const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
   if (!ctx.ok) return ctx
-  const { appointment, business, customer } = ctx.data
+  const { appointment, business, customer, displayName } = ctx.data
 
   const niche = await nicheOf(params.businessId)
   const notified = await messagePatient({
@@ -1114,7 +1130,7 @@ export async function notifyPatientOfConfirmedAppointment(params: {
     customerId: customer.id,
     phone: customer.phone,
     text: buildConfirmationText({
-      customer,
+      displayName,
       service: appointment.service,
       scheduledAt: appointment.scheduledAt,
       timezone: business.timezone,
@@ -1132,7 +1148,7 @@ export async function confirmAppointment(params: {
   try {
     const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
     if (!ctx.ok) return ctx
-    const { appointment, business, customer } = ctx.data
+    const { appointment, business, customer, displayName } = ctx.data
 
     if (appointment.status !== 'pending') {
       return err(wrongStatus('confirmar', params.businessId, appointment))
@@ -1157,7 +1173,7 @@ export async function confirmAppointment(params: {
 
     const niche = await nicheOf(params.businessId)
     const text = buildConfirmationText({
-      customer,
+      displayName,
       service: appointment.service,
       scheduledAt: appointment.scheduledAt,
       timezone: business.timezone,
@@ -1200,7 +1216,7 @@ export async function rejectAppointment(params: {
   try {
     const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
     if (!ctx.ok) return ctx
-    const { appointment, business, customer } = ctx.data
+    const { appointment, business, customer, displayName } = ctx.data
 
     if (appointment.status !== 'pending') {
       return err(wrongStatus('rechazar', params.businessId, appointment))
@@ -1213,7 +1229,7 @@ export async function rejectAppointment(params: {
 
     const reason = params.reason?.trim()
     const text = [
-      `${patientGreeting(customer)} Lamentamos informarte que no pudimos confirmar tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)}.`,
+      `${patientGreeting(displayName)} Lamentamos informarte que no pudimos confirmar tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)}.`,
       ...(reason ? [reason] : []),
       '¿Te gustaría agendar en otro horario?',
     ].join(' ')
@@ -1260,7 +1276,7 @@ export async function rescheduleAppointment(params: {
   try {
     const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
     if (!ctx.ok) return ctx
-    const { appointment, business, customer } = ctx.data
+    const { appointment, business, customer, displayName } = ctx.data
 
     // A finished or already-dropped appointment has nothing left to move.
     if (appointment.status === 'cancelled' || appointment.status === 'completed') {
@@ -1316,6 +1332,10 @@ export async function rescheduleAppointment(params: {
           businessId: params.businessId,
           customerId: appointment.customerId,
           service: appointment.service,
+          // Same booking, new slot: the name it was filed under travels with
+          // it. Copying the row's own value rather than re-reading the customer
+          // is what keeps a rename from rewriting history here too.
+          customerName: appointment.customerName,
           scheduledAt: datetime,
           durationMinutes: appointment.durationMinutes,
           status: 'pending',
@@ -1335,7 +1355,7 @@ export async function rescheduleAppointment(params: {
     const niche = await nicheOf(params.businessId)
     const note = params.message?.trim()
     const text = [
-      `${patientGreeting(customer)} ${proposerLabel(niche)} un cambio de horario para tu ${appointment.service}:`,
+      `${patientGreeting(displayName)} ${proposerLabel(niche)} un cambio de horario para tu ${appointment.service}:`,
       '',
       `📅 ${formatRequestDateTime(datetime, business.timezone)}`,
       ...(note ? [note] : []),
@@ -1449,8 +1469,9 @@ async function notifyOwnerOfPatientConfirmation(params: {
   scheduledAt: Date
   timezone: string
   customer: CustomerContact
+  displayName: string | null
 }): Promise<void> {
-  const who = formatPersonName(params.customer.name) ?? '(sin nombre)'
+  const who = formatPersonName(params.displayName) ?? '(sin nombre)'
 
   const text = [
     '✅ *Cita confirmada*',
@@ -1475,6 +1496,11 @@ async function notifyOwnerOfPatientConfirmation(params: {
 export async function confirmPendingForCustomer(params: {
   businessId: string
   customerId: string
+  // The name the patient gave while accepting. A slot the OWNER proposed is
+  // filed before anyone asks for one, so this is the only chance to put a real
+  // name on it — after this the booking is confirmed and nothing asks again.
+  // Already screened at the LLM boundary, same as book_appointment's.
+  customerName?: string
 }): Promise<Result<ConfirmPendingResult>> {
   try {
     const pending = await appointmentRepo.findLatestPendingByCustomer(
@@ -1511,7 +1537,7 @@ export async function confirmPendingForCustomer(params: {
 
     const ctx = await loadAppointmentContext(params.businessId, pending.id)
     if (!ctx.ok) return ctx
-    const { appointment, business, customer } = ctx.data
+    const { appointment, business, customer, displayName } = ctx.data
 
     // Re-read rather than trusting the row selected above: the owner may have
     // cancelled or confirmed the proposal in between.
@@ -1519,9 +1545,25 @@ export async function confirmPendingForCustomer(params: {
       return err(wrongStatus('confirmar', params.businessId, appointment))
     }
 
+    // Only filled when the row has none: a proposal that came out of a booking
+    // Emma filed already carries the name the patient gave then, and a later
+    // "dale" must not overwrite it.
+    const nameToFreeze = appointment.customerName ? null : normalizeCustomerName(params.customerName)
+
     let updated = await appointmentRepo.update(params.businessId, appointment.id, {
       status: 'scheduled',
+      ...(nameToFreeze ? { customerName: nameToFreeze } : {}),
     })
+
+    // The customer row is still on the WhatsApp push name in this flow — the
+    // rename inside bookAppointment never ran for an owner-proposed slot. Same
+    // rule as there: customers.name tracks who this phone is today, and every
+    // later escalation card and conversation row reads it.
+    if (nameToFreeze && customer.name?.trim() !== nameToFreeze) {
+      await customerRepo.updateName(params.businessId, customer.id, nameToFreeze)
+    }
+
+    const resolvedName = nameToFreeze ?? displayName
 
     // Same rule as the owner's confirmAppointment: a `pending` row is not a
     // commitment and stays off the calendar, and the instant it becomes one it
@@ -1544,6 +1586,7 @@ export async function confirmPendingForCustomer(params: {
       scheduledAt: updated.scheduledAt,
       timezone: business.timezone,
       customer,
+      displayName: resolvedName,
     }).catch((err) => {
       logger.warn(
         { err, businessId: params.businessId, appointmentId: updated.id },
@@ -1580,7 +1623,7 @@ export async function cancelAppointment(params: {
   try {
     const ctx = await loadAppointmentContext(params.businessId, params.appointmentId)
     if (!ctx.ok) return ctx
-    const { appointment, business, customer } = ctx.data
+    const { appointment, business, customer, displayName } = ctx.data
 
     // Any status may be cancelled EXCEPT one already cancelled — telling the
     // patient twice that the same appointment is off is worse than a no-op.
@@ -1595,7 +1638,7 @@ export async function cancelAppointment(params: {
 
     const reason = params.reason?.trim()
     const text = [
-      `${patientGreeting(customer)} Tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)} ha sido cancelada.`,
+      `${patientGreeting(displayName)} Tu cita para ${appointment.service} el ${formatRequestDateTime(appointment.scheduledAt, business.timezone)} ha sido cancelada.`,
       ...(reason ? [reason] : []),
       'Si deseas reagendar, escríbenos.',
     ].join(' ')

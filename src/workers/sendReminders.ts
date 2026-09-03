@@ -4,6 +4,7 @@ import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import { appointmentName } from '@/shared/name.js'
 import { buildReminder2hText, buildReminder24hText } from './reminderTexts.js'
 
 export interface ReminderRunResult {
@@ -50,10 +51,14 @@ async function dispatchReminder(appt: Appointment, kind: '24h' | '2h'): Promise<
   }
 
   const jid = customerJidFromPhone(customer.phone)
+  // Greeted by the name this appointment was booked under, not by whatever the
+  // customer row says today: a patient who last booked for their daughter must
+  // not get their own reminder addressed to her.
+  const greeted = { name: appointmentName(appt, customer) }
   const text =
     kind === '24h'
-      ? buildReminder24hText(customer, business, appt)
-      : buildReminder2hText(customer, business, appt)
+      ? buildReminder24hText(greeted, business, appt)
+      : buildReminder2hText(greeted, business, appt)
 
   try {
     await client.sendMessage(jid, text)

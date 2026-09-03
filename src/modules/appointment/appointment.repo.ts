@@ -6,6 +6,7 @@ import {
   customers,
   type NewAppointment,
 } from '@/db/schema/index.js'
+import { appointmentName } from '@/shared/name.js'
 
 // Appointments occupying [start, end). Cancelled ones are excluded: they no
 // longer hold their slot, and counting them kept the slot blocked forever —
@@ -117,8 +118,25 @@ export interface AppointmentWithCustomer {
   scheduledAt: Date
   durationMinutes: number
   status: string
+  /**
+   * The name the booking was filed under, falling back to the customer's
+   * current name. Resolved here so every consumer of these lists — the owner's
+   * tools, the daily report — reads the same name off one rule.
+   */
   customerName: string | null
   customerPhone: string
+}
+
+// Both list queries below select the frozen name AND the customer's, then pick
+// between them the same way. Kept as one function so they cannot drift.
+function withResolvedName(
+  row: Omit<AppointmentWithCustomer, 'customerName'> & {
+    bookedName: string | null
+    currentName: string | null
+  },
+): AppointmentWithCustomer {
+  const { bookedName, currentName, ...rest } = row
+  return { ...rest, customerName: appointmentName({ customerName: bookedName }, { name: currentName }) }
 }
 
 // Lists appointments scheduled in [start, end) with the customer's name and
@@ -130,14 +148,15 @@ export async function listScheduledInRange(
   limit = 20,
   exec: Executor = db,
 ): Promise<AppointmentWithCustomer[]> {
-  return await exec
+  const rows = await exec
     .select({
       id: appointments.id,
       service: appointments.service,
       scheduledAt: appointments.scheduledAt,
       durationMinutes: appointments.durationMinutes,
       status: appointments.status,
-      customerName: customers.name,
+      bookedName: appointments.customerName,
+      currentName: customers.name,
       customerPhone: customers.phone,
     })
     .from(appointments)
@@ -151,6 +170,7 @@ export async function listScheduledInRange(
     )
     .orderBy(asc(appointments.scheduledAt))
     .limit(limit)
+  return rows.map(withResolvedName)
 }
 
 // Every request still waiting on the owner's call, oldest slot first. Joined
@@ -160,20 +180,22 @@ export async function findPendingByBusiness(
   businessId: string,
   exec: Executor = db,
 ): Promise<AppointmentWithCustomer[]> {
-  return await exec
+  const rows = await exec
     .select({
       id: appointments.id,
       service: appointments.service,
       scheduledAt: appointments.scheduledAt,
       durationMinutes: appointments.durationMinutes,
       status: appointments.status,
-      customerName: customers.name,
+      bookedName: appointments.customerName,
+      currentName: customers.name,
       customerPhone: customers.phone,
     })
     .from(appointments)
     .innerJoin(customers, eq(customers.id, appointments.customerId))
     .where(and(eq(appointments.businessId, businessId), eq(appointments.status, 'pending')))
     .orderBy(asc(appointments.scheduledAt))
+  return rows.map(withResolvedName)
 }
 
 // The soonest request this one customer still has waiting on the owner's call.

@@ -55,3 +55,25 @@ export function formatPersonName(raw: string | null | undefined): string | null 
     .map((word, index) => (index > 0 && PARTICLES.has(word) ? word : capitalize(word)))
     .join(' ')
 }
+
+/**
+ * The name a booking is shown under, everywhere: the patient's notices, the
+ * owner's cards, the calendar event, the admin table.
+ *
+ * `appointments.customer_name` is the name frozen when the booking was filed.
+ * `customers.name` is who that phone number is TODAY — it gets overwritten
+ * whenever someone gives Emma a new one, including a patient booking for a
+ * relative, so reading a booking's name off it made past appointments change
+ * name behind everyone's back.
+ *
+ * The fallback covers two legitimate nulls: rows created before the column
+ * existed, and a slot the owner proposed before anybody asked for a name.
+ *
+ * Returns the raw stored name — pass it through formatPersonName to display it.
+ */
+export function appointmentName(
+  appointment: { customerName: string | null },
+  customer: { name: string | null } | null | undefined,
+): string | null {
+  return appointment.customerName?.trim() || customer?.name?.trim() || null
+}
