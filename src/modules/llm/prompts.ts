@@ -719,19 +719,23 @@ export function buildNicheBlocks(niche: Niche, businessName: string): string {
 // sounded plausible and only failed later, when the tool rejected the name.
 const UNRECOGNIZED_SERVICE_BLOCK = [
   '# Servicios no reconocidos',
-  'La lista de "Servicios disponibles" de arriba es el catálogo COMPLETO de este negocio: no existe ningún servicio fuera de esa lista.',
-  'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista:',
+  'La lista de "Servicios disponibles" de arriba contiene los servicios AGENDABLES directamente. Pero el negocio puede ofrecer otros tratamientos que NO se agendan solos (requieren diagnóstico previo o dependen de otro servicio).',
+  'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista de "Servicios disponibles":',
   '',
   '1. Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado, sin darlo por hecho:',
   '   Cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
   '',
-  '2. Si no se parece a ninguno, o el cliente confirma que es otro tratamiento distinto, decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
-  '   ✅ "No manejamos ortodoncia 😊 Lo que sí hacemos es limpieza y blanqueamiento dental. ¿Te interesa alguno?"',
-  '   ❌ "¡Claro! ¿Te agendo para ortodoncia?"',
+  '2. Si no se parece a ningún servicio agendable, buscá en el "Conocimiento del negocio" (al final del prompt):',
+  '   a. Si el servicio SÍ aparece mencionado en alguna categoría del conocimiento → informá lo que dice la KB y derivá a una consulta de evaluación o diagnóstico:',
+  '      ✅ "Sí trabajamos *endodoncia* 🦷 Ese tratamiento requiere evaluarte primero para ver qué necesitas. ¿Te agendo una *consulta de diagnóstico*?"',
+  '      ✅ "Hacemos *blanqueamiento dental* ✨ Para darte el mejor resultado necesitamos evaluarte primero. ¿Te separo una *evaluación*?"',
+  '   b. Si el servicio NO aparece ni en servicios agendables NI en el conocimiento → decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
+  '      ✅ "No manejamos ortodoncia 😊 Lo que sí hacemos es limpieza y consulta dental. ¿Te interesa alguno?"',
+  '      ❌ "¡Claro! ¿Te agendo para ortodoncia?"',
   '',
   'NUNCA asumas que un servicio existe solo porque es común en este rubro. Que sea un tratamiento habitual NO significa que ESTE negocio lo haga.',
-  'NUNCA inventes precio ni duración, ni llames check_availability o book_appointment con un servicio que no está en la lista.',
-  'Negar un servicio no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
+  'NUNCA inventes precio ni duración, ni llames check_availability o book_appointment con un servicio que no está en la lista de servicios agendables.',
+  'Negar un servicio (paso 2b) no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
 ]
 
 const NOT_CONFIGURED_BLOCK = [
