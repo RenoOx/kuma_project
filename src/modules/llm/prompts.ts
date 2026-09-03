@@ -457,6 +457,7 @@ function renderDepositBlock(settings: BusinessSettings): string[] {
       : 'Este negocio pide un adelanto para confirmar la cita.',
     `Formas de pago: ${formatPaymentMethods(settings.depositPaymentMethods)}`,
     'Esta es la ÚNICA fuente válida del adelanto. No la busques en el conocimiento del negocio.',
+    'Es la fuente del dato, no una autorización para darlo: cuándo se le pasa al cliente lo decide el bloque "Orden para cobrar el adelanto" del final.',
   ]
 }
 
@@ -548,6 +549,49 @@ const REQUIRES_APPROVAL_BLOCK = [
   '  ❌ "✅ ¡Cita confirmada! *limpieza dental* el *martes 12 a las 10:00am*."',
   '- Si el cliente pregunta por el estado de su solicitud, decile que espere la confirmación o que se comunique directamente con el negocio. No tenés forma de consultar en qué quedó.',
 ]
+
+// Only reaches the model when the business asks for a deposit, and it sits at
+// the very end of the body for the same reason REQUIRES_APPROVAL_BLOCK does: it
+// has to override what comes above. What it overrides is real — the niche block
+// told the model to hand over the amount and the account number to anyone who
+// asked, which is how Emma ended up quoting a Yape number to a patient whose
+// name she had never asked for, leaving the owner a capture with no booking
+// behind it.
+//
+// Niche-independent on purpose. Until now every rule about money lived inside
+// clinicalBlocks, so a barbershop or a salon with requiresDeposit got none.
+//
+// Phrased in terms of WHICH DATA IS MISSING rather than "call the tool now": in
+// the `greeting` state book_appointment is not in the model's tool list at all
+// (see stateMachine), and that list is fixed for the whole turn — so telling it
+// to call the tool there is telling it to do something it cannot.
+function depositOrderBlock(settings: BusinessSettings): string[] {
+  if (!settings.requiresDeposit) return []
+
+  return [
+    '',
+    '# Orden para cobrar el adelanto — ESTA REGLA PISA A CUALQUIER OTRA DE ARRIBA',
+    'La recolección de datos es SECUENCIAL y no se saltan pasos:',
+    '  1. Servicio confirmado',
+    '  2. Horario elegido',
+    '  3. Nombre del paciente',
+    '  4. Llamada a book_appointment — la tool la rechaza pidiendo el adelanto, eso es lo esperado, y esa llamada es la que deja registrado qué horario eligió',
+    '  5. Recién ahí, el pago',
+    '',
+    'NUNCA menciones el monto del adelanto, el método de pago, el número de Yape o Plin ni ninguna cuenta antes de tener el nombre del paciente Y haber llamado book_appointment.',
+    'Vale aunque el cliente lo pida directo, aunque insista y aunque diga que ya pagó. La sección "Adelanto para reservar" es de dónde sacás el dato cuando toca darlo, no un permiso para darlo antes.',
+    '',
+    'Si el cliente pregunta por el pago, o dice que ya pagó, y todavía te falta un dato, respondé SOLO pidiendo el que falta y sin adelantar nada de plata:',
+    '  - Te falta el nombre → pedí el nombre: "¿A nombre de quién agendo la cita?"',
+    '  - Te falta el horario → preguntá día y hora, y después el nombre.',
+    '  ✅ Cliente: "¿a qué número te deposito?" (sin nombre) → "Con gusto 😊 ¿A nombre de quién agendo la cita?"',
+    '  ✅ Cliente: "ya pagué" (sin nombre) → "¡Perfecto! ¿A nombre de quién agendo la cita?"',
+    '  ❌ Cliente: "¿a qué número te deposito?" → "Son S/ 20 por Yape al 987654321."  ← todavía no sabés quién es ni para cuándo',
+    '  ❌ "Te paso los datos de pago y me confirmas tu nombre después."  ← el nombre va primero, sin excepción',
+    '',
+    'El motivo no es formal: una captura que llega sin nombre y sin horario no se puede registrar, y el encargado se queda con una imagen y nada que aprobar.',
+  ]
+}
 
 // ── Bloques por nicho ────────────────────────────────────────────────────────
 //
@@ -663,7 +707,7 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     `Mensaje al cliente antes de escalar: "Entiendo que es urgente. Voy a comunicarme con ${businessName} para que te atiendan lo antes posible."`,
     '',
     '# Pagos y comprobantes',
-    'Si el cliente pregunta cómo pagar o a dónde transferir, respondé con la sección "Adelanto para reservar" de la configuración de arriba. Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
+    'Si el cliente pregunta cómo pagar o a dónde transferir, el dato sale de la sección "Adelanto para reservar" de la configuración de arriba — pero se lo pasás recién cuando ya tenés servicio + horario + nombre y llamaste book_appointment. Si te falta alguno de esos, pedí ese dato primero y no adelantes ni el monto ni el número (ver "Orden para cobrar el adelanto", al final). Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
     'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido.',
     'La captura NO agenda la cita por sí sola: el encargado revisa el pago y su visto bueno es lo que la agenda. Entre una cosa y la otra puede pasar un rato.',
     'Al informar el adelanto, NO preguntes si quiere mandar la captura: pedila directamente.',
@@ -843,6 +887,7 @@ function buildStaticBody(
     '  Si SÍ requiere adelanto:',
     '    a. Llamá book_appointment con el servicio, el horario y el nombre que ya tenés. La tool te la va a RECHAZAR pidiendo el adelanto. Eso es lo esperado y no es un error: esa llamada es la que deja registrado qué horario eligió el cliente.',
     '    b. Con lo que te devuelve la tool, decile el monto y cómo pagar: "Para confirmar tu cita necesitas un adelanto de [monto]. Puedes pagar por [método] al [número]. Mándame la captura cuando pagues 😊".',
+    '       Este es el PRIMER momento de la conversación en que podés nombrar dinero. Antes del 4a no se menciona monto, método ni número, ni aunque el cliente lo pida.',
     '    c. NO le digas que la cita quedó agendada ni que la solicitud fue enviada. Por esa llamada rechazada no quedó nada agendado todavía.',
     '    d. Si dice "ya pagué" pero no manda nada, pedile la captura con amabilidad. Sin captura no avanzás.',
     '    e. Si el cliente CAMBIA de horario o de servicio después de esto, volvé a llamar book_appointment con los datos nuevos. Te la voy a rechazar otra vez, y así lo registrado pasa a ser lo último que eligió. Si no la volvés a llamar, la cita se va a crear con el horario viejo.',
@@ -1013,6 +1058,9 @@ function buildStaticBody(
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
     // comment. An unconfigured business (settings null) keeps `direct`.
     ...(settings?.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : []),
+    // Last of the instruction blocks: it overrides the niche block's payment
+    // rules, which sit above and used to contradict it outright.
+    ...(settings ? depositOrderBlock(settings) : []),
     '',
     // KNOWLEDGE BASE GOES LAST — DO NOT MOVE IT BACK UP.
     //

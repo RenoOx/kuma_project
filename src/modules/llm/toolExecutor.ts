@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
+import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import {
   type DepositPaymentMethod,
   formatPaymentMethods,
@@ -32,6 +33,12 @@ export interface ToolExecutionResult {
   // an error result and still the most important transition in the booking flow.
   // Absent means nothing moved.
   trigger?: string
+  // Proof for the entry guard of whatever state `trigger` leads to. Set only
+  // where the proof is actually produced — the deposit gate, which freezes the
+  // booking intent itself. Everywhere else its absence is the correct answer:
+  // a trigger that cannot show the precondition does not get to walk the
+  // conversation into a state that depends on it.
+  evidence?: TransitionEvidence
 }
 
 const checkAvailabilityArgs = z.object({
@@ -388,6 +395,11 @@ export async function executeTool(
           }),
           error: 'deposit_required',
           trigger: 'deposit_required',
+          // The proof for await_payment's entry guard, and this is the only
+          // place in the codebase that can give it: the expectImage call above
+          // just froze the service, the slot and the name this capture will pay
+          // for, after isUsableName cleared the name.
+          evidence: { bookingIntent: true },
         }
       }
 

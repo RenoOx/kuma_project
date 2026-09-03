@@ -427,7 +427,18 @@ async function handleCustomerImage(params: {
         : `[El paciente envió una captura de pago para ${intent.service}${
             intent.amount ? ` (adelanto de ${intent.amount})` : ''
           }, pero no pude registrarla. NO llames book_appointment ni le confirmes la cita: decile que la estás revisando.]`
-    : '[El paciente envió una imagen.]'
+    : // No frozen intent, and the business asks for a deposit: almost always a
+      // customer who already knew where to pay — they saw the number on
+      // Instagram, they came last month, the owner passed it to them — and paid
+      // before Emma ever asked for a name or a slot. Nothing was registered, so
+      // there is no verification for the owner to rule on and the generic marker
+      // below would leave the model unaware a capture even arrived.
+      //
+      // 'reference' is excluded because a reference photo lands here too, with
+      // the same null intent, and it is not a payment at all.
+      requiresDeposit && purpose !== 'reference'
+      ? '[El paciente envió una imagen que parece un comprobante de pago, pero no hay ninguna reserva registrada a la que asociarla. Pedile el horario y el nombre (los que falten) para poder registrarla. NO des el pago por recibido, NO le confirmes ninguna cita y NO llames book_appointment hasta tener esos datos.]'
+      : '[El paciente envió una imagen.]'
   const markerPersisted = await messageService.append({
     businessId,
     conversationId,
