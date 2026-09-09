@@ -10,6 +10,7 @@ import { openai } from '@/modules/llm/openai.client.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError } from '@/shared/errors.js'
+import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { buildOwnerSystemPrompt } from './ownerAssistant.prompts.js'
 import { executeOwnerTool } from './ownerAssistant.toolExecutor.js'
@@ -296,7 +297,7 @@ export async function handle(
           iteration,
           tool: call.function.name,
           args: parsedArgs,
-          resultPreview: toolResult.result.slice(0, 200),
+          resultPreview: preview(toolResult.result, 200),
           error: toolResult.error,
         },
         'owner tool executed',

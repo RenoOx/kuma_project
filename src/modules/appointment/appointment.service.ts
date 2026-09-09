@@ -1548,7 +1548,9 @@ export async function confirmPendingForCustomer(params: {
     // Only filled when the row has none: a proposal that came out of a booking
     // Emma filed already carries the name the patient gave then, and a later
     // "dale" must not overwrite it.
-    const nameToFreeze = appointment.customerName ? null : normalizeCustomerName(params.customerName)
+    const nameToFreeze = appointment.customerName
+      ? null
+      : normalizeCustomerName(params.customerName)
 
     let updated = await appointmentRepo.update(params.businessId, appointment.id, {
       status: 'scheduled',

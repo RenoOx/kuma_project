@@ -12,6 +12,7 @@ import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import { customerJid } from '@/modules/whatsapp/customerJid.js'
 import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
@@ -669,7 +670,7 @@ async function replyToCustomer(
     }
   }
 
-  const jid = `${phone.replace('+', '')}@s.whatsapp.net`
+  const jid = customerJid(customer)
   try {
     await sendWithPresence({
       businessId: ctx.businessId,

@@ -11,6 +11,7 @@ import {
   getConnectionState,
   storePairingCode,
 } from './modules/whatsapp/clientRegistry.js'
+import { summarize } from './modules/whatsapp/healthMonitor.js'
 import * as sessionGuard from './modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from './shared/errors.js'
 
@@ -18,11 +19,21 @@ const VERSION = '0.1.0'
 
 export const app = new Hono()
 
+// Always 200, even with every WhatsApp number offline. This is deliberate: a
+// failing healthcheck makes Railway restart the container, and a restart is a
+// fresh WhatsApp handshake with the same credentials — we would be converting a
+// disconnection into ban risk. The signal lives in the body and in the error
+// lines the health monitor writes, never in the status code.
+//
+// The whatsapp block is an aggregate on purpose. This endpoint is
+// unauthenticated, so it must not enumerate which businesses exist, and it must
+// never carry a QR or a pairing code.
 app.get('/health', (c) => {
   return c.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: VERSION,
+    whatsapp: summarize(),
   })
 })
 

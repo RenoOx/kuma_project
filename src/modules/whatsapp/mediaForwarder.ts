@@ -6,6 +6,7 @@ import { appointmentName, formatPersonName } from '@/shared/name.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { WhatsappClient } from './baileys.client.js'
 import type { ImagePurpose, PaymentContext } from './imageExpectation.js'
+import { enqueueSend } from './sendQueue.js'
 
 // Same JID shape ownerNotifier builds. Kept local rather than imported so this
 // module stays usable with any client, not only the registry-backed one.
@@ -169,7 +170,9 @@ export async function forwardImageToOwner(
   })
 
   try {
-    await params.client.sendImage(jid, params.image, caption)
+    await enqueueSend(business.id, 'owner', () =>
+      params.client.sendImage(jid, params.image, caption),
+    )
     logger.info(
       {
         businessId: business.id,

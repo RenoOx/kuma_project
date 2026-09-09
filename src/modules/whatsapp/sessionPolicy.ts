@@ -13,6 +13,11 @@ export type DisconnectKind = 'halt' | 'restart_required' | 'transient'
 export const RECONNECT_BASE_DELAY_MS = 5_000
 export const RECONNECT_MAX_DELAY_MS = 160_000
 export const MAX_RECONNECT_ATTEMPTS = 6
+// Spread as a fraction of the computed delay. Without it every number dropped
+// by the same event — a Railway network blip, a WhatsApp server hiccup — comes
+// back on the identical millisecond, six times in a row, from one IP. The
+// backoff is only half the protection; not arriving in lockstep is the other.
+export const RECONNECT_JITTER_RATIO = 0.25
 
 // While a QR is on screen waiting to be scanned, WhatsApp closes the socket
 // every time the code expires. Those closes are the normal rhythm of pairing,
@@ -60,13 +65,19 @@ export function disconnectReasonName(statusCode: number | undefined): string {
 }
 
 /**
- * Exponential backoff for reconnect attempt N (1-based), capped.
- * 1→5s, 2→10s, 3→20s, 4→40s, 5→80s, 6→160s.
+ * Exponential backoff for reconnect attempt N (1-based), capped, with jitter.
+ * Base: 1→5s, 2→10s, 3→20s, 4→40s, 5→80s, 6→160s, each spread by ±25%.
+ *
+ * `random` is injectable so the schedule can be pinned in a test, following the
+ * same convention as the reply-variant pickers.
  */
-export function reconnectDelayMs(attempt: number): number {
-  if (attempt < 1) return RECONNECT_BASE_DELAY_MS
-  const raw = RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1)
-  return Math.min(raw, RECONNECT_MAX_DELAY_MS)
+export function reconnectDelayMs(attempt: number, random: () => number = Math.random): number {
+  const capped =
+    attempt < 1
+      ? RECONNECT_BASE_DELAY_MS
+      : Math.min(RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1), RECONNECT_MAX_DELAY_MS)
+  const jitter = capped * RECONNECT_JITTER_RATIO * (random() * 2 - 1)
+  return Math.max(0, Math.round(capped + jitter))
 }
 
 /** True once a transient reconnect loop has burned its whole budget. */

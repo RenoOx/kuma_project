@@ -4,13 +4,16 @@ import {
   Browsers,
   fetchLatestBaileysVersion,
   makeWASocket,
+  type proto,
   useMultiFileAuthState,
   type WAMessage,
   type WASocket,
 } from '@whiskeysockets/baileys'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
+import { env } from '@/config/env.js'
 import { logger as rootLogger } from '@/config/logger.js'
+import { withTimeout } from '@/shared/withTimeout.js'
 import { classifyDisconnect, type DisconnectKind, disconnectReasonName } from './sessionPolicy.js'
 
 export type MessageHandler = (raw: WAMessage) => Promise<void> | void
@@ -74,21 +77,50 @@ export interface WhatsappClient {
   logout(): Promise<void>
 }
 
+// How many outgoing message protos to keep around for retry requests. A
+// retry lands within seconds of the original, so this only has to cover a
+// short burst — it is not a transcript.
+const SENT_MESSAGE_CACHE_MAX = 500
+
 export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<WhatsappClient> {
   const log = rootLogger.child({ component: 'baileys', businessId: opts.businessId })
 
   await mkdir(opts.sessionDir, { recursive: true })
   const { state, saveCreds } = await useMultiFileAuthState(opts.sessionDir)
 
-  // Elevated to `info` while we stabilize prod pairing — surfaces protocol
-  // events (stream errors, disconnect reasons) in Railway logs without full spam.
-  const baileysLogger = pino({ level: 'info' })
+  // Was pinned to `info` while prod pairing was being stabilised. That is done,
+  // and at `info` Baileys narrates every frame it handles — on a busy number
+  // that is the bulk of the log volume, and volume is what fills a Railway
+  // volume. Protocol failures (stream errors, disconnect reasons) are `warn` and
+  // above, so nothing diagnostic is lost.
+  const baileysLogger = pino({ level: env.NODE_ENV === 'production' ? 'warn' : 'info' })
 
   // WhatsApp's server rejects the handshake with a generic 500 if the client
   // doesn't announce a WA-Web version it accepts and a recognizable browser
   // identifier. fetchLatestBaileysVersion pulls the currently-supported one.
   const { version } = await fetchLatestBaileysVersion()
   log.info({ version }, 'using whatsapp web version')
+
+  // Protos of the messages we sent, newest last, so Baileys can re-serve one
+  // when a recipient asks for a retry.
+  //
+  // Scoped to THIS socket and never module-level: the key is WhatsApp's message
+  // id, and a shared map would make one business's message content readable
+  // through another business's socket.
+  const sentMessages = new Map<string, proto.IMessage>()
+
+  function rememberSentMessage(
+    id: string | null | undefined,
+    message: proto.IMessage | null | undefined,
+  ): void {
+    if (!id || !message) return
+    // Map iterates in insertion order, so the first key is the oldest.
+    if (sentMessages.size >= SENT_MESSAGE_CACHE_MAX) {
+      const oldest = sentMessages.keys().next().value
+      if (oldest !== undefined) sentMessages.delete(oldest)
+    }
+    sentMessages.set(id, message)
+  }
 
   const sock = makeWASocket({
     auth: state,
@@ -98,6 +130,10 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     // Skip the full history sync on connect — we only need incoming messages
     // from now on, not the entire chat history.
     syncFullHistory: false,
+    // Belt and braces on top of syncFullHistory. WhatsApp still pushes history
+    // sync notifications during linking, and every one we accept is traffic and
+    // decryption work for messages this bot will never read.
+    shouldSyncHistoryMessage: () => false,
     // Skip the initial sync/profile queries entirely. On fresh WA accounts
     // some of these queries hang forever and, when they finally hit the
     // internal timeout, Baileys tears down the whole stream. We don't need
@@ -108,11 +144,26 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     // "last seen".
     markOnlineOnConnect: false,
     // Give any remaining IQ (not init) a long leash — 3 min instead of the
-    // 60s default so a slow WA response doesn't kill the socket.
+    // 60s default so a slow WA response doesn't kill the socket. Set together
+    // with fireInitQueries during the 2026-07-01 pairing incident, where the
+    // stream was being torn down every few minutes.
+    //
+    // Kept high ON PURPOSE, and not the right knob for "a query hung and blocked
+    // something": this value protects the connection, while the calls that sit
+    // in serialized critical paths carry their own short timeouts (see
+    // prepareLidSession below, and the reachability check in sendReminders).
+    // Lowering this instead would trade a real, fixed incident for a problem
+    // those local timeouts already solve.
     defaultQueryTimeoutMs: 180_000,
     // Emit own outgoing messages back through the event stream. Not needed
     // for the bot; keeping it off reduces noise on the handler.
     emitOwnEvents: false,
+    // Called when a recipient could not decrypt one of our messages and asks
+    // for a retry. Returning undefined loses that message for good — the
+    // patient is left on "Esperando este mensaje" — and leaves their client
+    // retrying, and repeated decryption failures are a session-health signal
+    // WhatsApp counts against the number.
+    getMessage: async (key) => (key.id ? sentMessages.get(key.id) : undefined),
   })
 
   const messageHandlers: MessageHandler[] = []
@@ -132,8 +183,15 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     if (intentionallyClosed) return
 
     if (qr) {
-      log.info('whatsapp QR ready — scan it with the WhatsApp app on your phone')
-      qrcode.generate(qr, { small: true })
+      log.info('whatsapp QR ready — open /admin/whatsapp/qr to scan it')
+      // A QR is a session credential: anyone who can read the log stream can
+      // scan it and link their own device to the customer's WhatsApp. It belongs
+      // on the authenticated admin page, never in stdout. Kept for local
+      // development, where the terminal IS the operator's screen.
+      //
+      // It also stops the ASCII block from being reprinted every ~20s for up to
+      // twenty pairing cycles.
+      if (env.NODE_ENV === 'development') qrcode.generate(qr, { small: true })
       for (const handler of qrHandlers) handler(qr)
     }
     if (connection === 'open') {
@@ -170,11 +228,14 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     }
   })
 
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  sock.ev.on('messages.upsert', ({ messages, type }) => {
     log.info({ type, count: messages.length }, 'messages.upsert received')
     if (type !== 'notify') return
     for (const m of messages) {
-      log.info(
+      // debug, not info: the batch line above already records that traffic
+      // arrived and how much. This per-message shape dump is a development aid,
+      // and in production it doubled the log lines for every single message.
+      log.debug(
         {
           fromMe: m.key.fromMe,
           remoteJid: m.key.remoteJid,
@@ -185,10 +246,23 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
         'dispatching message to handlers',
       )
       for (const handler of messageHandlers) {
+        // NOT awaited. The handler serialises its own work per sender, so
+        // awaiting here only queued unrelated customers behind each other's
+        // debounce window and LLM call — on the offline backlog WhatsApp
+        // delivers after a reconnect, that was minutes of silence for whoever
+        // came last in the batch.
+        //
+        // Safe because of two things that did not exist when this loop was
+        // written: the send queue rate-limits the outbound side, so the fan-out
+        // cannot become a burst, and the handler caps how many messages it
+        // processes at once. Dedup is unaffected — claimMessageId runs in the
+        // handler's synchronous prologue, before any await.
         try {
-          await handler(m)
+          void Promise.resolve(handler(m)).catch((err) => {
+            log.error({ err }, 'message handler rejected')
+          })
         } catch (err) {
-          log.error({ err }, 'message handler threw')
+          log.error({ err }, 'message handler threw synchronously')
         }
       }
     }
@@ -198,17 +272,26 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
   // signal session established. assertSessions alone often isn't enough because
   // WA delays returning key material until presence is subscribed. Pattern that
   // works: presenceSubscribe → delay → assertSessions → send.
+  //
+  // Both queries are bounded well below defaultQueryTimeoutMs. That 3-minute
+  // leash exists so a slow init query cannot tear the stream down, but this runs
+  // inside a send-queue lane: a query hanging on the global timeout would stall
+  // every other message for that business for three minutes. Ten seconds is more
+  // than a healthy handshake needs, and both failures already degrade into
+  // "send anyway".
+  const LID_QUERY_TIMEOUT_MS = 10_000
+
   async function prepareLidSession(jid: string): Promise<void> {
     if (!jid.endsWith('@lid')) return
     try {
-      await sock.presenceSubscribe(jid)
+      await withTimeout(sock.presenceSubscribe(jid), LID_QUERY_TIMEOUT_MS, 'presenceSubscribe')
       log.info({ jid }, 'presenceSubscribe ok for lid')
     } catch (err) {
       log.warn({ err, jid }, 'presenceSubscribe failed')
     }
     await new Promise((r) => setTimeout(r, 800))
     try {
-      await sock.assertSessions([jid], true)
+      await withTimeout(sock.assertSessions([jid], true), LID_QUERY_TIMEOUT_MS, 'assertSessions')
       log.info({ jid }, 'assertSessions ok for lid')
     } catch (err) {
       log.warn({ err, jid }, 'assertSessions failed — send may still 463')
@@ -221,6 +304,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       log.info({ jid, textLen: text.length }, 'sock.sendMessage: calling')
       await prepareLidSession(jid)
       const result = await sock.sendMessage(jid, { text })
+      rememberSentMessage(result?.key?.id, result?.message)
       log.info(
         { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
         'sock.sendMessage: returned',
@@ -233,6 +317,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
         image,
         ...(caption ? { caption } : {}),
       })
+      rememberSentMessage(result?.key?.id, result?.message)
       log.info(
         { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
         'sock.sendImage: returned',
@@ -274,6 +359,8 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       connectHandlers.length = 0
       pairingCodeHandlers.length = 0
       callHandlers.length = 0
+      // Patient message content must not outlive the socket that sent it.
+      sentMessages.clear()
       try {
         sock.end(undefined)
       } catch (err) {
@@ -303,6 +390,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       connectHandlers.length = 0
       pairingCodeHandlers.length = 0
       callHandlers.length = 0
+      sentMessages.clear()
 
       try {
         await sock.logout()

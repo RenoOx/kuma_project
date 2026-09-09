@@ -1,18 +1,16 @@
 import { logger } from '@/config/logger.js'
+import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { AppError } from '@/shared/errors.js'
+import { preview } from '@/shared/logRedact.js'
+import { normalizePhone } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as clientRegistry from './clientRegistry.js'
+import { customerJid } from './customerJid.js'
+import { enqueueSend } from './sendQueue.js'
 
 // Mirror of ownerNotifier, pointed the other way: the business pushing a message
 // to one of its customers. Used when the owner acts on a booking request from
 // their own WhatsApp and the patient has to be told the outcome.
-//
-// KNOWN LIMITATION: builds the classic `<digits>@s.whatsapp.net` JID. Customers
-// whose phone was derived from a LID (see extractPhone in handler.ts) have no
-// such JID and the send fails — same gap the reminders worker has.
-function customerJidFromPhone(phone: string): string {
-  return `${phone.replace('+', '')}@s.whatsapp.net`
-}
 
 /**
  * Sends a proactive message to a customer over WhatsApp.
@@ -39,10 +37,41 @@ export async function notifyCustomer(
     )
   }
 
-  const jid = customerJidFromPhone(phone)
+  // Looked up rather than derived: the row carries the JID WhatsApp routes by,
+  // which for a post-LID contact is nothing the phone can reconstruct.
+  const customer = await customerRepo.findByPhone(businessId, normalizePhone(phone) ?? phone)
+  if (!customer) {
+    return err(
+      new AppError({
+        code: 'customer_not_found',
+        message: `no customer with phone ${phone} in business ${businessId}`,
+        userMessage: 'No encontré a ese paciente en este negocio, así que no le escribí.',
+        logContext: { businessId },
+      }),
+    )
+  }
+
+  // WhatsApp already told us this JID has nobody behind it. Saying so is worth
+  // more to the owner than a send that will fail — and retrying a dead number
+  // is exactly the pattern that gets a number flagged.
+  if (customer.whatsappUnreachableAt) {
+    return err(
+      new AppError({
+        code: 'customer_unreachable',
+        message: `customer ${customer.id} flagged unreachable at ${customer.whatsappUnreachableAt.toISOString()}`,
+        userMessage:
+          'Ese número ya no tiene WhatsApp activo, así que no le pude escribir. Habría que contactarlo por otra vía.',
+        logContext: { businessId, customerId: customer.id },
+      }),
+    )
+  }
+
+  const jid = customerJid(customer)
   try {
-    await client.sendMessage(jid, text)
-    logger.info({ businessId, jid, textPreview: text.slice(0, 60) }, 'notified customer')
+    // 'reply' priority, not 'reminder': the owner has just been told the patient
+    // was messaged and is watching for it to land.
+    await enqueueSend(businessId, 'reply', () => client.sendMessage(jid, text))
+    logger.info({ businessId, jid, textPreview: preview(text) }, 'notified customer')
     return ok(undefined)
   } catch (cause) {
     return err(

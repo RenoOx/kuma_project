@@ -11,13 +11,11 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import {
-  getStateConfig,
-  type TransitionEvidence,
-} from '@/modules/conversation/stateMachine.js'
+import { getStateConfig, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
+import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
@@ -410,7 +408,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           iteration,
           tool: call.function.name,
           args: parsedArgs,
-          resultPreview: toolResult.result.slice(0, 200),
+          resultPreview: preview(toolResult.result, 200),
           error: toolResult.error,
         },
         'tool executed',

@@ -1,9 +1,11 @@
 import { logger } from '@/config/logger.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { AppError } from '@/shared/errors.js'
+import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as clientRegistry from './clientRegistry.js'
 import { recordOwnerNotification } from './ownerThreadLog.js'
+import { enqueueSend } from './sendQueue.js'
 
 // Builds the Baileys JID for a phone number stored in E.164 (+51999...).
 // Baileys uses `<digits>@s.whatsapp.net` for individual chats.
@@ -57,8 +59,11 @@ export async function notifyOwner(
 
   const jid = ownerJidFromPhone(business.ownerWhatsappNumber)
   try {
-    await client.sendMessage(jid, text)
-    logger.info({ businessId, jid, textPreview: text.slice(0, 60) }, 'notified owner')
+    // Queued like every other outbound message: a push to the owner spends the
+    // same number's budget as a reply to a patient, and used to bypass every
+    // limit we had.
+    await enqueueSend(businessId, 'owner', () => client.sendMessage(jid, text))
+    logger.info({ businessId, jid, textPreview: preview(text) }, 'notified owner')
   } catch (cause) {
     return err(
       new AppError({

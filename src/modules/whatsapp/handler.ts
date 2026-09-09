@@ -1,4 +1,4 @@
-import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys'
+import { downloadMediaMessage, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
@@ -35,9 +35,11 @@ import {
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
-import { sendWithPresence } from '@/modules/whatsapp/outbound.js'
+import { sendDirect, sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
+import * as presence from '@/modules/whatsapp/presence.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
+import { preview } from '@/shared/logRedact.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 
@@ -130,6 +132,54 @@ function claimMessageId(key: string, now: number = Date.now()): boolean {
   return true
 }
 
+// Caps how many messages are being processed at once, across all senders and
+// all tenants.
+//
+// The dispatch loop in baileys.client no longer awaits each handler, which is
+// what stopped one slow conversation from holding up every other customer in the
+// same batch. The cost of that is a fan-out: reconnecting after an outage
+// delivers the whole offline backlog in one upsert, and without a cap fifty
+// messages would open fifty concurrent GPT-4o-mini calls. OpenAI would rate-limit
+// most of them and real patients would get the fallback line.
+//
+// Five is chosen to be well clear of that while still finishing a fifty-message
+// backlog in ten rounds instead of a queue of fifty.
+const MAX_CONCURRENT_PROCESSING = 5
+
+let activeProcessing = 0
+const processingWaiters: Array<() => void> = []
+
+/**
+ * Runs `work` once a processing slot is free.
+ *
+ * Applied AFTER the synchronous prologue and after the debounce, never around
+ * them: dedup has to stay atomic against the event loop, and holding a slot
+ * through a four-second debounce window would spend the budget on waiting rather
+ * than on working.
+ */
+async function withProcessingSlot(work: () => Promise<void>): Promise<void> {
+  if (activeProcessing >= MAX_CONCURRENT_PROCESSING) {
+    // The slot is handed over already counted (see the finally below), so
+    // nothing is incremented on this side of the wait.
+    await new Promise<void>((resolve) => processingWaiters.push(resolve))
+  } else {
+    activeProcessing++
+  }
+
+  try {
+    await work()
+  } finally {
+    // Hand the slot straight to the next waiter WITHOUT dropping the count.
+    // Decrementing first and then resolving leaves a microtask-sized window in
+    // which a fresh caller sees a free slot, takes it, and the woken waiter then
+    // increments on top of it — the cap silently overshoots under exactly the
+    // burst it exists to contain.
+    const next = processingWaiters.shift()
+    if (next) next()
+    else activeProcessing--
+  }
+}
+
 // Serialises message processing per (businessId, sender-phone) so that two
 // rapid messages from the same number never run their LLM calls concurrently,
 // which would interleave messages in the conversation history.
@@ -214,8 +264,9 @@ async function respondUnsupportedFormat(params: {
   send: SendFn
   log: HandlerLogger
   humanize: boolean
+  readKey: WAMessageKey
 }): Promise<void> {
-  const { businessId, conversationId, format, jid, send, log, humanize } = params
+  const { businessId, conversationId, format, jid, send, log, humanize, readKey } = params
 
   if (!shouldSendUnsupportedNotice(conversationId)) {
     log.info({ conversationId, format }, 'unsupported format within cooldown; event only')
@@ -235,9 +286,9 @@ async function respondUnsupportedFormat(params: {
 
   try {
     if (humanize) {
-      await sendWithPresence({ businessId, jid, text: reply, send })
+      await sendWithPresence({ businessId, jid, text: reply, send, readKey })
     } else {
-      await send(jid, reply)
+      await sendDirect({ businessId, jid, text: reply, send, readKey })
     }
     log.info({ conversationId, format }, 'unsupported format notice sent')
   } catch (err) {
@@ -474,7 +525,7 @@ async function handleCustomerImage(params: {
   }
 
   try {
-    await sendWithPresence({ businessId, jid, text: reply, send })
+    await sendWithPresence({ businessId, jid, text: reply, send, readKey: raw.key })
   } catch (err) {
     log.error({ err, jid }, 'failed to acknowledge customer image')
   }
@@ -733,7 +784,7 @@ async function processMessage(
       }
       log.info({ keyword, ok: result.ok }, 'demo command processed')
       try {
-        await send(jid, reply)
+        await sendDirect({ businessId, jid, text: reply, send, readKey: raw.key })
       } catch {}
       return
     }
@@ -775,6 +826,7 @@ async function processMessage(
         log,
         // Owner flow: no anti-ban timing, this is an internal conversation.
         humanize: false,
+        readKey: raw.key,
       })
       return
     }
@@ -814,7 +866,7 @@ async function processMessage(
     }
 
     try {
-      await send(jid, replyText)
+      await sendDirect({ businessId, jid, text: replyText, send, readKey: raw.key })
     } catch (err) {
       log.error({ err, jid }, 'failed to send owner reply over whatsapp')
     }
@@ -822,10 +874,13 @@ async function processMessage(
   }
 
   // CUSTOMER FLOW — the historical path.
+  // jid, not a rebuilt one: this is the address WhatsApp just delivered on, and
+  // for a post-LID contact it is the only address that works.
   const customerResult = await customerService.getOrCreate(
     businessId,
     phone,
     raw.pushName ?? undefined,
+    jid,
   )
   if (!customerResult.ok) {
     log.error(
@@ -833,7 +888,7 @@ async function processMessage(
       'getOrCreate customer failed',
     )
     try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send })
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
     } catch {}
     return
   }
@@ -849,7 +904,7 @@ async function processMessage(
       'getOrCreateOpen conversation failed',
     )
     try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send })
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
     } catch {}
     return
   }
@@ -867,7 +922,7 @@ async function processMessage(
       'append user message failed',
     )
     try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send })
+      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
     } catch {}
     return
   }
@@ -931,7 +986,7 @@ async function processMessage(
     })
 
     try {
-      await sendWithPresence({ businessId, jid, text: PAUSED_REPLY, send })
+      await sendWithPresence({ businessId, jid, text: PAUSED_REPLY, send, readKey: raw.key })
     } catch (err) {
       log.error({ err, jid }, 'failed to send paused canned reply')
     }
@@ -965,6 +1020,7 @@ async function processMessage(
       send,
       log,
       humanize: true,
+      readKey: raw.key,
     })
     return
   }
@@ -985,7 +1041,7 @@ async function processMessage(
         log.error({ code: persisted.error.code }, 'append escalated canned reply failed')
       }
       try {
-        await sendWithPresence({ businessId, jid, text: ESCALATED_REPLY, send })
+        await sendWithPresence({ businessId, jid, text: ESCALATED_REPLY, send, readKey: raw.key })
         log.info({ conversationId: conversation.id }, 'escalated: canned reply sent, LLM skipped')
       } catch (err) {
         log.error({ err, jid }, 'failed to send escalated canned reply')
@@ -1045,11 +1101,11 @@ async function processMessage(
   }
 
   log.info(
-    { jid, replyLen: replyText.length, replyPreview: replyText.slice(0, 60) },
+    { jid, replyLen: replyText.length, replyPreview: preview(replyText) },
     'about to send reply over whatsapp',
   )
   try {
-    await sendWithPresence({ businessId, jid, text: replyText, send })
+    await sendWithPresence({ businessId, jid, text: replyText, send, readKey: raw.key })
     log.info({ jid }, 'reply sent successfully')
   } catch (err) {
     log.error({ err, jid }, 'failed to send reply over whatsapp')
@@ -1120,9 +1176,14 @@ export function handleIncomingMessage(
     return Promise.resolve()
   }
 
+  // An inbound message is the one unambiguous sign somebody is working this
+  // number. Placed after every filter so protocol noise and duplicates do not
+  // keep a quiet number looking online all day.
+  presence.markActive(businessId)
+
   log.info(
     incoming.kind === 'text'
-      ? { phone, textPreview: incoming.text.slice(0, 60) }
+      ? { phone, textLen: incoming.text.length, textPreview: preview(incoming.text) }
       : incoming.kind === 'image'
         ? { phone, format: 'image', hasCaption: !!incoming.caption }
         : { phone, format: incoming.format },
@@ -1137,7 +1198,7 @@ export function handleIncomingMessage(
   // possibly before the text it came with — accepted trade-off.
   if (incoming.kind !== 'text') {
     return withSenderLock(senderKey, () =>
-      processMessage(raw, businessId, send, jid, phone, incoming),
+      withProcessingSlot(() => processMessage(raw, businessId, send, jid, phone, incoming)),
     )
   }
 
@@ -1150,10 +1211,12 @@ export function handleIncomingMessage(
       return
     }
     return withSenderLock(senderKey, () =>
-      processMessage(raw, businessId, send, jid, phone, {
-        kind: 'text',
-        text: joined,
-      }),
+      withProcessingSlot(() =>
+        processMessage(raw, businessId, send, jid, phone, {
+          kind: 'text',
+          text: joined,
+        }),
+      ),
     )
   })
 }
