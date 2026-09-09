@@ -60,6 +60,49 @@ export async function updateLastSeen(
 ): Promise<void> {
   await exec
     .update(customers)
-    .set({ lastSeenAt: at, updatedAt: at })
+    // Clearing whatsappUnreachableAt here is the point of doing it in this
+    // function: an inbound message IS proof the number is alive, and this runs
+    // on every one of them. A customer who was flagged while their phone was
+    // off must not stay excluded from reminders forever.
+    .set({ lastSeenAt: at, whatsappUnreachableAt: null, updatedAt: at })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
+/**
+ * Records the transport address WhatsApp routes this customer by.
+ *
+ * Called only when the JID actually changed: a contact can move from "<lid>@lid"
+ * to "<phone>@s.whatsapp.net" once WhatsApp exposes their number, and the newer
+ * one is the one future proactive sends have to use.
+ */
+export async function updateWaJid(
+  businessId: string,
+  id: string,
+  waJid: string,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(customers)
+    .set({ waJid, updatedAt: new Date() })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
+/**
+ * Flags a customer WhatsApp says has no account behind their JID, so proactive
+ * sends stop targeting them.
+ *
+ * Not a delete and not a hard block: the flag is cleared by updateLastSeen the
+ * moment they write again, because the only evidence that outranks WhatsApp's
+ * "does not exist" is the person actually messaging us.
+ */
+export async function markWhatsappUnreachable(
+  businessId: string,
+  id: string,
+  at: Date = new Date(),
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(customers)
+    .set({ whatsappUnreachableAt: at, updatedAt: at })
     .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
 }

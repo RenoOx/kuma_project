@@ -4,17 +4,23 @@ import { app } from './app.js'
 import { env } from './config/env.js'
 import { logger } from './config/logger.js'
 import * as businessRepo from './modules/business/business.repo.js'
+import { inspectAuthState, logSessionsDirDiagnostics } from './modules/whatsapp/authState.js'
 import { makeWhatsappClient } from './modules/whatsapp/baileys.client.js'
 import { handleIncomingCall } from './modules/whatsapp/callHandler.js'
 import {
+  getAllClients,
   getClient,
   getConnectionState,
   registerClient,
   setConnectionStatus,
   storePairingCode,
   storeQR,
+  touchActivity,
 } from './modules/whatsapp/clientRegistry.js'
 import { handleIncomingMessage } from './modules/whatsapp/handler.js'
+import { HEALTH_CHECK_INTERVAL_MS, startHealthMonitor } from './modules/whatsapp/healthMonitor.js'
+import * as presence from './modules/whatsapp/presence.js'
+import { stopQueue } from './modules/whatsapp/sendQueue.js'
 import * as sessionGuard from './modules/whatsapp/sessionGuard.service.js'
 import {
   hasExhaustedReconnects,
@@ -77,6 +83,9 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
     await previous.close()
   }
   cancelPendingReconnect(businessId)
+  // Drop any presence timer left over from the socket being replaced: it would
+  // fire against a socket that no longer exists.
+  presence.stopPresence(businessId)
 
   const client = await makeWhatsappClient({ businessId, sessionDir })
 
@@ -98,6 +107,8 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
 
   client.onConnect(() => {
     setConnectionStatus(businessId, 'connected')
+    touchActivity(businessId)
+    presence.scheduleInitialPresence(businessId)
     // A successful link proves the number is healthy: drop the backoff counter
     // and clear any accumulated rate-limit state for it.
     reconnectAttempts.delete(businessId)
@@ -108,14 +119,18 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
     })
   })
 
-  client.onMessage((raw) => handleIncomingMessage(raw, businessId, client.sendMessage))
+  client.onMessage((raw) => {
+    touchActivity(businessId)
+    return handleIncomingMessage(raw, businessId, client.sendMessage)
+  })
 
-  client.onCall((call) =>
-    handleIncomingCall(call, businessId, {
+  client.onCall((call) => {
+    touchActivity(businessId)
+    return handleIncomingCall(call, businessId, {
       rejectCall: client.rejectCall,
       send: client.sendMessage,
-    }),
-  )
+    })
+  })
 
   client.onDisconnect((info) => {
     if (info.kind === 'halt') {
@@ -235,6 +250,18 @@ export async function restartWhatsappFor(
   return startWhatsappFor(businessId, whatsappNumber)
 }
 
+// Spacing between the first connection of each business at boot. N handshakes
+// from one Railway IP on the same second is a pattern; the same N spread over
+// minutes is a server coming up. Tracked so a redeploy landing mid-boot does not
+// leave timers firing handshakes for a process that is already shutting down.
+const BOOT_STAGGER_MS = 15_000
+const bootTimers: NodeJS.Timeout[] = []
+
+function cancelPendingBoots(): void {
+  for (const timer of bootTimers) clearTimeout(timer)
+  bootTimers.length = 0
+}
+
 async function bootWhatsapp(): Promise<void> {
   const allBusinesses = await businessRepo.findAll()
 
@@ -244,6 +271,10 @@ async function bootWhatsapp(): Promise<void> {
   }
 
   logger.info({ count: allBusinesses.length }, 'booting whatsapp clients')
+
+  // Printed once, before any socket: if the volume is not mounted where
+  // SESSIONS_DIR points, this is the line in the deploy log that says so.
+  await logSessionsDirDiagnostics(env.SESSIONS_DIR)
 
   for (const business of allBusinesses) {
     // A redeploy must never re-attempt a number WhatsApp is currently punishing.
@@ -265,6 +296,36 @@ async function bootWhatsapp(): Promise<void> {
       )
     }
 
+    // Fail CLOSED on a broken auth state, the same way the guard fails closed
+    // on the paths that burn a number. Booting anyway would hand the operator a
+    // QR for a number that is already linked, and scanning it spends linking
+    // budget on fixing something that is really a storage problem.
+    //
+    // 'absent' is NOT this case: a business that has never been linked has no
+    // credentials by definition, and it has to boot to produce its first QR.
+    const authState = await inspectAuthState(`${env.SESSIONS_DIR}/${business.id}`)
+    if (authState.status === 'corrupt') {
+      setConnectionStatus(business.id, 'logged_out')
+      logger.error(
+        {
+          businessId: business.id,
+          name: business.name,
+          reason: authState.reason,
+          sessionDir: `${env.SESSIONS_DIR}/${business.id}`,
+        },
+        'skipping whatsapp boot — stored credentials are damaged. Do NOT re-pair before checking the volume: a fresh QR here spends the number linking budget on a storage fault',
+      )
+      continue
+    }
+    logger.info(
+      {
+        businessId: business.id,
+        credentials: authState.status,
+        registeredAs: authState.registeredAs,
+      },
+      'auth state inspected',
+    )
+
     if (status?.blocked) {
       setConnectionStatus(business.id, 'logged_out')
       logger.warn(
@@ -280,13 +341,23 @@ async function bootWhatsapp(): Promise<void> {
       continue
     }
 
+    const delayMs = bootTimers.length * BOOT_STAGGER_MS
     logger.info(
-      { businessId: business.id, name: business.name, whatsappNumber: business.whatsappNumber },
-      'booting whatsapp client for business',
+      {
+        businessId: business.id,
+        name: business.name,
+        whatsappNumber: business.whatsappNumber,
+        delayMs,
+      },
+      'scheduling whatsapp client boot for business',
     )
-    startWhatsappFor(business.id, business.whatsappNumber).catch((err) => {
-      logger.error({ err, businessId: business.id }, 'whatsapp boot failed for business')
-    })
+    const timer = setTimeout(() => {
+      startWhatsappFor(business.id, business.whatsappNumber).catch((err) => {
+        logger.error({ err, businessId: business.id }, 'whatsapp boot failed for business')
+      })
+    }, delayMs)
+    timer.unref()
+    bootTimers.push(timer)
   }
 }
 
@@ -321,8 +392,65 @@ setInterval(() => {
 }, REMINDER_INTERVAL_MS).unref()
 logger.info({ intervalMs: REMINDER_INTERVAL_MS }, 'reminders worker scheduled (setInterval)')
 
-const shutdown = (signal: string): void => {
+// Offline-number alerting. Does not reconnect anything — see healthMonitor.ts
+// for why recycling on silence would make things worse.
+startHealthMonitor()
+logger.info({ intervalMs: HEALTH_CHECK_INTERVAL_MS }, 'whatsapp health monitor scheduled')
+
+// Railway sends SIGKILL roughly 10s after SIGTERM. The socket drain gets 8 of
+// those, leaving room for the HTTP server to close after it.
+const SOCKET_DRAIN_BUDGET_MS = 8_000
+const HTTP_CLOSE_BUDGET_MS = 1_500
+
+let shuttingDown = false
+
+const shutdown = async (signal: string): Promise<void> => {
+  // SIGTERM and SIGINT can both land on the same stop, and uncaughtException
+  // routes in here too. Draining twice would race close() against itself.
+  if (shuttingDown) return
+  shuttingDown = true
   logger.info({ signal }, 'received shutdown signal')
+
+  // Before anything else: a reconnect timer — or a staggered boot still waiting
+  // its turn — firing mid-drain opens a fresh socket for a process that is
+  // already dying, and nothing would ever close it.
+  for (const businessId of [...reconnectTimers.keys()]) cancelPendingReconnect(businessId)
+  cancelPendingBoots()
+
+  // Nothing new goes out from here on. With roughly 8s before SIGKILL there is
+  // no honest way to drain a backlog, and every caller already handles a
+  // rejected send by logging it.
+  const dropped = stopQueue()
+  if (dropped > 0) {
+    logger.warn({ dropped }, 'send queue stopped — queued messages discarded on shutdown')
+  }
+
+  for (const [businessId] of getAllClients()) presence.stopPresence(businessId)
+
+  // Closing the WhatsApp sockets is the whole point of this handler. Exiting
+  // without it leaves the session registered on WhatsApp's side, so the
+  // container replacing us links with the same credentials while the old device
+  // is still listed — that is a 440 connectionReplaced, which classifyDisconnect
+  // routes to 'halt' and recordHalt can turn into a 6h block on the customer's
+  // number. close() flips intentionallyClosed before ending the socket, so none
+  // of these closes is mistaken for a drop or triggers a reconnect.
+  const clients = getAllClients()
+  if (clients.length > 0) {
+    await Promise.race([
+      Promise.allSettled(
+        clients.map(async ([businessId, client]) => {
+          try {
+            await client.close()
+          } catch (err) {
+            logger.warn({ err, businessId }, 'client.close threw during shutdown')
+          }
+        }),
+      ),
+      new Promise((resolve) => setTimeout(resolve, SOCKET_DRAIN_BUDGET_MS)),
+    ])
+    logger.info({ count: clients.length }, 'whatsapp clients drained')
+  }
+
   server.close(() => {
     logger.info('server closed')
     process.exit(0)
@@ -330,18 +458,22 @@ const shutdown = (signal: string): void => {
   setTimeout(() => {
     logger.error('forced shutdown after timeout')
     process.exit(1)
-  }, 10_000).unref()
+  }, HTTP_CLOSE_BUDGET_MS).unref()
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'))
-process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => void shutdown('SIGINT'))
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
 process.on('uncaughtException', (err) => {
-  logger.fatal({ err }, 'uncaught exception')
-  process.exit(1)
+  logger.fatal({ err }, 'uncaught exception — draining whatsapp sockets before exit')
+  void shutdown('uncaughtException').finally(() => process.exit(1))
 })
 
+// Deliberately NOT fatal. Baileys emits stray rejections of its own (Signal
+// decryption failures, IQ timeouts, internal socket errors), and exiting on one
+// turns a recoverable hiccup into a container restart — which is a fresh
+// WhatsApp handshake with the same credentials. Ten of those back to back is
+// what rate-limited the first production number. Log it loudly, keep serving.
 process.on('unhandledRejection', (reason) => {
-  logger.fatal({ reason }, 'unhandled rejection')
-  process.exit(1)
+  logger.error({ reason }, 'unhandled rejection — process kept alive on purpose')
 })

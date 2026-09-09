@@ -2,11 +2,11 @@ import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
-import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import {
   type DepositPaymentMethod,
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
+import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'

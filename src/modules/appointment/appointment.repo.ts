@@ -136,7 +136,10 @@ function withResolvedName(
   },
 ): AppointmentWithCustomer {
   const { bookedName, currentName, ...rest } = row
-  return { ...rest, customerName: appointmentName({ customerName: bookedName }, { name: currentName }) }
+  return {
+    ...rest,
+    customerName: appointmentName({ customerName: bookedName }, { name: currentName }),
+  }
 }
 
 // Lists appointments scheduled in [start, end) with the customer's name and

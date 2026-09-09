@@ -79,7 +79,7 @@ export async function handleIncomingCall(
   // samePhone, not `===`: same format mismatch that broke the message routing.
   const isOwner = samePhone(business.ownerWhatsappNumber, phone)
 
-  const customerResult = await customerService.getOrCreate(businessId, phone)
+  const customerResult = await customerService.getOrCreate(businessId, phone, undefined, call.from)
   if (!customerResult.ok) {
     log.error({ code: customerResult.error.code }, 'getOrCreate customer failed for call')
     return
