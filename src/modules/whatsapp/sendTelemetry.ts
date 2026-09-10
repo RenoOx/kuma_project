@@ -74,7 +74,8 @@ export function classifySendError(err: unknown): SendErrorKind {
   if (status === 403 || status === 401) return 'forbidden'
 
   const message = err instanceof Error ? err.message.toLowerCase() : String(err ?? '').toLowerCase()
-  if (message.includes('rate-overlimit') || message.includes('rate overlimit')) return 'rate_limited'
+  if (message.includes('rate-overlimit') || message.includes('rate overlimit'))
+    return 'rate_limited'
   if (message.includes('not-authorized') || message.includes('forbidden')) return 'forbidden'
   return 'other'
 }
