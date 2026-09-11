@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The panel link is a bearer token in the URL. Telling browsers not to
+         send a referrer keeps that token out of the Referer header on any
+         outbound navigation. -->
+    <meta name="referrer" content="no-referrer" />
+    <!-- Same reason, one step further: a URL that carries a credential has no
+         business in a search index. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <!-- Paints the mobile browser's chrome the panel's background instead of
+         leaving a white bar above a dark app. -->
+    <meta name="theme-color" content="#0A0F0D" />
+    <!-- Inline so it costs no request and cannot 404 into the SPA fallback,
+         which would answer index.html for a favicon. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23059669'/%3E%3Ctext x='16' y='22' font-family='Inter,sans-serif' font-size='18' font-weight='700' fill='%23F0E6DA' text-anchor='middle'%3EE%3C/text%3E%3C/svg%3E"
+    />
+    <title>Emma — Panel</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

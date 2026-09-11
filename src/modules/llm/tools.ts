@@ -114,6 +114,27 @@ export const kumaTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'classify_interest',
+      description:
+        'Registra qué tan interesado se ve el cliente. Llamala UNA vez por respuesta, junto con tu mensaje, cuando el interés del cliente haya quedado claro o haya cambiado. Es solo una etiqueta interna para el panel del dueño: NO cambia lo que le respondés al cliente, NO agenda nada y el cliente nunca la ve. Si no estás seguro, no la llames.',
+      parameters: {
+        type: 'object',
+        properties: {
+          estado_interes: {
+            type: 'string',
+            enum: ['qualified', 'browsing', 'disengaged'],
+            description:
+              '"qualified": preguntó precios, disponibilidad, horarios, o mostró interés concreto en comprar o agendar. "browsing": pregunta general sin compromiso claro. "disengaged": dijo que no le interesa, que está caro, o que va a ver en otro lado.',
+          },
+        },
+        required: ['estado_interes'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const KUMA_TOOL_NAMES = [
@@ -122,5 +143,6 @@ export const KUMA_TOOL_NAMES = [
   'confirm_pending_appointment', //confirmar cita pendeinte
   'request_image', // pedir imagen
   'escalate_to_human', //escalar a humano
+  'classify_interest', // etiquetar interés del lead (solo para el panel)
 ] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]

@@ -14,6 +14,7 @@ import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import * as messageService from '@/modules/message/message.service.js'
+import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import {
@@ -37,8 +38,8 @@ import {
 } from '@/modules/whatsapp/messageKind.js'
 import { sendDirect, sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import * as presence from '@/modules/whatsapp/presence.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
+import * as presence from '@/modules/whatsapp/presence.js'
 import { preview } from '@/shared/logRedact.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
@@ -495,6 +496,7 @@ async function handleCustomerImage(params: {
     conversationId,
     role: 'user',
     content: marker,
+    senderType: 'customer',
   })
   if (!markerPersisted.ok) {
     log.error({ code: markerPersisted.error.code }, 'append image marker failed')
@@ -733,10 +735,9 @@ type Payload =
 // received anything. It states only what is true either way: the image arrived
 // and Emma cannot see it. Whether it went any further is carried by the
 // assistant turn that follows, which is persisted too.
-function imagePlaceholder(caption: string | null): string {
-  const said = caption?.trim() ? ` con el texto: "${caption.trim()}"` : ''
-  return `[El cliente envió una imagen${said}. No puedo verla]`
-}
+// Moved to message/messageDisplay so the panel can render the same placeholder
+// back as "📷 Imagen recibida" without matching on a string literal of its own.
+const imagePlaceholder = buildImagePlaceholder
 
 async function processMessage(
   raw: WAMessage,
@@ -813,6 +814,8 @@ async function processMessage(
         conversationId: ownerThread.data.id,
         role: 'user',
         content: text,
+        // The owner typing on their own WhatsApp, not a customer.
+        senderType: 'human',
       })
       if (!persisted.ok) {
         log.error({ code: persisted.error.code }, 'append owner unsupported placeholder failed')
@@ -915,6 +918,7 @@ async function processMessage(
     conversationId: conversation.id,
     role: 'user',
     content: text,
+    senderType: 'customer',
   })
   if (!userMsgResult.ok) {
     log.error(
@@ -933,6 +937,54 @@ async function processMessage(
   if (payload.kind !== 'text') {
     const format = payload.kind === 'image' ? 'image' : payload.format
     await recordUnsupportedEvent(businessId, conversation.id, format, phone, log)
+  }
+
+  // HUMAN TAKEOVER — the owner is answering this thread from the panel, so Emma
+  // stays out of it. The message is already persisted above, which is the whole
+  // job here: the panel polls the transcript, so the owner sees what the
+  // customer keeps writing while they hold the conversation.
+  //
+  // Placed here, not in handleIncomingMessage where PANEL_SPEC's AC5 asks for
+  // "before the debounce": neither the customer nor the conversation exists
+  // that early, and resolving them there would mean two extra queries on every
+  // inbound message plus a second place that knows how to find a thread. The
+  // effect is identical — the debounce only joins consecutive texts into one
+  // string, and no LLM call, no send and no anti-ban timing happens past this
+  // point. `conversation` is already in hand, so this gate costs nothing.
+  //
+  // No reply of any kind: a canned "un momento" would be Emma talking over the
+  // human who just took the thread.
+  if (conversation.qualification === 'human_takeover') {
+    log.info(
+      { conversationId: conversation.id, phone, kind: payload.kind },
+      'human takeover active; message stored, LLM skipped',
+    )
+    return
+  }
+
+  // REVIVED LEAD — a thread the system had written off just heard from the
+  // customer again. Back to 'new' before Emma reads it, so a person who returns
+  // a week later is served like anyone else instead of arriving pre-labelled as
+  // a lost cause.
+  //
+  // This also releases a label the owner had pinned by hand: their decision was
+  // made about a silent conversation, and the customer writing back is a newer
+  // fact than that decision. Placed after the takeover gate so it can never
+  // steal a thread a human is holding, and before the pause gate so that an
+  // escalation still gets the last word with 'needs_info'.
+  if (conversation.qualification === 'lost' || conversation.qualification === 'waiting') {
+    const revived = await conversationService.reactivate(businessId, conversation.id)
+    if (!revived.ok) {
+      log.error(
+        { conversationId: conversation.id, code: revived.error.code },
+        'reactivating conversation failed, continuing',
+      )
+    } else {
+      log.info(
+        { conversationId: conversation.id, from: conversation.qualification },
+        'customer returned; qualification reset to new',
+      )
+    }
   }
 
   // BOT PAUSED — keep the customer record + the message, but skip LLM and

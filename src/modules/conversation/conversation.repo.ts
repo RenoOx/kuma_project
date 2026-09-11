@@ -1,7 +1,8 @@
-import { and, count, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNull, notInArray, or, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import {
   type Conversation,
+  type ConversationQualification,
   type ConversationStatus,
   conversations,
   customers,
@@ -177,6 +178,124 @@ export async function updateState(
   await exec
     .update(conversations)
     .set({ state, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
+}
+
+// Qualifications a fixed rule owns. Once a conversation carries one of these,
+// the LLM's read of the room does not get to overwrite it: a booked appointment
+// is a fact, an escalation is a fact, and a human holding the thread is a fact,
+// while classify_interest is an opinion formed from the last few messages.
+// PANEL_SPEC US-02 AC5.
+const LLM_PINNED_QUALIFICATIONS: ConversationQualification[] = [
+  'appointment',
+  'needs_info',
+  'human_takeover',
+]
+
+/** Unconditional write. For the fixed rules, which outrank the model. */
+export async function updateQualification(
+  businessId: string,
+  id: string,
+  qualification: ConversationQualification,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(conversations)
+    .set({ qualification, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
+}
+
+/**
+ * The model's write. Skips rows a fixed rule already pinned.
+ *
+ * Expressed as one conditional UPDATE rather than a read-then-write so there is
+ * no window between the two: book_appointment and classify_interest can land in
+ * the same LLM turn, in either order, and a check-then-write would let the
+ * opinion clobber the fact depending on which finished first.
+ *
+ * Returns whether the row actually moved, for the log line.
+ */
+export async function updateQualificationIfNotPinned(
+  businessId: string,
+  id: string,
+  qualification: ConversationQualification,
+  exec: Executor = db,
+): Promise<boolean> {
+  const updated = await exec
+    .update(conversations)
+    .set({ qualification, updatedAt: new Date() })
+    .where(
+      and(
+        eq(conversations.businessId, businessId),
+        eq(conversations.id, id),
+        notInArray(conversations.qualification, LLM_PINNED_QUALIFICATIONS),
+        // Pinned by origin: the owner chose this label by hand and the model
+        // does not get a vote until they release it.
+        isNull(conversations.qualificationLockedAt),
+      ),
+    )
+    .returning({ id: conversations.id })
+  return updated.length > 0
+}
+
+/**
+ * The owner's write, from the panel.
+ *
+ * Sets the label and the lock in the same statement: a two-step write would
+ * leave a window where classify_interest sees an unlocked row carrying a label
+ * a person just chose, which is precisely the race the lock exists to close.
+ */
+export async function lockQualification(
+  businessId: string,
+  id: string,
+  qualification: ConversationQualification,
+  exec: Executor = db,
+): Promise<boolean> {
+  const now = new Date()
+  const updated = await exec
+    .update(conversations)
+    .set({ qualification, qualificationLockedAt: now, updatedAt: now })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
+    .returning({ id: conversations.id })
+  return updated.length > 0
+}
+
+/**
+ * Releases the owner's lock, handing the label back to Emma and the worker.
+ *
+ * Called where a new fact outranks the old decision: the customer came back
+ * from the dead, or the owner handed the thread over deliberately.
+ */
+export async function clearQualificationLock(
+  businessId: string,
+  id: string,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(conversations)
+    .set({ qualificationLockedAt: null, updatedAt: new Date() })
+    .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
+}
+
+/**
+ * Starts or clears the human-takeover clock.
+ *
+ * Written together with the qualification because the two are one fact: a
+ * thread is held by a human, or it is not. Splitting them across two updates
+ * is how you end up with a takeover timestamp on a conversation Emma is
+ * answering, or the reverse — a thread nobody can get back because the
+ * auto-return worker sees no clock to expire.
+ */
+export async function setHumanTakeover(
+  businessId: string,
+  id: string,
+  takeoverAt: Date | null,
+  qualification: ConversationQualification,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(conversations)
+    .set({ humanTakeoverAt: takeoverAt, qualification, updatedAt: new Date() })
     .where(and(eq(conversations.businessId, businessId), eq(conversations.id, id)))
 }
 

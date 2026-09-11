@@ -74,7 +74,10 @@ const REMINDER_2H_VARIANTS: ReadonlyArray<ReminderVariant> = [
     emoji: '😊',
     body: (when, biz) => `En un rato te esperamos: tu cita en ${biz} es *hoy a las ${when}*.`,
   },
-  { emoji: '⏰', body: (when, biz) => `Tu cita de *hoy a las ${when}* en ${biz} ya está cerquita.` },
+  {
+    emoji: '⏰',
+    body: (when, biz) => `Tu cita de *hoy a las ${when}* en ${biz} ya está cerquita.`,
+  },
   { emoji: '📌', body: (when, biz) => `Recordatorio: hoy a las *${when}* te esperamos en ${biz}.` },
 ]
 

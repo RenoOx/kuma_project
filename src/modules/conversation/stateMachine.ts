@@ -80,11 +80,31 @@ const ESCALATE = 'escalate_to_human'
 // await_payment is the one exclusion — see the comment there.
 const PENDING_CONFIRM = 'confirm_pending_appointment'
 
+// Available in EVERY state, and unlike the two constants above that is not a
+// judgement call per state — it is a property of the tool. classify_interest
+// only labels how warm the lead looks for the panel's inbox; it emits no
+// trigger, touches no booking and cannot move the state machine. There is no
+// state where reading the room is the wrong thing to do.
+//
+// Applied through withClassifier below rather than typed into fifteen arrays,
+// because "every state" written by hand is one state away from being false the
+// next time somebody adds one.
+const CLASSIFY = 'classify_interest'
+
+function withClassifier(flow: FlowDefinition): FlowDefinition {
+  return Object.fromEntries(
+    Object.entries(flow).map(([state, config]) => [
+      state,
+      { ...config, tools: [...config.tools, CLASSIFY] },
+    ]),
+  )
+}
+
 // Booking flow: clinics, barbershops, aesthetics. Ends on a scheduled slot.
 //
 // 'confirmed' is deliberately not terminal — a customer who already booked
 // comes back with questions, and without an exit that thread would be stuck.
-export const appointmentsFlow: FlowDefinition = {
+export const appointmentsFlow: FlowDefinition = withClassifier({
   idle: {
     tools: [PENDING_CONFIRM, ESCALATE],
     promptAddition: '',
@@ -238,7 +258,7 @@ export const appointmentsFlow: FlowDefinition = {
       inactive_24h: 'idle',
     },
   },
-}
+})
 
 // Sales flow: courses, certifications, campaign selling. Ends on a paid
 // enrollment with the customer's data collected.
@@ -247,7 +267,7 @@ export const appointmentsFlow: FlowDefinition = {
 // reserve. Several states carry only ESCALATE because the tools this flow needs
 // have not been built yet — see the comments below. No name in this file refers
 // to a tool the executor cannot run.
-export const salesFlow: FlowDefinition = {
+export const salesFlow: FlowDefinition = withClassifier({
   idle: {
     tools: [ESCALATE],
     promptAddition: '',
@@ -312,7 +332,7 @@ export const salesFlow: FlowDefinition = {
       inactive_24h: 'idle',
     },
   },
-}
+})
 
 // Written as a ternary rather than a Record<FlowType, FlowDefinition> so that
 // adding a third flowType to the enum breaks the build here, instead of
