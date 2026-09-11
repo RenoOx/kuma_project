@@ -237,6 +237,7 @@ export const businessSettingsSchema = z.object({
 })
 
 export type BusinessSettings = z.infer<typeof businessSettingsSchema>
+export type OperatingHours = z.infer<typeof operatingHoursSchema>
 export type DayHours = z.infer<typeof dayHoursSchema>
 export type DayBreak = z.infer<typeof breakSchema>
 export type Service = z.infer<typeof serviceSchema>

@@ -276,6 +276,21 @@ export async function approve(params: {
     { appointmentId: booked.data.id },
   )
   await applyConversationTrigger(params.businessId, verification.conversationId, 'payment_approved')
+  // Third and last way a booking gets filed (the other two are in toolExecutor).
+  // With requiresDeposit on, this is the ONLY one the customer side can reach,
+  // so without it every deposit-taking business would show its won deals in the
+  // inbox as whatever the model last guessed.
+  const qualified = await conversationService.setQualification(
+    params.businessId,
+    verification.conversationId,
+    'appointment',
+  )
+  if (!qualified.ok) {
+    logger.warn(
+      { businessId: params.businessId, conversationId: verification.conversationId },
+      'could not mark approved conversation as appointment',
+    )
+  }
 
   logger.info(
     {

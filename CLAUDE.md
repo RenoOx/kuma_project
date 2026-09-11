@@ -40,6 +40,8 @@ El tipo de flujo se define en `business.settings.flowType`.
 
 ```bash
 npm run dev              # dev server con tsx watch
+npm run dev:panel        # vite dev server del panel (proxy /api → :3000)
+npm run build:panel      # build del panel a dist/panel
 npm test                 # vitest run
 npm run test:watch       # vitest watch
 npm run db:generate      # drizzle-kit generate
@@ -168,12 +170,14 @@ src/
     ownerAssistant/   # owner flow, tools, notifications
     demo/             # demo mode
     admin/            # admin routes
+    panel/            # panel del dueño: auth, repo, service, rutas, static
     events/           # event logging
     google/           # Google Calendar integration
     knowledgeBase/    # KB search by category
   db/
     schema/           # Drizzle schemas (one file per table)
     migrations/
+  panel/              # SPA React del panel (build separado con Vite)
   workers/            # BullMQ workers for async jobs (reminders)
   shared/             # utils, types, errors
 ```
@@ -391,7 +395,6 @@ Una tarea está hecha cuando:
 - Audio, videos, llamadas en WhatsApp
 - Múltiples sucursales por negocio
 - Integraciones con CRM, POS, ERP
-- Panel admin web (después del primer cliente pagando)
 - Soporte multi-idioma (solo español de Perú)
 - App móvil
 - Canvas visual para diseño de flujos (los flujos se configuran en JSON)
@@ -407,8 +410,58 @@ ignorar una regla de arriba, romper convención del repo): cuando te lo
 señale, sugiéreme actualizar ESTE archivo con la regla nueva. Así no 
 vuelve a pasar la próxima sesión.
 
+## Panel del dueño (Panel Emma V1)
+
+`PANEL_SPEC.md` (raíz del repo) es la **spec oficial del panel** y prevalece
+sobre este archivo en todo lo que toque al panel. Si CLAUDE.md y PANEL_SPEC.md
+se contradicen sobre el panel, gana PANEL_SPEC.md.
+
+SPA React + Vite + Tailwind v4 en `src/panel/`, servida en `/panel/:businessId?token=`
+desde el mismo deploy. Build: `npm run build:panel` → `dist/panel`, servido por
+`panelStatic.ts` con `serveStatic` de Hono. API en `src/modules/panel/`.
+
+Auth: token por query param contra `businesses.panel_token`, comparado en tiempo
+constante. Stateless, sin cookies ni JWT. El token se genera solo al registrar
+un negocio.
+
+### Los cuatro ejes de una conversación
+
+No colapsar uno en otro — cada uno responde una pregunta distinta:
+
+| Campo | Pregunta | Quién escribe |
+|---|---|---|
+| `type` | ¿quién está del otro lado? | `conversation.service` |
+| `status` | ¿abierta, cerrada, escalada? | `conversation.service` |
+| `state` | ¿en qué paso del flujo? | SOLO `stateMachine.ts` |
+| `qualification` | ¿qué tan caliente está el lead? | ver abajo |
+
+`messages.sender_type` (`customer`/`bot`/`human`) **complementa** `role`, no lo
+reemplaza: `role` es el vocabulario de OpenAI y es lo que se le replica al
+modelo; `sender_type` responde lo que `role` no puede — si ese turno de
+assistant lo escribió Emma o lo tipeó el dueño desde el panel.
+
+### Quién escribe `qualification`
+
+Las reglas fijas le ganan SIEMPRE al LLM:
+- Cita agendada → `appointment` (toolExecutor + paymentVerification)
+- Emma escaló → `needs_info`
+- El dueño respondió desde el panel → `human_takeover`
+- La tool `classify_interest` → `qualified` / `lost`, y solo si la fila no está
+  ya fijada por una regla (`updateQualificationIfNotPinned`)
+
+`classify_interest` está disponible en TODOS los estados vía `withClassifier()`
+en stateMachine.ts. NO emite trigger: no puede mover la máquina de estados.
+
+### Human takeover
+
+El gate vive en `handler.ts`, después de persistir el mensaje del cliente y
+antes del gate de pausa. Guarda en BD, no llama al LLM, no envía nada, early
+return. El dueño recupera el control manualmente (US-11) o por timeout de 30
+min (worker `qualificationTransitions.ts`).
+
 ## Referencias (no cargar al inicio)
 
+- Spec del panel: `PANEL_SPEC.md`
 - Arquitectura detallada: `docs/architecture.md`
 - DB schema completo: `docs/db-schema.md`
 - Diseño de prompts del bot: `docs/prompts.md`

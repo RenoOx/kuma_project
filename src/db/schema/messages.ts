@@ -6,6 +6,19 @@ import { conversations } from './conversations.js'
 export const messageRoles = ['user', 'assistant', 'tool', 'system'] as const
 export type MessageRole = (typeof messageRoles)[number]
 
+// Who actually produced this message, for the panel's chat bubbles.
+//
+// COMPLEMENTS `role`, it does not replace it. `role` is the OpenAI vocabulary
+// and is what gets replayed into the model — an owner's reply from the panel is
+// still an 'assistant' turn as far as the conversation history is concerned, or
+// Emma would lose the thread. `sender_type` answers the question `role` cannot:
+// was that assistant turn written by Emma or typed by a human?
+//
+// Default 'bot' matches every row that predates this column: before the panel
+// existed, no human could write into a conversation.
+export const messageSenderTypes = ['customer', 'bot', 'human'] as const
+export type MessageSenderType = (typeof messageSenderTypes)[number]
+
 export const messages = pgTable(
   'messages',
   {
@@ -19,6 +32,7 @@ export const messages = pgTable(
       .notNull()
       .references(() => businesses.id, { onDelete: 'cascade' }),
     role: text('role').notNull().$type<MessageRole>(),
+    senderType: text('sender_type').notNull().default('bot').$type<MessageSenderType>(),
     content: text('content').notNull(),
     toolCalls: jsonb('tool_calls'),
     toolCallId: text('tool_call_id'),

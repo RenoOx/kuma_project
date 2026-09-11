@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, jsonb, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { index, jsonb, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core'
 import { nanoid } from 'nanoid'
 
 export const businesses = pgTable(
@@ -23,6 +23,12 @@ export const businesses = pgTable(
     // it into a KB entry. googleMapsUrl complements it, it does not replace it.
     address: text('address'),
     googleMapsUrl: text('google_maps_url'),
+    // Bearer-in-the-URL for the owner's panel. Not a session and not a
+    // password: whoever holds the link is the owner, which is the whole point —
+    // a barber is not going to keep a set of credentials. Rotating it is a
+    // column update, and the link stops working everywhere at once.
+    // Nullable because rows created before the panel have none until backfilled.
+    panelToken: varchar('panel_token', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

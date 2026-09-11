@@ -156,6 +156,7 @@ export async function handle(
     conversationId,
     role: 'user',
     content: userText,
+    senderType: 'human',
   })
   if (!userPersist.ok) return userPersist
 

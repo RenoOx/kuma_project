@@ -1,0 +1,256 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Emma's palette — Vamvu Labs dark.
+
+   Declared as Tailwind v4 theme variables so every token is also a utility
+   class: --color-emma-accent gives bg-emma-accent, text-emma-accent and the
+   rest for free, instead of a parallel set of hand-written classes.
+
+   The panel is dark end to end, the way PANEL_SPEC.md specifies it: a near
+   black page, content in bordered blocks one step lighter, cream text, Emma's
+   green for anything the owner can act on. No white surfaces anywhere — the
+   only white left in the panel is type sitting on green. */
+@theme {
+  /* Surfaces. Two steps and nothing in between: the page, and the blocks that
+     sit on it. Depth comes from the 1px border, never from a shadow. */
+  --color-emma-bg: #0a0f0d;
+  --color-emma-bg-secondary: #141a17;
+  --color-emma-sidebar: #0a0f0d;
+
+  /* One step above a block, for the surfaces shadcn raises off a card: hover
+     fills, muted backgrounds, the tab strip. */
+  --color-emma-elevated: #1c2521;
+
+  /* Brand */
+  --color-emma-accent: #059669;
+  --color-emma-accent-hover: #047857;
+  --color-emma-cream: #f0e6da;
+
+  /* Text */
+  --color-emma-text: #f0e6da;
+  --color-emma-text-muted: #9ca3af;
+  --color-emma-sidebar-text: #f0e6da;
+
+  --color-emma-border: #1f2937;
+
+  /* Chat bubbles. One token per speaker, because who said it is the only thing
+     that decides the colour. The customer reuses the block surface, so only the
+     two sides that speak for the business need a token of their own. */
+  --color-emma-bubble-bot: #059669;
+  --color-emma-bubble-human: #f0e6da;
+
+  /* Qualification colors — one per conversations.qualification value.
+     They carry meaning rather than style, so they are the same seven hues the
+     spec lists, and they read on near-black as well as they did on cream. */
+  --color-q-new: #3b82f6;
+  --color-q-qualified: #10b981;
+  --color-q-needs-info: #f59e0b;
+  --color-q-appointment: #047857;
+  --color-q-waiting: #6b7280;
+  --color-q-lost: #ef4444;
+  --color-q-human: #8b5cf6;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* shadcn's token contract, wired to the palette above.
+   shadcn/ui components are written against a fixed set of semantic names
+   (--primary, --border, --muted-foreground…). Rather than let it install its
+   own neutral scale — which would leave two palettes in one panel — every one
+   of its names points at an Emma color. A shadcn Button is Emma green because
+   --primary IS --color-emma-accent, not because it was restyled after the fact.
+
+   Dark-only, so there is one block and no `.dark` variant to keep in sync. */
+:root {
+  --radius: 0.5rem;
+
+  --background: var(--color-emma-bg);
+  --foreground: var(--color-emma-text);
+
+  /* Anything raised off the page background: cards, sheets, popovers, menus. */
+  --card: var(--color-emma-bg-secondary);
+  --card-foreground: var(--color-emma-text);
+  --popover: var(--color-emma-bg-secondary);
+  --popover-foreground: var(--color-emma-text);
+
+  --primary: var(--color-emma-accent);
+  --primary-foreground: #ffffff;
+
+  --secondary: var(--color-emma-elevated);
+  --secondary-foreground: var(--color-emma-text);
+
+  /* A step above a block, so a muted surface still reads as a surface on a
+     near-black page instead of dissolving into it. */
+  --muted: var(--color-emma-elevated);
+  --muted-foreground: var(--color-emma-text-muted);
+
+  /* shadcn uses --accent for hover surfaces, not for the brand color. Naming it
+     after Emma's accent green here would tint every hover state. */
+  --accent: var(--color-emma-elevated);
+  --accent-foreground: var(--color-emma-text);
+
+  --destructive: var(--color-q-lost);
+  --destructive-foreground: #ffffff;
+
+  --border: var(--color-emma-border);
+  --input: var(--color-emma-border);
+  --ring: var(--color-emma-accent);
+
+  /* Recharts series, in the qualification vocabulary the panel already uses. */
+  --chart-1: var(--color-emma-accent);
+  --chart-2: var(--color-q-new);
+  --chart-3: var(--color-q-needs-info);
+  --chart-4: var(--color-q-human);
+  --chart-5: var(--color-q-waiting);
+}
+
+/* Exposes the tokens above as utilities (bg-background, text-muted-foreground,
+   border-border…), which is what the shadcn component source expects to find. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  /* 12px — the radius every content block in the panel shares. */
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* The panel is dark-only on purpose: it is one product surface with one look,
+   not a document that has to survive the reader's theme. Declaring the scheme
+   is what keeps native form controls and scrollbars from rendering light on top
+   of it. */
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-emma-bg);
+  color: var(--color-emma-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The qualification tabs scroll sideways when they do not fit, and a scrollbar
+   under a row of pills reads as a broken layout rather than an affordance. The
+   row stays scrollable by touch and wheel; only the bar is hidden.
+
+   touch-action is the half that makes a finger drag work: without it the
+   browser hands a horizontal swipe to the page, and the row looks frozen on
+   exactly the devices where there is no wheel to fall back on. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* FullCalendar, dressed for the panel.
+
+   v6 injects its own stylesheet and exposes the parts worth changing as CSS
+   variables, so this overrides tokens rather than fighting its selectors. The
+   handful of real rules below are for the button chrome, which predates the
+   variables and is still hardcoded to a light theme. */
+.emma-calendar {
+  --fc-border-color: var(--color-emma-border);
+  --fc-page-bg-color: var(--color-emma-bg-secondary);
+  --fc-neutral-bg-color: var(--color-emma-bg);
+  --fc-neutral-text-color: var(--color-emma-text-muted);
+  --fc-today-bg-color: rgb(5 150 105 / 0.1);
+  /* Outside business hours. On a dark grid the recess has to be darker than the
+     block it sits in, not lighter: closed hours read as the page showing
+     through the calendar. */
+  --fc-non-business-color: rgb(10 15 13 / 0.55);
+  --fc-now-indicator-color: var(--color-q-lost);
+  --fc-list-event-hover-bg-color: var(--color-emma-elevated);
+  --fc-highlight-color: rgb(5 150 105 / 0.15);
+
+  font-size: 0.85rem;
+}
+
+.emma-calendar .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-emma-text);
+}
+
+.emma-calendar .fc-button {
+  background-color: var(--color-emma-bg);
+  border-color: var(--color-emma-border);
+  color: var(--color-emma-text);
+  font-size: 0.8rem;
+  text-transform: capitalize;
+  box-shadow: none;
+}
+
+.emma-calendar .fc-button:hover:not(:disabled) {
+  background-color: var(--color-emma-elevated);
+  border-color: var(--color-emma-border);
+}
+
+.emma-calendar .fc-button-primary:not(:disabled).fc-button-active,
+.emma-calendar .fc-button-primary:not(:disabled):active {
+  background-color: var(--color-emma-accent);
+  border-color: var(--color-emma-accent);
+  color: #fff;
+}
+
+.emma-calendar .fc-button:focus-visible {
+  outline: 2px solid var(--color-emma-accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.emma-calendar .fc-button:disabled {
+  opacity: 0.4;
+}
+
+.emma-calendar .fc-event {
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 500;
+  padding: 1px 3px;
+}
+
+.emma-calendar .fc-list-event:hover td {
+  background-color: var(--color-emma-elevated);
+}
+
+/* The toolbar stacks on phones instead of squeezing three button groups onto
+   one line, where the view switcher would fall off the edge. */
+@media (max-width: 640px) {
+  .emma-calendar .fc-toolbar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}

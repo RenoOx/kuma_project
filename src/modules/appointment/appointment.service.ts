@@ -1617,6 +1617,56 @@ export async function confirmPendingForCustomer(params: {
   }
 }
 
+/**
+ * Marks a booking as done. The one action here that sends NOTHING.
+ *
+ * A patient who has just been served does not need a WhatsApp telling them they
+ * were served, and sending one would be the kind of unprompted message that
+ * costs a number its reputation. Purely a bookkeeping move so the calendar and
+ * the stats know the appointment happened.
+ *
+ * Only a live booking can complete: re-completing a completed one is a no-op
+ * worth refusing, and completing a cancelled one is a mistake worth surfacing.
+ */
+export async function completeAppointment(params: {
+  businessId: string
+  appointmentId: string
+}): Promise<Result<Appointment>> {
+  try {
+    const existing = await appointmentRepo.findById(params.businessId, params.appointmentId)
+    if (!existing) {
+      return err(
+        new NotFoundError({
+          resource: 'appointment',
+          logContext: { businessId: params.businessId, appointmentId: params.appointmentId },
+        }),
+      )
+    }
+    if (existing.status !== 'scheduled' && existing.status !== 'confirmed') {
+      return err(wrongStatus('completar', params.businessId, existing))
+    }
+
+    const updated = await appointmentRepo.update(params.businessId, existing.id, {
+      status: 'completed',
+    })
+    logger.info(
+      { businessId: params.businessId, appointmentId: existing.id },
+      'appointment marked completed',
+    )
+    return ok(updated)
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'complete_appointment_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pude marcar la cita como completada.',
+        logContext: { businessId: params.businessId, appointmentId: params.appointmentId },
+        cause,
+      }),
+    )
+  }
+}
+
 export async function cancelAppointment(params: {
   businessId: string
   appointmentId: string

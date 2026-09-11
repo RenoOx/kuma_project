@@ -16,6 +16,7 @@ function fakeBusiness(overrides: Partial<Business> = {}): Business {
     ownerName: null,
     address: null,
     googleMapsUrl: null,
+    panelToken: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

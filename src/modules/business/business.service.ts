@@ -1,4 +1,5 @@
 import type { Business, NewBusiness } from '@/db/schema/index.js'
+import { generatePanelToken } from '@/modules/panel/panelToken.js'
 import { AppError, ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as businessRepo from './business.repo.js'
@@ -70,7 +71,13 @@ export async function register(data: NewBusiness): Promise<Result<Business>> {
         }),
       )
     }
-    const created = await businessRepo.create(data)
+    // Every business gets a panel link from birth. Minted here rather than as a
+    // column default so the token comes from Node's CSPRNG, the same source the
+    // comparison helper lives next to — and so a caller can still pass its own.
+    const created = await businessRepo.create({
+      ...data,
+      panelToken: data.panelToken ?? generatePanelToken(),
+    })
     return ok(created)
   } catch (cause) {
     if (
