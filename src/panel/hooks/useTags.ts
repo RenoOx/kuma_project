@@ -1,3 +1,4 @@
+import type { InfiniteData, QueryKey } from '@tanstack/react-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PanelApiError } from '../api/client.js'
 import {
@@ -9,7 +10,7 @@ import {
   type TagInput,
   updateTag,
 } from '../api/tags.js'
-import type { PanelTag } from '../api/types.js'
+import type { ConversationListItem, MessagePage, Paged, PanelTag } from '../api/types.js'
 import { useSession } from '../lib/session.js'
 
 export function useTags() {
@@ -75,19 +76,73 @@ export function useAssignTags(conversationId: string) {
 /**
  * The per-chat Emma switch.
  *
- * Invalidates messages as well as conversations: the chat header reads the flag
- * off the message page, so without this the switch would snap back on the next
- * poll.
+ * Optimistic: writes the flag into both caches the header can read it from
+ * before the server answers, so the switch moves the instant it's clicked
+ * instead of holding `mutation.variables` until a refetch lands and then
+ * possibly snapping back to a stale value in the gap between "not pending
+ * anymore" and "invalidated data arrived". `onError` rolls back to the exact
+ * snapshot taken in `onMutate`; `onSettled` reconciles with the server
+ * regardless of outcome.
  */
 export function useSetEmmaEnabled(conversationId: string) {
   const session = useSession()
   const queryClient = useQueryClient()
+  const conversationsKey = ['conversations', session.businessId]
+  const messagesKey = ['messages', session.businessId, conversationId]
 
-  return useMutation<{ success: boolean; enabled: boolean }, Error, boolean>({
+  interface OptimisticContext {
+    previousConversations: Array<[QueryKey, Paged<ConversationListItem> | undefined]>
+    previousMessages: InfiniteData<MessagePage> | undefined
+  }
+
+  return useMutation<{ success: boolean; enabled: boolean }, Error, boolean, OptimisticContext>({
     mutationFn: (enabled) => setEmmaEnabled(session, conversationId, enabled),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
-      void queryClient.invalidateQueries({ queryKey: ['messages', session.businessId] })
+
+    onMutate: async (enabled) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: conversationsKey }),
+        queryClient.cancelQueries({ queryKey: messagesKey }),
+      ])
+
+      const previousConversations = queryClient.getQueriesData<Paged<ConversationListItem>>({
+        queryKey: conversationsKey,
+      })
+      const previousMessages = queryClient.getQueryData<InfiniteData<MessagePage>>(messagesKey)
+
+      queryClient.setQueriesData<Paged<ConversationListItem>>(
+        { queryKey: conversationsKey },
+        (page) =>
+          page && {
+            ...page,
+            data: page.data.map((c) =>
+              c.id === conversationId ? { ...c, emmaEnabled: enabled } : c,
+            ),
+          },
+      )
+
+      queryClient.setQueryData<InfiniteData<MessagePage>>(messagesKey, (data) => {
+        const first = data?.pages[0]
+        if (!data || !first) return data
+        return {
+          ...data,
+          pages: data.pages.map((page, i) => (i === 0 ? { ...first, emmaEnabled: enabled } : page)),
+        }
+      })
+
+      return { previousConversations, previousMessages }
+    },
+
+    onError: (_error, _enabled, context) => {
+      if (!context) return
+      for (const [key, data] of context.previousConversations) {
+        queryClient.setQueryData(key, data)
+      }
+      queryClient.setQueryData(messagesKey, context.previousMessages)
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: conversationsKey })
+      void queryClient.invalidateQueries({ queryKey: messagesKey })
     },
   })
 }
