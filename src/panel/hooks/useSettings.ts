@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { PanelApiError } from '../api/client.js'
 import {
   getIntegrations,
   getSettings,
@@ -19,7 +20,6 @@ import type {
   PaymentsPatch,
   SpecialDay,
 } from '../api/types.js'
-import { PanelApiError } from '../api/client.js'
 import { POLL_MS } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 

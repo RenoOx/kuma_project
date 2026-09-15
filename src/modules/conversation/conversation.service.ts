@@ -1,8 +1,5 @@
 import { logger } from '@/config/logger.js'
-import type {
-  Conversation,
-  ConversationStatus,
-} from '@/db/schema/index.js'
+import type { Conversation, ConversationStatus } from '@/db/schema/index.js'
 import type { FlowType } from '@/modules/business/business.settings.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'

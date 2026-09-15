@@ -55,9 +55,7 @@ export function TagPicker({
         <DropdownMenuLabel>Etiquetas</DropdownMenuLabel>
 
         {(tags ?? []).length === 0 ? (
-          <p className="text-muted-foreground px-2 py-1.5 text-xs">
-            Todavía no creaste etiquetas.
-          </p>
+          <p className="text-muted-foreground px-2 py-1.5 text-xs">Todavía no creaste etiquetas.</p>
         ) : (
           (tags ?? []).map((tag) => {
             const on = assignedIds.has(tag.id)
@@ -72,7 +70,9 @@ export function TagPicker({
                 }}
                 className={cn(on && 'font-medium')}
               >
-                <span className={cn('size-2 rounded-full', TAG_COLOR_META[tag.color].dotClassName)} />
+                <span
+                  className={cn('size-2 rounded-full', TAG_COLOR_META[tag.color].dotClassName)}
+                />
                 <span className="flex-1 truncate">{tag.name}</span>
                 {on && <Check size={14} aria-hidden />}
               </DropdownMenuItem>
@@ -80,7 +80,10 @@ export function TagPicker({
           })
         )}
 
-        <DropdownMenuItem onSelect={onManage} className="text-muted-foreground border-t border-border">
+        <DropdownMenuItem
+          onSelect={onManage}
+          className="text-muted-foreground border-t border-border"
+        >
           <Settings2 size={14} aria-hidden />
           Administrar etiquetas
         </DropdownMenuItem>

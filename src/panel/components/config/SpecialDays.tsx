@@ -1,23 +1,14 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
 import type { DayHours, SpecialDay } from '../../api/types.js'
+import { useKeyedDraft } from '../../hooks/useKeyedDraft.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
+import { todayISO } from '../../lib/utils.js'
 import { Button } from '../ui/button.js'
 import { Input } from '../ui/input.js'
 import { Switch } from '../ui/switch.js'
 import { SettingsCard } from './SettingsCard.js'
 
 const OPEN_DEFAULT: DayHours = { open: '09:00', close: '13:00' }
-
-function todayISO(): string {
-  // The date input wants a local calendar date, so this reads the local day
-  // rather than slicing an ISO string in UTC — which is the previous day for
-  // Lima all evening.
-  const now = new Date()
-  const month = `${now.getMonth() + 1}`.padStart(2, '0')
-  const day = `${now.getDate()}`.padStart(2, '0')
-  return `${now.getFullYear()}-${month}-${day}`
-}
 
 /**
  * Date-specific overrides of the weekly schedule: holidays, one-off hours.
@@ -28,21 +19,9 @@ function todayISO(): string {
  */
 export function SpecialDays({ days }: { days: SpecialDay[] }): React.JSX.Element {
   const { save, saving, saved, error } = useSectionSave()
-  const [draft, setDraft] = useState<SpecialDay[]>(days)
+  const { rows, values: draft, add, update, remove } = useKeyedDraft<SpecialDay>(days)
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(days)
-
-  const update = (index: number, next: SpecialDay): void => {
-    setDraft((prev) => prev.map((d, i) => (i === index ? next : d)))
-  }
-
-  const remove = (index: number): void => {
-    setDraft((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const add = (): void => {
-    setDraft((prev) => [...prev, { date: todayISO(), hours: null, label: '' }])
-  }
 
   return (
     <SettingsCard
@@ -67,12 +46,9 @@ export function SpecialDays({ days }: { days: SpecialDay[] }): React.JSX.Element
         </p>
       ) : (
         <div className="flex flex-col divide-y divide-border">
-          {draft.map((day, index) => (
+          {rows.map(({ key, value: day }, index) => (
             <SpecialDayRow
-              // The date is what identifies a row to the person reading it, but
-              // two rows can briefly share one while being edited, so the index
-              // rides along to keep the key unique.
-              key={`${day.date}-${index}`}
+              key={key}
               day={day}
               onChange={(next) => update(index, next)}
               onRemove={() => remove(index)}
@@ -82,7 +58,11 @@ export function SpecialDays({ days }: { days: SpecialDay[] }): React.JSX.Element
       )}
 
       <div>
-        <Button variant="outline" size="sm" onClick={add}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => add({ date: todayISO(), hours: null, label: '' })}
+        >
           <Plus size={14} aria-hidden />
           Agregar día
         </Button>

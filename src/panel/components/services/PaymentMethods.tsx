@@ -1,14 +1,15 @@
-import { Plus, TriangleAlert, Trash2 } from 'lucide-react'
+import { Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import type { BusinessSettingsView, DepositMethod, DepositPaymentMethod } from '../../api/types.js'
+import { useKeyedDraft } from '../../hooks/useKeyedDraft.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
-import { DEPOSIT_METHODS, DEPOSIT_METHOD_LABELS } from '../../lib/constants.js'
+import { DEPOSIT_METHOD_LABELS, DEPOSIT_METHODS } from '../../lib/constants.js'
+import { SettingsCard } from '../config/SettingsCard.js'
 import { Button } from '../ui/button.js'
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
 import { Switch } from '../ui/switch.js'
-import { SettingsCard } from '../config/SettingsCard.js'
 
 export function PaymentMethods({
   settings,
@@ -19,7 +20,13 @@ export function PaymentMethods({
 
   const [requiresDeposit, setRequiresDeposit] = useState(settings.requiresDeposit)
   const [amount, setAmount] = useState(settings.depositAmount ?? '')
-  const [methods, setMethods] = useState<DepositPaymentMethod[]>(settings.depositPaymentMethods)
+  const {
+    rows: methodRows,
+    values: methods,
+    add: addMethod,
+    update: updateMethod,
+    remove: removeMethod,
+  } = useKeyedDraft<DepositPaymentMethod>(settings.depositPaymentMethods)
 
   const dirty =
     requiresDeposit !== settings.requiresDeposit ||
@@ -55,25 +62,19 @@ export function PaymentMethods({
         </p>
       ) : (
         <div className="flex flex-col divide-y divide-border">
-          {methods.map((method, index) => (
+          {methodRows.map(({ key, value: method }, index) => (
             <MethodRow
-              key={`${method.method}-${index}`}
+              key={key}
               method={method}
-              onChange={(next) =>
-                setMethods((prev) => prev.map((m, i) => (i === index ? next : m)))
-              }
-              onRemove={() => setMethods((prev) => prev.filter((_, i) => i !== index))}
+              onChange={(next) => updateMethod(index, next)}
+              onRemove={() => removeMethod(index)}
             />
           ))}
         </div>
       )}
 
       <div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setMethods((prev) => [...prev, { method: 'yape' }])}
-        >
+        <Button variant="outline" size="sm" onClick={() => addMethod({ method: 'yape' })}>
           <Plus size={14} aria-hidden />
           Agregar forma de pago
         </Button>
@@ -87,11 +88,7 @@ export function PaymentMethods({
               Emma pide el comprobante antes de confirmar la cita.
             </span>
           </div>
-          <Switch
-            id="pay-deposit"
-            checked={requiresDeposit}
-            onCheckedChange={setRequiresDeposit}
-          />
+          <Switch id="pay-deposit" checked={requiresDeposit} onCheckedChange={setRequiresDeposit} />
         </div>
 
         {/* Two consequences the owner cannot deduce from the switch: Emma stops

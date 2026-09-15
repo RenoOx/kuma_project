@@ -31,8 +31,8 @@ import {
   reconnectDelayMs,
 } from './modules/whatsapp/sessionPolicy.js'
 import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
-import { runTakeoverTimeoutGuarded } from './workers/takeoverTimeout.js'
 import { sendDueReminders } from './workers/sendReminders.js'
+import { runTakeoverTimeoutGuarded } from './workers/takeoverTimeout.js'
 
 const server = serve(
   {

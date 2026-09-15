@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import type { Business } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import {
   bookingPatchSchema,
   generalPatchSchema,
-  paymentsPatchSchema,
   mergeSettingsSection,
+  paymentsPatchSchema,
   readSettings,
   schedulePatchSchema,
   servicesPatchSchema,
   specialDaysPatchSchema,
 } from '@/modules/panel/settings.merge.js'
-import type { Business } from '@/db/schema/index.js'
 
 const BASE_SETTINGS: BusinessSettings = {
   niche: 'barberia',
@@ -55,7 +55,10 @@ describe('mergeSettingsSection — carrying the document forward', () => {
   // the schedule form never loads `services`, and must not be able to drop it.
   it('keeps fields the patch does not mention', () => {
     const result = mergeSettingsSection('biz1', BASE_SETTINGS, {
-      operatingHours: { ...BASE_SETTINGS.operatingHours, sunday: { open: '10:00', close: '14:00' } },
+      operatingHours: {
+        ...BASE_SETTINGS.operatingHours,
+        sunday: { open: '10:00', close: '14:00' },
+      },
     })
 
     expect(result.ok).toBe(true)
@@ -285,9 +288,7 @@ describe('servicesPatchSchema', () => {
   it('treats a service with no active field as active', () => {
     // Services stored before the field existed must keep working untouched.
     const parsed = servicesPatchSchema.safeParse({
-      services: [
-        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30 },
-      ],
+      services: [{ name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30 }],
     })
     expect(parsed.success).toBe(true)
     if (!parsed.success) return

@@ -1,12 +1,6 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
-import {
-  conversations,
-  conversationTags,
-  type NewTag,
-  type Tag,
-  tags,
-} from '@/db/schema/index.js'
+import { conversations, conversationTags, type NewTag, type Tag, tags } from '@/db/schema/index.js'
 
 export async function findByBusiness(businessId: string, exec: Executor = db): Promise<Tag[]> {
   return await exec
@@ -122,9 +116,7 @@ export async function replaceForConversation(
 ): Promise<void> {
   await exec.delete(conversationTags).where(eq(conversationTags.conversationId, conversationId))
   if (tagIds.length === 0) return
-  await exec
-    .insert(conversationTags)
-    .values(tagIds.map((tagId) => ({ conversationId, tagId })))
+  await exec.insert(conversationTags).values(tagIds.map((tagId) => ({ conversationId, tagId })))
 }
 
 /**

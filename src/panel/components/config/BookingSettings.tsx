@@ -2,8 +2,8 @@ import { useState } from 'react'
 import type { BookingMode, BusinessSettingsView } from '../../api/types.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
 import { Input } from '../ui/input.js'
-import { Switch } from '../ui/switch.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
+import { Switch } from '../ui/switch.js'
 import { Field, SettingsCard } from './SettingsCard.js'
 
 const BOOKING_MODE_LABELS: Record<BookingMode, string> = {

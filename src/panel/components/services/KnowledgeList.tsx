@@ -1,4 +1,4 @@
-import { Pencil, Plus, TriangleAlert, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import type { KbCategory, KnowledgeEntry, KnowledgeInput } from '../../api/types.js'
 import { useKnowledgeMutation } from '../../hooks/useKnowledge.js'
@@ -115,7 +115,9 @@ function CategoryGroup({
           <p className="text-xs">
             Esta categoría tiene {activeCount} entradas activas y Emma solo carga las{' '}
             {MAX_KB_ENTRIES_PER_CATEGORY} más antiguas.{' '}
-            {overflow === 1 ? 'La más nueva no le llega' : `Las ${overflow} más nuevas no le llegan`}
+            {overflow === 1
+              ? 'La más nueva no le llega'
+              : `Las ${overflow} más nuevas no le llegan`}
             . Desactivá las que ya no apliquen o juntá varias en una sola.
           </p>
         </div>

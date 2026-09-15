@@ -143,6 +143,54 @@ export interface AppointmentActionResult {
   patientNotifyError?: string
 }
 
+export type SlotWarningCode =
+  | 'closed_day'
+  | 'outside_hours'
+  | 'break_overlap'
+  | 'slot_too_soon'
+  | 'overlap'
+
+/** Written server-side for the owner to read. Rendered verbatim. */
+export interface SlotWarning {
+  code: SlotWarningCode
+  message: string
+}
+
+export interface CreateAppointmentPayload {
+  /** One of the two is required: an existing contact, or a phone to create one. */
+  customerId?: string
+  phone?: string
+  customerName?: string
+  service: string
+  /** Wall clock in the business's timezone. */
+  date: string
+  time: string
+  notes?: string
+  notifyCustomer: boolean
+  /** Second attempt, after the owner read the warnings and said "igual". */
+  force: boolean
+}
+
+/**
+ * Two outcomes, one status code.
+ *
+ * A slot that breaks a rule is not an error — the owner may book through it —
+ * so the warnings come back on the happy path and the caller branches on
+ * `created`, instead of catching an exception to drive a normal step of the flow.
+ */
+export type CreateAppointmentResult =
+  | { created: false; warnings: SlotWarning[] }
+  | {
+      created: true
+      warnings: SlotWarning[]
+      appointmentId: string
+      status: AppointmentStatus
+      scheduledAt: string
+      customerId: string
+      patientNotified: boolean
+      patientNotifyError?: string
+    }
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 export interface PanelStats {

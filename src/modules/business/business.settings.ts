@@ -341,7 +341,7 @@ export function formatServicePrice(service: Service): string {
 // owner tool executor.
 export function isBotPausedNow(settings: BusinessSettings | null, now: Date = new Date()): boolean {
   const state = settings?.botPaused
-  if (!state || !state.paused) return false
+  if (!state?.paused) return false
   if (state.until && Date.parse(state.until) <= now.getTime()) return false
   return true
 }

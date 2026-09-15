@@ -22,7 +22,7 @@ import * as googleCalendarService from '@/modules/google/googleCalendar.service.
 import * as messageService from '@/modules/message/message.service.js'
 import * as customerNotifier from '@/modules/whatsapp/customerNotifier.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import { formatDateTimeForDisplay } from '@/shared/datetime.js'
+import { formatDateTimeForDisplay, formatTimeForDisplay } from '@/shared/datetime.js'
 import {
   AppError,
   ConflictError,
@@ -604,6 +604,320 @@ export async function bookAppointment(params: BookAppointmentParams): Promise<Re
   }
 }
 
+// ── Cita creada a mano por el dueño ──────────────────────────────────────────
+
+export interface CreateManualAppointmentParams {
+  businessId: string
+  customerId: string
+  service: string
+  /** Calendar day in the BUSINESS's wall clock, YYYY-MM-DD. */
+  dateISO: string
+  /** Time of day in the BUSINESS's wall clock, HH:mm. */
+  timeHHmm: string
+  customerName?: string
+  notes?: string
+  /** Book despite the warnings. Second call, after the owner said "igual". */
+  force?: boolean
+  notifyCustomer?: boolean
+}
+
+export type SlotWarningCode =
+  | 'closed_day'
+  | 'outside_hours'
+  | 'break_overlap'
+  | 'slot_too_soon'
+  | 'overlap'
+
+export interface SlotWarning {
+  code: SlotWarningCode
+  /** Rendered verbatim in the panel, so it is written for the owner to read. */
+  message: string
+}
+
+export type CreateManualAppointmentResult =
+  | { created: false; warnings: SlotWarning[] }
+  | {
+      created: true
+      appointment: Appointment
+      /** What the owner chose to book through. Empty on a clean slot. */
+      warnings: SlotWarning[]
+      patientNotified: boolean
+      patientNotifyError?: string
+    }
+
+/**
+ * Books the appointment the OWNER typed into the panel.
+ *
+ * Deliberately a separate entry point rather than a flag on `bookAppointment`:
+ * every rule that one enforces exists to stop Emma from promising a customer
+ * something the business cannot honour. The owner needs none of that policing
+ * over their own agenda — `rescheduleAppointment` already settled that an
+ * owner-picked slot skips hours, break and lead time. What it never did is say
+ * so out loud, and that is what `SlotWarning` adds: the first call reports
+ * everything the slot breaks and persists NOTHING, then a second call with
+ * `force` goes ahead. Only an unknown or deactivated service is a hard no.
+ *
+ * Three other departures from the customer path:
+ *   - status is always 'scheduled'. `bookingMode: 'requires_approval'` exists so
+ *     a human sees the request first, and the human is the one filling this form.
+ *   - the owner is never notified (US-07 AC5): they are looking at the result.
+ *   - the patient is notified only on request. A slot agreed on the phone a
+ *     minute ago does not need a confirmation pushed at it.
+ */
+export async function createManualAppointment(
+  params: CreateManualAppointmentParams,
+): Promise<Result<CreateManualAppointmentResult>> {
+  try {
+    const businessResult = await businessService.getById(params.businessId)
+    if (!businessResult.ok) return businessResult
+    const business = businessResult.data
+
+    const settingsResult = await businessService.getSettings(params.businessId)
+    if (!settingsResult.ok) return settingsResult
+    const settings = settingsResult.data
+
+    // Active services only, same as every other booking path: turning a service
+    // off is a decision this form has no business overriding.
+    const knownService = findKnownService(settings, params.service)
+    if (!knownService) {
+      return err(validationErrorForUnknownService(params.businessId, params.service, settings))
+    }
+
+    // The form speaks wall clock — "el jueves a las 3" — and the timezone maths
+    // lives here rather than in the route, next to everything else that has to
+    // agree on what instant that is.
+    const tzOffset = tzOffsetForDate(business.timezone, params.dateISO)
+    const startMinutes = timeToMinutes(params.timeHHmm)
+    if (tzOffset === null || Number.isNaN(startMinutes)) {
+      return err(
+        new ValidationError({
+          code: 'invalid_datetime',
+          message: `cannot resolve ${params.dateISO}T${params.timeHHmm} in ${business.timezone}`,
+          userMessage: 'No pude interpretar esa fecha y hora.',
+          logContext: {
+            businessId: params.businessId,
+            dateISO: params.dateISO,
+            timeHHmm: params.timeHHmm,
+            timezone: business.timezone,
+          },
+        }),
+      )
+    }
+
+    const datetime = new Date(`${params.dateISO}T${params.timeHHmm}:00${tzOffset}`)
+    if (Number.isNaN(datetime.getTime())) {
+      return err(
+        new ValidationError({
+          code: 'invalid_datetime',
+          message: `cannot parse ${params.dateISO}T${params.timeHHmm}${tzOffset}`,
+          userMessage: 'No pude interpretar esa fecha y hora.',
+          logContext: { businessId: params.businessId, dateISO: params.dateISO },
+        }),
+      )
+    }
+
+    const durationMinutes = resolveServiceDurationMinutes(knownService, settings)
+    const endsAt = new Date(datetime.getTime() + durationMinutes * 60_000)
+
+    const warnings = await evaluateManualSlot({
+      businessId: params.businessId,
+      settings,
+      timezone: business.timezone,
+      dateISO: params.dateISO,
+      startMinutes,
+      durationMinutes,
+      datetime,
+      endsAt,
+    })
+
+    if (warnings.length > 0 && params.force !== true) {
+      return ok({ created: false, warnings })
+    }
+
+    // Same 30s window the customer path uses: a double click on the modal's
+    // button must not put two identical appointments on the calendar.
+    const recent = await appointmentRepo.findRecentByCustomerSlot(
+      params.businessId,
+      params.customerId,
+      datetime,
+      knownService.name,
+      IDEMPOTENCY_WINDOW_MS,
+    )
+    if (recent) {
+      logger.info(
+        { businessId: params.businessId, appointmentId: recent.id },
+        'createManualAppointment: idempotent hit, returning existing appointment',
+      )
+      // patientNotified false because THIS call sent nothing — the first one
+      // already did whatever the toggle asked for.
+      return ok({ created: true, appointment: recent, warnings, patientNotified: false })
+    }
+
+    let customer = await customerRepo.findById(params.businessId, params.customerId)
+    if (!customer) {
+      return err(
+        new NotFoundError({
+          resource: 'customer',
+          userMessage: 'No encontré a ese contacto en este negocio.',
+          logContext: { businessId: params.businessId, customerId: params.customerId },
+        }),
+      )
+    }
+
+    // Same rule as the customer path: the name typed here is the real one, so it
+    // replaces whatever WhatsApp push name the row was carrying. Runs before the
+    // insert, so a failed write never leaves an appointment already persisted.
+    const providedName = normalizeCustomerName(params.customerName)
+    if (providedName && customer.name?.trim() !== providedName) {
+      const renamed = await customerRepo.updateName(
+        params.businessId,
+        params.customerId,
+        providedName,
+      )
+      if (renamed) customer = renamed
+    }
+
+    const created = await appointmentRepo.create({
+      businessId: params.businessId,
+      customerId: params.customerId,
+      // The configured spelling, not whatever casing reached the form.
+      service: knownService.name,
+      customerName: providedName ?? customer.name?.trim() ?? null,
+      scheduledAt: datetime,
+      durationMinutes,
+      // Never 'pending': the approver is the one who just filled the form.
+      status: 'scheduled',
+      ...(params.notes ? { notes: params.notes } : {}),
+    })
+
+    const googleEventId = await mirrorToGoogleCalendar({
+      businessId: params.businessId,
+      appointment: created,
+      timezone: business.timezone,
+      customer,
+    })
+    const appointment =
+      googleEventId === null
+        ? created
+        : await appointmentRepo.update(params.businessId, created.id, { googleEventId })
+
+    if (params.notifyCustomer !== true) {
+      return ok({ created: true, appointment, warnings, patientNotified: false })
+    }
+
+    // Reuses the confirmation card the deposit flow and the owner's WhatsApp
+    // assistant already send, so a patient hears one voice whichever path booked
+    // them — and it lands in the transcript, so Emma remembers it.
+    const notified = await notifyPatientOfConfirmedAppointment({
+      businessId: params.businessId,
+      appointmentId: appointment.id,
+    })
+    if (!notified.ok) {
+      return ok({
+        created: true,
+        appointment,
+        warnings,
+        patientNotified: false,
+        patientNotifyError: notified.error.userMessage,
+      })
+    }
+    return ok({
+      created: true,
+      appointment,
+      warnings,
+      patientNotified: notified.data.patientNotified,
+      ...(notified.data.patientNotifyError
+        ? { patientNotifyError: notified.data.patientNotifyError }
+        : {}),
+    })
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'create_manual_appointment_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pude agendar la cita en este momento.',
+        logContext: {
+          businessId: params.businessId,
+          customerId: params.customerId,
+          dateISO: params.dateISO,
+          timeHHmm: params.timeHHmm,
+          service: params.service,
+        },
+        cause,
+      }),
+    )
+  }
+}
+
+/**
+ * Everything the slot breaks, in the order the owner would notice it.
+ *
+ * Returns a list instead of failing at the first one on purpose: a form that
+ * reports "el negocio no atiende ese día", waits for a fix and only then admits
+ * the hour was also taken is a form the owner fights twice.
+ */
+async function evaluateManualSlot(p: {
+  businessId: string
+  settings: BusinessSettings
+  timezone: string
+  dateISO: string
+  startMinutes: number
+  durationMinutes: number
+  datetime: Date
+  endsAt: Date
+}): Promise<SlotWarning[]> {
+  const warnings: SlotWarning[] = []
+
+  const dayKey = dayKeyForDateISO(p.dateISO)
+  const dayHours = dayKey === null ? null : resolveDayHours(p.settings, p.dateISO, dayKey)
+  if (dayHours === null) {
+    warnings.push({ code: 'closed_day', message: 'Ese día el negocio no atiende.' })
+  } else {
+    const openMin = timeToMinutes(dayHours.open)
+    const closeMin = timeToMinutes(dayHours.close)
+    const outside =
+      !Number.isNaN(openMin) &&
+      !Number.isNaN(closeMin) &&
+      (p.startMinutes < openMin || p.startMinutes + p.durationMinutes > closeMin)
+    if (outside) {
+      warnings.push({
+        code: 'outside_hours',
+        message: `Queda fuera del horario de ese día (${dayHours.open} a ${dayHours.close}).`,
+      })
+    }
+    if (dayHours.break && overlapsBreak(p.startMinutes, p.durationMinutes, dayHours.break)) {
+      warnings.push({
+        code: 'break_overlap',
+        message: `Se cruza con el descanso (${dayHours.break.start} a ${dayHours.break.end}).`,
+      })
+    }
+  }
+
+  const minNoticeMinutes = getMinBookingNoticeMinutes(p.settings)
+  const now = Date.now()
+  if (p.datetime.getTime() < now) {
+    warnings.push({ code: 'slot_too_soon', message: 'Ese horario ya pasó.' })
+  } else if (p.datetime.getTime() < now + minNoticeMinutes * 60_000) {
+    warnings.push({
+      code: 'slot_too_soon',
+      message: `Falta menos de ${minNoticeMinutes} minutos para ese horario.`,
+    })
+  }
+
+  const clash = await appointmentRepo.findOverlapping(p.businessId, p.datetime, p.endsAt)
+  if (clash) {
+    warnings.push({
+      code: 'overlap',
+      message: `Se cruza con otra cita: ${clash.service} a las ${formatTimeForDisplay(
+        clash.scheduledAt,
+        p.timezone,
+      )}.`,
+    })
+  }
+
+  return warnings
+}
+
 // Returns the YYYY-MM-DD that `instant` represents in `timezone`, or null
 // if the formatter can't handle the timezone.
 function formatDateInTimezone(instant: Date, timezone: string): string | null {
@@ -795,7 +1109,7 @@ export interface EscalateParams {
 // escalation itself is already persisted by the time this runs.
 async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
   const conv = await conversationRepo.findById(params.businessId, params.conversationId)
-  if (!conv || !conv.customerId) return
+  if (!conv?.customerId) return
   const customer = await customerRepo.findById(params.businessId, conv.customerId)
   if (!customer) return
 
@@ -806,7 +1120,7 @@ async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
   const phone = customer.phone ? `(${customer.phone})` : null
   const text = [
     '🔔 *Escalación pendiente*',
-    `Cliente: ${who}` + (phone ? ` ${phone}` : ''),
+    `Cliente: ${who}${phone ? ` ${phone}` : ''}`,
     `Motivo: ${params.reason}`,
     'Revisá la conversación cuando puedas.',
   ].join('\n')

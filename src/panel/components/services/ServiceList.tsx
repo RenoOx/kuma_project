@@ -1,11 +1,12 @@
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { PanelService } from '../../api/types.js'
+import { useKeyedDraft } from '../../hooks/useKeyedDraft.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
 import { cn, formatServicePrice } from '../../lib/utils.js'
+import { SettingsCard } from '../config/SettingsCard.js'
 import { Button } from '../ui/button.js'
 import { Switch } from '../ui/switch.js'
-import { SettingsCard } from '../config/SettingsCard.js'
 import { ServiceForm } from './ServiceForm.js'
 
 /**
@@ -17,18 +18,15 @@ import { ServiceForm } from './ServiceForm.js'
  */
 export function ServiceList({ services }: { services: PanelService[] }): React.JSX.Element {
   const { save, saving, saved, error } = useSectionSave()
-  const [draft, setDraft] = useState<PanelService[]>(services)
+  const { rows, values: draft, add, update, remove } = useKeyedDraft<PanelService>(services)
   const [editing, setEditing] = useState<{ index: number | null } | null>(null)
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(services)
   const activeCount = draft.filter((s) => s.active).length
 
   const submit = (service: PanelService): void => {
-    setDraft((prev) =>
-      editing?.index === null || editing === null
-        ? [...prev, service]
-        : prev.map((s, i) => (i === editing.index ? service : s)),
-    )
+    if (editing === null || editing.index === null) add(service)
+    else update(editing.index, service)
     setEditing(null)
   }
 
@@ -49,16 +47,13 @@ export function ServiceList({ services }: { services: PanelService[] }): React.J
           </p>
         ) : (
           <div className="flex flex-col divide-y divide-border">
-            {draft.map((service, index) => (
+            {rows.map(({ key, value: service }, index) => (
               <ServiceRow
-                // Names can collide while being edited, so the index rides along.
-                key={`${service.name}-${index}`}
+                key={key}
                 service={service}
-                onToggle={(active) =>
-                  setDraft((prev) => prev.map((s, i) => (i === index ? { ...s, active } : s)))
-                }
+                onToggle={(active) => update(index, { ...service, active })}
                 onEdit={() => setEditing({ index })}
-                onRemove={() => setDraft((prev) => prev.filter((_, i) => i !== index))}
+                onRemove={() => remove(index)}
               />
             ))}
           </div>
@@ -82,7 +77,9 @@ export function ServiceList({ services }: { services: PanelService[] }): React.J
 
       <ServiceForm
         open={editing !== null}
-        service={editing?.index === null || editing === null ? null : (draft[editing.index] ?? null)}
+        service={
+          editing?.index === null || editing === null ? null : (draft[editing.index] ?? null)
+        }
         onClose={() => setEditing(null)}
         onSubmit={submit}
         error={null}
@@ -113,7 +110,9 @@ function ServiceRow({
       <div className={cn('min-w-0 flex-1', !service.active && 'opacity-50')}>
         <p className="truncate text-sm font-medium">{service.name}</p>
         <p className="text-muted-foreground truncate text-xs">
-          {service.durationMinutes === null ? 'Sin duración fija' : `${service.durationMinutes} min`}
+          {service.durationMinutes === null
+            ? 'Sin duración fija'
+            : `${service.durationMinutes} min`}
           {' · '}
           {formatServicePrice(service)}
         </p>

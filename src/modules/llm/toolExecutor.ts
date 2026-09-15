@@ -469,7 +469,6 @@ export async function executeTool(
       const businessResult = await businessService.getById(context.businessId)
       const timezone = businessResult.ok ? businessResult.data.timezone : 'America/Lima'
 
-
       return {
         result: JSON.stringify({
           appointment_id: r.data.id,
@@ -540,7 +539,6 @@ export async function executeTool(
           error: r.error.code,
         }
       }
-
 
       return {
         result: JSON.stringify({

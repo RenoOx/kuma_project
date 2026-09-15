@@ -1,4 +1,4 @@
-import type { EventClickArg, EventInput } from '@fullcalendar/core'
+import type { DateSelectArg, EventClickArg, EventInput } from '@fullcalendar/core'
 import esLocale from '@fullcalendar/core/locales/es'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
@@ -49,11 +49,14 @@ export function AppointmentCalendar({
   operatingHours,
   onRangeChange,
   onSelect,
+  onSlotClick,
 }: {
   appointments: PanelAppointment[]
   operatingHours: OperatingHours | null
   onRangeChange: (range: DateRange) => void
   onSelect: (appointment: PanelAppointment) => void
+  /** An empty slot the owner picked, as wall-clock YYYY-MM-DD and HH:mm. */
+  onSlotClick: (date: string, time: string) => void
 }): React.JSX.Element {
   const isDesktop = useIsDesktop()
   const calendarRef = useRef<FullCalendar>(null)
@@ -89,6 +92,19 @@ export function AppointmentCalendar({
     if (clicked) onSelect(clicked)
   }
 
+  // The gesture the owner tries anyway: click an empty slot to book it. Read
+  // off the local Date rather than the ISO string, which is UTC and lands on
+  // the wrong day in Lima all evening.
+  const handleSelect = (info: DateSelectArg): void => {
+    const pad = (n: number): string => `${n}`.padStart(2, '0')
+    const d = info.start
+    onSlotClick(
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    )
+    info.view.calendar.unselect()
+  }
+
   return (
     <FullCalendar
       ref={calendarRef}
@@ -106,6 +122,8 @@ export function AppointmentCalendar({
       }}
       events={events}
       eventClick={handleClick}
+      selectable
+      select={handleSelect}
       // Dates arrive as local Date objects; the API validates strict ISO with a
       // Z, so the conversion happens here rather than in every caller.
       datesSet={(info) =>

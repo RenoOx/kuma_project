@@ -5,7 +5,6 @@ import { type NicheCopy, nicheCopy } from '../../lib/constants.js'
 import { PanelLink } from '../../lib/session.js'
 import { cn } from '../../lib/utils.js'
 import { Badge } from '../ui/badge.js'
-import { Logo } from './Logo.js'
 
 interface NavItem {
   to: string
@@ -38,18 +37,16 @@ export function Sidebar({ niche }: { niche: string | undefined }): React.JSX.Ele
         // Same near-black as the page, so the rail is defined by the rule along
         // its edge and by the green of the active item — not by a second shade
         // competing with the content blocks.
-        'bg-emma-sidebar border-emma-border flex shrink-0 gap-1',
+        'bg-emma-sidebar border-emma-sidebar-border flex shrink-0 gap-1',
         // Horizontal bar on phones, rail on desktop. One element, not two
-        // components fighting over which is mounted. The border follows the
-        // flip: a top rule under the bar, a right rule beside the rail.
-        'flex-row border-t p-2',
-        'md:h-full md:w-52 md:flex-col md:border-t-0 md:border-r md:p-3',
+        // components fighting over which is mounted. On a phone it sits last,
+        // under the content; on desktop it is the body of the left column, so
+        // the width and the rule down its edge belong to that column and not
+        // here — otherwise the header above it would stop short of both.
+        'order-3 flex-row border-t p-2',
+        'md:order-none md:min-h-0 md:flex-1 md:flex-col md:border-t-0 md:p-3',
       )}
     >
-      <div className="hidden px-3 pt-1 pb-4 md:block">
-        <Logo />
-      </div>
-
       {NAV.map((item) => {
         const active = section === item.to
         const Icon = item.icon

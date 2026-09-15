@@ -23,8 +23,8 @@ import {
 } from '../ui/dialog.js'
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
-import { Switch } from '../ui/switch.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
+import { Switch } from '../ui/switch.js'
 import { Textarea } from '../ui/textarea.js'
 
 const SEND_MODES: KbSendMode[] = ['always', 'on_request', 'trigger_based']

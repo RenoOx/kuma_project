@@ -21,7 +21,7 @@ import { normalizePhone, samePhone } from '@/shared/phone.js'
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
-async function requireAdmin(c: Context, next: Next): Promise<Response | void> {
+async function requireAdmin(c: Context, next: Next): Promise<Response | undefined> {
   if (!env.ADMIN_SECRET) {
     return c.json({ error: 'not_configured', message: 'ADMIN_SECRET not set on this server' }, 501)
   }
@@ -29,6 +29,9 @@ async function requireAdmin(c: Context, next: Next): Promise<Response | void> {
     return c.json({ error: 'unauthorized' }, 401)
   }
   await next()
+  // Explicit: the return type is `Response | undefined` rather than
+  // `Response | void`, and `noImplicitReturns` wants every path to say so.
+  return undefined
 }
 
 // ── Request body schemas ──────────────────────────────────────────────────────

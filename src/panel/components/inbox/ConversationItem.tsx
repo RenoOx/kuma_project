@@ -20,7 +20,7 @@ export function ConversationItem({
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors',
-        selected ? 'bg-emma-accent/10' : 'hover:bg-accent/40',
+        selected ? 'bg-emma-accent/10' : 'hover:bg-emma-elevated',
       )}
     >
       <Avatar className="mt-0.5 size-9">

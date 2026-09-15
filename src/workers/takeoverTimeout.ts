@@ -24,9 +24,7 @@ export interface TakeoverRunResult {
   takeoversReturned: number
 }
 
-export async function runTakeoverTimeout(
-  now: Date = new Date(),
-): Promise<TakeoverRunResult> {
+export async function runTakeoverTimeout(now: Date = new Date()): Promise<TakeoverRunResult> {
   const cutoff = new Date(now.getTime() - HUMAN_TAKEOVER_TIMEOUT_MS)
 
   // Clears the clock and nothing else. In particular it does NOT touch
@@ -36,9 +34,7 @@ export async function runTakeoverTimeout(
   const returned = await db
     .update(conversations)
     .set({ humanTakeoverAt: null, updatedAt: now })
-    .where(
-      and(isNotNull(conversations.humanTakeoverAt), lt(conversations.humanTakeoverAt, cutoff)),
-    )
+    .where(and(isNotNull(conversations.humanTakeoverAt), lt(conversations.humanTakeoverAt, cutoff)))
     .returning({ id: conversations.id })
 
   // Logged per row, not just as a count: when an owner asks why Emma started

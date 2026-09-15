@@ -183,7 +183,11 @@ describe('business.settings — remindersExplicitlyDisabled', () => {
   // postBooking existed parses as reminders:false, and treating that as a
   // choice would silence reminders that go out today.
   it('does not disable reminders for settings with no postBooking block', () => {
-    expect(remindersExplicitlyDisabled(BASE_SETTINGS)).toBe(false)
+    // BASE_SETTINGS carries a full postBooking block with reminders off, which
+    // is the opposite case — what this one is about is a row saved before the
+    // field existed, so the key has to be genuinely absent.
+    const { postBooking: _omitted, ...withoutPostBooking } = BASE_SETTINGS
+    expect(remindersExplicitlyDisabled(withoutPostBooking)).toBe(false)
   })
 
   it('does not disable reminders when postBooking omits the key', () => {
@@ -191,7 +195,10 @@ describe('business.settings — remindersExplicitlyDisabled', () => {
   })
 
   it('disables reminders only on a stored false', () => {
-    const off = { ...BASE_SETTINGS, postBooking: { ...BASE_SETTINGS.postBooking, reminders: false } }
+    const off = {
+      ...BASE_SETTINGS,
+      postBooking: { ...BASE_SETTINGS.postBooking, reminders: false },
+    }
     expect(remindersExplicitlyDisabled(off)).toBe(true)
   })
 

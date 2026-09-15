@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { PanelApiError } from '../api/client.js'
 import {
   createKnowledge,
   deleteKnowledge,
   getKnowledge,
   updateKnowledge,
 } from '../api/knowledge.js'
-import { PanelApiError } from '../api/client.js'
 import type { KnowledgeEntry, KnowledgeInput } from '../api/types.js'
 import { useSession } from '../lib/session.js'
 

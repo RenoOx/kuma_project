@@ -1,18 +1,12 @@
 import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
 import type { Business } from '@/db/schema/index.js'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
+import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
 import { AppError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import {
-  botPausedFromPatch,
-  mergeSettingsSection,
-  type PanelSettingsView,
-  readSettings,
-} from './settings.merge.js'
 import type {
   BookingPatch,
   BotPatch,
@@ -21,6 +15,12 @@ import type {
   SchedulePatch,
   ServicesPatch,
   SpecialDaysPatch,
+} from './settings.merge.js'
+import {
+  botPausedFromPatch,
+  mergeSettingsSection,
+  type PanelSettingsView,
+  readSettings,
 } from './settings.merge.js'
 
 // The database-facing half. Everything pure — patch schemas, the merge, the

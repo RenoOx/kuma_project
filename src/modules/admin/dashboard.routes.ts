@@ -3,41 +3,14 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
-import type {
-  KbAttachmentType,
-  KbCategory,
-  KbSendMode,
-  KnowledgeBaseEntry,
-} from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
-import {
-  BOOKING_MODE_LABELS,
-  type BookingMode,
-  type BusinessSettings,
-  businessSettingsSchema,
-  type DayKey,
-  DEPOSIT_METHOD_LABELS,
-  DEPOSIT_METHODS,
-  type DepositPaymentMethod,
-  NICHE_LABELS,
-  type Niche,
-  type Service,
-} from '@/modules/business/business.settings.js'
 import * as googleCalendarService from '@/modules/google/googleCalendar.service.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
-import {
-  type ActiveKbCategory,
-  KB_ATTACHMENT_TYPE_LABELS,
-  KB_ATTACHMENT_TYPES,
-  KB_CATEGORIES,
-  KB_CATEGORY_LABELS,
-  KB_SEND_MODE_LABELS,
-  KB_SEND_MODES,
-  LEGACY_KB_CATEGORIES,
-} from '@/modules/knowledgeBase/knowledgeBase.types.js'
-import { MAX_ENTRIES_PER_QUERY } from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
+// Read-only on this surface now: the business detail page still summarises the
+// knowledge base, but editing it lives in the owner's panel.
+import { KB_CATEGORIES, KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import {
   dayRangeInTimezone,
   shiftDateISO,
@@ -243,313 +216,6 @@ function renderGuardWarning(
     </div>`
 }
 
-// ── Settings form helpers ─────────────────────────────────────────────────────
-
-const DAYS: Array<{ key: DayKey; label: string }> = [
-  { key: 'monday', label: 'Lunes' },
-  { key: 'tuesday', label: 'Martes' },
-  { key: 'wednesday', label: 'Miércoles' },
-  { key: 'thursday', label: 'Jueves' },
-  { key: 'friday', label: 'Viernes' },
-  { key: 'saturday', label: 'Sábado' },
-  { key: 'sunday', label: 'Domingo' },
-]
-
-type DayHours = { open: string; close: string; break?: { start: string; end: string } } | null
-
-function renderDayRow(key: DayKey, label: string, hours: DayHours): string {
-  const enabled = hours !== null
-  const open = hours?.open ?? '09:00'
-  const close = hours?.close ?? '18:00'
-  const hasBreak = !!hours?.break
-  const bStart = hours?.break?.start ?? '13:00'
-  const bEnd = hours?.break?.end ?? '14:00'
-  const dis = enabled ? '' : 'disabled'
-  const bDis = enabled && hasBreak ? '' : 'disabled'
-
-  return `<tr>
-    <td style="font-weight:500;padding-right:.5rem">${label}</td>
-    <td style="text-align:center">
-      <input type="checkbox" name="day_${key}_enabled" id="day_${key}_enabled"
-        ${enabled ? 'checked' : ''} onchange="toggleDay('${key}')">
-    </td>
-    <td><input type="time" class="time-input" name="day_${key}_open" id="day_${key}_open"
-      value="${open}" ${dis}></td>
-    <td><input type="time" class="time-input" name="day_${key}_close" id="day_${key}_close"
-      value="${close}" ${dis}></td>
-    <td style="text-align:center">
-      <input type="checkbox" name="day_${key}_break" id="day_${key}_break"
-        ${hasBreak ? 'checked' : ''} ${dis} onchange="toggleBreak('${key}')">
-    </td>
-    <td><input type="time" class="time-input" name="day_${key}_break_start"
-      id="day_${key}_break_start" value="${bStart}" ${bDis}></td>
-    <td><input type="time" class="time-input" name="day_${key}_break_end"
-      id="day_${key}_break_end" value="${bEnd}" ${bDis}></td>
-  </tr>`
-}
-
-// The reference-link row only makes sense for evaluation-first services, so it
-// starts hidden and toggleServiceRef shows it with the checkbox. It keeps its
-// value while hidden on purpose: unchecking by accident must not silently drop
-// a link the owner already saved.
-function renderServiceRow(i: number, s?: Service): string {
-  const requiresEvaluation = s?.requiresEvaluation ?? false
-  const refHidden = requiresEvaluation ? '' : 'display:none;'
-
-  return `<div class="service-row" id="service-row-${i}">
-      <input type="text" class="form-input" name="service_${i}_name" data-field="name"
-        value="${esc(s?.name ?? '')}" placeholder="ej. Corte de cabello" style="flex:1"${s ? ' required' : ''}>
-      <input type="number" class="form-input" name="service_${i}_duration" data-field="duration"
-        min="5" max="480" value="${s?.durationMinutes ?? ''}" placeholder="ej. 45" style="width:90px">
-      <input type="number" class="form-input" name="service_${i}_price_min" data-field="price_min"
-        min="0" step="0.01" value="${s?.priceMin ?? ''}" placeholder="Precio mínimo (S/)" style="width:130px">
-      <input type="number" class="form-input" name="service_${i}_price_max" data-field="price_max"
-        min="0" step="0.01" value="${s?.priceMax ?? ''}" placeholder="Precio máximo (S/)" style="width:130px">
-      <label class="service-eval"><input type="checkbox" name="service_${i}_requires_evaluation"
-        data-field="requires_evaluation"${requiresEvaluation ? ' checked' : ''}
-        onchange="toggleServiceRef(this)"> Requiere evaluación previa</label>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>
-      <div class="service-ref" data-ref-row style="${refHidden}">
-        <input type="url" class="form-input" name="service_${i}_reference_url" data-field="reference_url"
-          value="${esc(s?.referenceUrl ?? '')}"
-          placeholder="Link de referencia (Canva, Drive, portafolio...)">
-      </div>
-    </div>`
-}
-
-function renderServiceRows(services: Service[]): string {
-  if (services.length === 0) return renderServiceRow(0)
-  return services.map((s, i) => renderServiceRow(i, s)).join('')
-}
-
-// One payment method row. The number field is hidden for 'efectivo' — there is
-// no number to type — but kept in the DOM so switching back restores the value.
-function renderDepositMethodRow(i: number, m?: DepositPaymentMethod): string {
-  const method = m?.method ?? 'yape'
-  const number = m?.number ?? ''
-  const label = m?.label ?? ''
-  const options = DEPOSIT_METHODS.map(
-    (v) =>
-      `<option value="${v}" ${method === v ? 'selected' : ''}>${esc(DEPOSIT_METHOD_LABELS[v])}</option>`,
-  ).join('')
-
-  return `<div class="service-row deposit-row" id="deposit-row-${i}">
-    <select class="form-input form-select" name="deposit_method_${i}_method" data-field="method"
-      style="width:150px" onchange="toggleDepositNumber(this)">${options}</select>
-    <input type="text" class="form-input" name="deposit_method_${i}_number" data-field="number"
-      value="${esc(number)}" placeholder="ej. 987654321" style="width:160px"
-      ${method === 'efectivo' ? 'hidden' : ''}>
-    <input type="text" class="form-input" name="deposit_method_${i}_label" data-field="label"
-      value="${esc(label)}" placeholder="Nombre de referencia (ej. Dr. Pérez)" style="flex:1">
-    <button type="button" class="btn btn-ghost btn-sm" onclick="removeDepositMethod(this)">✕</button>
-  </div>`
-}
-
-function renderDepositMethodRows(methods: DepositPaymentMethod[]): string {
-  return methods.map((m, i) => renderDepositMethodRow(i, m)).join('')
-}
-
-type SpecialDayRow = { date: string; label?: string; hours: DayHours }
-
-function renderSpecialDayRow(i: number, s?: SpecialDayRow): string {
-  const date = s?.date ?? ''
-  const label = s?.label ?? ''
-  const closed = s ? s.hours === null : false
-  const open = s?.hours?.open ?? '09:00'
-  const close = s?.hours?.close ?? '13:00'
-  const dis = closed ? 'disabled' : ''
-
-  return `<div class="service-row special-row" id="special-row-${i}">
-    <input type="date" class="form-input" name="special_${i}_date" data-field="date"
-      value="${esc(date)}" style="width:150px">
-    <input type="text" class="form-input" name="special_${i}_label" data-field="label"
-      value="${esc(label)}" placeholder="ej. Navidad" style="flex:1">
-    <label style="display:flex;align-items:center;gap:.3rem;font-size:12px;white-space:nowrap">
-      <input type="checkbox" name="special_${i}_closed" data-field="closed"
-        ${closed ? 'checked' : ''} onchange="toggleSpecialClosed(${i})"> Cerrado
-    </label>
-    <input type="time" class="time-input" name="special_${i}_open" id="special_${i}_open"
-      data-field="open" value="${open}" ${dis}>
-    <input type="time" class="time-input" name="special_${i}_close" id="special_${i}_close"
-      data-field="close" value="${close}" ${dis}>
-    <button type="button" class="btn btn-ghost btn-sm" onclick="removeSpecialDay(this)">✕</button>
-  </div>`
-}
-
-function renderSpecialDayRows(specialDays: SpecialDayRow[]): string {
-  if (specialDays.length === 0) return ''
-  return specialDays.map((s, i) => renderSpecialDayRow(i, s)).join('')
-}
-
-// An empty input means the field is genuinely unset, which the settings schema
-// represents as null — never coerce it to 0 or NaN.
-function optionalNumberField(formData: FormData, key: string): number | null {
-  const raw = formData.get(key)?.toString().trim()
-  if (!raw) return null
-  const parsed = Number(raw)
-  return Number.isNaN(parsed) ? null : parsed
-}
-
-// referenceUrl is `.optional()` (not nullable) in the schema, so an empty input
-// has to disappear from the object entirely rather than become null.
-function optionalStringField(formData: FormData, key: string): string | undefined {
-  return formData.get(key)?.toString().trim() || undefined
-}
-
-// Zod issue → something the business owner can act on. Only the cases an owner
-// actually hits are translated; anything else falls back to the raw path so a
-// new validation rule never renders as an empty message.
-function humanizeSettingsIssue(path: string, message: string): string {
-  const service = /^services\.(\d+)\.(\w+)$/.exec(path)
-  if (service) {
-    const label = `Servicio ${Number(service[1]) + 1}`
-    switch (service[2]) {
-      case 'priceMin':
-        return `${label}: falta el precio mínimo. Si el precio depende del caso, marcá "Requiere evaluación previa".`
-      case 'priceMax':
-        return `${label}: el precio máximo no puede ser menor que el mínimo.`
-      case 'referenceUrl':
-        return `${label}: el link de referencia debe ser una URL completa (empezando con https://).`
-      case 'name':
-        return `${label}: falta el nombre.`
-      default:
-        return `${label}: ${message}`
-    }
-  }
-  return path === '' ? message : `${path}: ${message}`
-}
-
-async function parseSettingsFromForm(
-  formData: FormData,
-): Promise<{ ok: true; data: BusinessSettings } | { ok: false; errors: string[] }> {
-  const operatingHours: Record<string, unknown> = {}
-  for (const { key } of DAYS) {
-    const enabled = formData.get(`day_${key}_enabled`) === 'on'
-    if (!enabled) {
-      operatingHours[key] = null
-      continue
-    }
-    const open = formData.get(`day_${key}_open`)?.toString() ?? ''
-    const close = formData.get(`day_${key}_close`)?.toString() ?? ''
-    const hasBreak = formData.get(`day_${key}_break`) === 'on'
-    const day: Record<string, unknown> = { open, close }
-    if (hasBreak) {
-      day.break = {
-        start: formData.get(`day_${key}_break_start`)?.toString() ?? '',
-        end: formData.get(`day_${key}_break_end`)?.toString() ?? '',
-      }
-    }
-    operatingHours[key] = day
-  }
-
-  const slotDuration = Number(formData.get('slotDurationMinutes') ?? 30)
-  const minNoticeRaw = formData.get('minBookingNoticeMinutes')?.toString()
-  const minNotice = minNoticeRaw ? Number(minNoticeRaw) : undefined
-
-  const serviceCount = Number(formData.get('service_count') ?? 0)
-  const services: Service[] = []
-  for (let i = 0; i < serviceCount; i++) {
-    const name = formData.get(`service_${i}_name`)?.toString().trim() ?? ''
-    if (!name) continue
-    const referenceUrl = optionalStringField(formData, `service_${i}_reference_url`)
-    services.push({
-      name,
-      durationMinutes: optionalNumberField(formData, `service_${i}_duration`),
-      priceMin: optionalNumberField(formData, `service_${i}_price_min`),
-      priceMax: optionalNumberField(formData, `service_${i}_price_max`),
-      requiresEvaluation: formData.get(`service_${i}_requires_evaluation`) === 'on',
-      // This form has no active switch — the owner's panel owns that. Every row
-      // parses as active and the POST handler restores the real flag by name;
-      // see the remap below `parsed.data`.
-      active: true,
-      ...(referenceUrl ? { referenceUrl } : {}),
-    })
-  }
-
-  const specialDayCount = Number(formData.get('special_count') ?? 0)
-  const specialDays: Array<Record<string, unknown>> = []
-  for (let i = 0; i < specialDayCount; i++) {
-    const date = formData.get(`special_${i}_date`)?.toString().trim() ?? ''
-    if (!date) continue
-    const label = formData.get(`special_${i}_label`)?.toString().trim() || undefined
-    const closed = formData.get(`special_${i}_closed`) === 'on'
-    if (closed) {
-      specialDays.push({ date, hours: null, ...(label ? { label } : {}) })
-      continue
-    }
-    specialDays.push({
-      date,
-      hours: {
-        open: formData.get(`special_${i}_open`)?.toString() ?? '',
-        close: formData.get(`special_${i}_close`)?.toString() ?? '',
-      },
-      ...(label ? { label } : {}),
-    })
-  }
-
-  // Anything other than the explicit 'hybrid' radio falls back to the schema
-  // default, so a malformed post can never silently flip a business to walk-ins.
-  const appointmentMode =
-    formData.get('appointmentMode')?.toString() === 'hybrid' ? 'hybrid' : 'appointments_only'
-
-  // Same defensive pattern as appointmentMode: anything outside the known set
-  // falls back to the schema default instead of failing the whole form.
-  const nicheRaw = formData.get('niche')?.toString()
-  const niche: Niche = nicheRaw && nicheRaw in NICHE_LABELS ? (nicheRaw as Niche) : 'general'
-
-  const bookingModeRaw = formData.get('bookingMode')?.toString()
-  const bookingMode: BookingMode =
-    bookingModeRaw && bookingModeRaw in BOOKING_MODE_LABELS
-      ? (bookingModeRaw as BookingMode)
-      : 'direct'
-
-  // Unchecked checkboxes are simply absent from the form data, so presence is
-  // the value. No fallback needed: absent means false, which is the default.
-  const forwardImages = formData.get('forwardImages')?.toString() === 'on'
-
-  const requiresDeposit = formData.get('requiresDeposit')?.toString() === 'on'
-  const depositAmount = optionalStringField(formData, 'depositAmount')
-  const methodCount = Number(formData.get('deposit_method_count') ?? 0)
-  const depositPaymentMethods: DepositPaymentMethod[] = []
-  for (let i = 0; i < methodCount; i++) {
-    const method = formData.get(`deposit_method_${i}_method`)?.toString()
-    // A row whose method never made it through is a row the owner removed or a
-    // malformed post — skipped rather than failing the whole save.
-    if (!method || !DEPOSIT_METHODS.includes(method as DepositPaymentMethod['method'])) continue
-    const number = optionalStringField(formData, `deposit_method_${i}_number`)
-    const label = optionalStringField(formData, `deposit_method_${i}_label`)
-    depositPaymentMethods.push({
-      method: method as DepositPaymentMethod['method'],
-      ...(number ? { number } : {}),
-      ...(label ? { label } : {}),
-    })
-  }
-
-  const raw = {
-    niche,
-    bookingMode,
-    forwardImages,
-    requiresDeposit,
-    depositPaymentMethods,
-    ...(depositAmount ? { depositAmount } : {}),
-    operatingHours,
-    slotDurationMinutes: isNaN(slotDuration) ? 30 : slotDuration,
-    services,
-    appointmentMode,
-    ...(minNotice !== undefined && !isNaN(minNotice) ? { minBookingNoticeMinutes: minNotice } : {}),
-    ...(specialDays.length > 0 ? { specialDays } : {}),
-  }
-
-  const parsed = businessSettingsSchema.safeParse(raw)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      errors: parsed.error.issues.map((i) => humanizeSettingsIssue(i.path.join('.'), i.message)),
-    }
-  }
-  return { ok: true, data: parsed.data }
-}
-
 // ── Configure panel helpers ───────────────────────────────────────────────────
 
 // Alerts render as dismissible popups instead of full-width banners so the page
@@ -557,6 +223,47 @@ async function parseSettingsFromForm(
 // auto-closes: the error one carries the validation detail the owner needs in
 // order to fix the form, and the rebind one carries the QR link that brings
 // Emma back online — neither may evaporate on its own.
+/**
+ * Where the rest of the configuration went.
+ *
+ * Every business gets a panel link, and this is the only place in the admin
+ * that shows it — without it the operator has no way to reach the surface that
+ * now owns hours, services, deposits and the knowledge base. A business created
+ * before panel tokens existed has none, and says so rather than linking nowhere.
+ */
+function panelHandoffSection(
+  business: { id: string; panelToken: string | null },
+  secretParam: string,
+): string {
+  const bid = esc(business.id)
+  if (!business.panelToken) {
+    return `<section class="config-section">
+        <div class="section-header">
+          <h2 class="section-title">Panel del cliente</h2>
+          <p class="section-desc">
+            Este negocio no tiene token de panel. Se genera al registrarlo; para uno viejo hay que
+            escribirlo a mano en <span class="mono">businesses.panel_token</span>.
+          </p>
+        </div>
+      </section>`
+  }
+
+  const url = `/panel/${bid}?token=${encodeURIComponent(business.panelToken)}`
+  return `<section class="config-section">
+      <div class="section-header">
+        <h2 class="section-title">Panel del cliente</h2>
+        <p class="section-desc">
+          Horarios, servicios, pagos, conocimiento del negocio y recordatorios se editan ahí.
+          El link es la credencial: cualquiera que lo tenga entra.
+        </p>
+      </div>
+      <div class="actions">
+        <a href="${url}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Abrir panel</a>
+        <a href="/admin/dashboard/${bid}?secret=${secretParam}" class="btn btn-ghost btn-sm">Volver al negocio</a>
+      </div>
+    </section>`
+}
+
 function renderToast(
   kind: 'success' | 'error' | 'warning',
   title: string,
@@ -572,88 +279,6 @@ function renderToast(
       <button type="button" class="toast-close" aria-label="Cerrar"
         onclick="this.closest('.toast').remove()">✕</button>
     </div>`
-}
-
-function checklistRow(mark: '✓' | '✕' | '○', on: boolean, name: string, meta: string): string {
-  return `<div class="kb-check-row${on ? '' : ' is-missing'}">
-      <span class="kb-mark ${on ? 'kb-mark-on' : 'kb-mark-off'}">${mark}</span>
-      <span class="kb-check-name">${esc(name)}</span>
-      <span class="kb-check-meta">${esc(meta)}</span>
-    </div>`
-}
-
-// Read-only status split the way the owner needs to see it: the top group is
-// what business settings already answer (so nobody files a duplicate KB entry
-// for it), the bottom group is what only the knowledge base can answer.
-//
-// The top group reflects the actual settings rather than printing three fixed
-// checkmarks — telling an owner with no services loaded that Emma "already
-// knows" their services is exactly the kind of invented answer the rest of the
-// product refuses to give.
-//
-// Counts only active entries: a disabled one is out of the prompt, so claiming
-// the category is covered would be a lie.
-function renderKbChecklist(params: {
-  entries: KnowledgeBaseEntry[]
-  serviceCount: number
-  hasHours: boolean
-  hasLocation: boolean
-}): string {
-  const counts = new Map<KbCategory, number>()
-  for (const e of params.entries) {
-    if (e.active) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
-  }
-
-  const known = [
-    checklistRow(
-      params.serviceCount > 0 ? '✓' : '✕',
-      params.serviceCount > 0,
-      'Servicios y precios',
-      params.serviceCount > 0
-        ? `${params.serviceCount} ${params.serviceCount === 1 ? 'servicio' : 'servicios'} configurados`
-        : 'Sin servicios configurados',
-    ),
-    checklistRow(
-      params.hasHours ? '✓' : '✕',
-      params.hasHours,
-      'Horarios de atención',
-      params.hasHours ? 'Horario semanal cargado' : 'Sin días de atención configurados',
-    ),
-    checklistRow(
-      params.hasLocation ? '✓' : '✕',
-      params.hasLocation,
-      'Ubicación y contacto',
-      params.hasLocation ? 'Dirección cargada' : 'Sin dirección configurada',
-    ),
-  ].join('')
-
-  // `promociones` is genuinely optional — a business with nothing on sale is
-  // correctly configured, so it gets a neutral mark instead of a red one.
-  const needed = KB_CATEGORIES.map((cat) => {
-    const count = counts.get(cat) ?? 0
-    const optional = cat === 'promociones'
-    if (count > 0) {
-      return checklistRow(
-        '✓',
-        true,
-        KB_CATEGORY_LABELS[cat],
-        `${count} ${count === 1 ? 'entrada' : 'entradas'}`,
-      )
-    }
-    return checklistRow(
-      optional ? '○' : '✕',
-      false,
-      KB_CATEGORY_LABELS[cat],
-      optional
-        ? 'Opcional — sin entradas'
-        : 'Sin entradas — Emma no podrá responder preguntas sobre este tema.',
-    )
-  }).join('')
-
-  return `<div class="kb-group-title">Lo que Emma ya sabe (desde Configuración)</div>
-    ${known}
-    <div class="kb-group-title is-second">Lo que necesitás agregar acá</div>
-    ${needed}`
 }
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
@@ -946,7 +571,7 @@ dashboardRoutes.get('/admin/dashboard', async (c) => {
           <div class="actions">
             ${waActions(b.id, status, secret)}
             <a href="/admin/dashboard/${esc(b.id)}?secret=${se}" class="btn btn-ghost btn-sm">Detalle</a>
-            <a href="/admin/dashboard/${esc(b.id)}/configure?secret=${se}" class="btn btn-ghost btn-sm">Configurar</a>
+            <a href="/admin/dashboard/${esc(b.id)}/configure?secret=${se}" class="btn btn-ghost btn-sm">Conexión</a>
           </div>
         </td>
       </tr>`
@@ -1138,7 +763,7 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
         </p>
         <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center">
           <a href="/admin/dashboard/${bid}/configure?secret=${se}" class="btn btn-primary">
-            1. Configurar horarios y servicios
+            1. Revisar números y abrir el panel
           </a>
           <form method="post" action="/admin/dashboard/${bid}/connect?secret=${se}" style="display:inline"
             onsubmit="return confirm('¿Iniciar la vinculación de WhatsApp?\\n\\nSe va a generar un QR para escanear con el teléfono. Cada intento cuenta contra el límite de WhatsApp para este número.')">
@@ -1239,7 +864,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
     <div class="page-header">
       <h1 class="page-title">${esc(business.name)}</h1>
       <div class="actions">
-        <a href="/admin/dashboard/${bid}/configure?secret=${se}" class="btn btn-primary">Configurar</a>
+        <a href="/admin/dashboard/${bid}/configure?secret=${se}" class="btn btn-primary">Conexión</a>
       </div>
     </div>
 
@@ -1329,7 +954,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
     <div class="card" style="margin-bottom:1.5rem">
       <div class="card-header">
         <span class="card-title">Base de conocimiento</span>
-        <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost btn-sm">Ver todas / gestionar</a>
+        <span class="muted" style="font-size:12px">Se edita desde el panel del cliente</span>
       </div>
       <div class="card-body">
         ${kbSummary}
@@ -1493,17 +1118,29 @@ dashboardRoutes.post('/admin/dashboard/:id/appointments/:apptId/cancel', async (
   )
 })
 
-// ── Configurar negocio: formulario ────────────────────────────────────────────
+// ── Configurar negocio: conexión y números ────────────────────────────────────
+//
+// Lo que quedó acá después de la migración al panel del cliente.
+//
+// Everything this form used to hold — hours, services, booking rules, deposits,
+// the knowledge base, the niche — now lives in the owner's panel, which merges
+// per section instead of rebuilding the whole settings document from a form.
+// Keeping a second editor for the same jsonb meant two shapes of the same truth
+// and a save here silently reverting what the owner had just set there.
+//
+// What the panel deliberately cannot touch stays: the bot's own WhatsApp number
+// and the owner's, because changing the first one tears down the live session
+// and needs a QR rescan — behind a token in a URL that is a mis-click away from
+// taking a business off WhatsApp.
 
 dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
   const secret = getSecret(c)
   if (!secret) return unauthorized(c)
 
   const businessId = c.req.param('id')
-  const [business, gcEmail, kbResult] = await Promise.all([
+  const [business, gcEmail] = await Promise.all([
     businessRepo.findById(businessId),
     dashRepo.getGoogleConnectedEmail(businessId),
-    knowledgeBaseService.getByBusiness(businessId),
   ])
   if (!business) return c.html('<h1>404</h1>', 404) as Response
 
@@ -1515,7 +1152,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
 
   const toasts = [
     saved
-      ? renderToast('success', 'Cambios guardados', 'La configuración quedó actualizada.', 4000)
+      ? renderToast('success', 'Cambios guardados', 'Los datos quedaron actualizados.', 4000)
       : '',
     error ? renderToast('error', 'No se pudo guardar', esc(error)) : '',
     rebind === 'pending'
@@ -1535,381 +1172,59 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       : '',
   ].join('')
 
-  const raw = business.settings as Partial<BusinessSettings>
-  const hours = (raw?.operatingHours ?? {}) as Partial<Record<DayKey, DayHours>>
-
-  const defaultHours: Record<DayKey, DayHours> = {
-    monday: { open: '09:00', close: '18:00', break: { start: '13:00', end: '14:00' } },
-    tuesday: { open: '09:00', close: '18:00', break: { start: '13:00', end: '14:00' } },
-    wednesday: { open: '09:00', close: '18:00', break: { start: '13:00', end: '14:00' } },
-    thursday: { open: '09:00', close: '18:00', break: { start: '13:00', end: '14:00' } },
-    friday: { open: '09:00', close: '18:00', break: { start: '13:00', end: '14:00' } },
-    saturday: { open: '09:00', close: '13:00' },
-    sunday: null,
-  }
-
-  const effectiveHours = Object.fromEntries(
-    DAYS.map(({ key }) => [key, key in hours ? (hours[key] ?? null) : defaultHours[key]]),
-  ) as Record<DayKey, DayHours>
-
-  // Unvalidated jsonb straight from the row. Services saved before the
-  // priceMin/priceMax split have none of the price fields, so they render as
-  // empty inputs and the owner has to re-enter them — which is the intended
-  // prompt, since there is no data migration.
-  const services = Array.isArray(raw?.services) ? (raw.services as Service[]) : []
-
-  const specialDays = Array.isArray(raw?.specialDays)
-    ? (raw.specialDays as SpecialDayRow[]).slice().sort((a, b) => a.date.localeCompare(b.date))
-    : []
-
-  const slotDuration = raw?.slotDurationMinutes ?? 30
-  const minNotice = raw?.minBookingNoticeMinutes ?? 30
-  // Unvalidated jsonb: a business saved before this field existed has no mode,
-  // and the visual default has to match the schema default.
-  const isHybrid = raw?.appointmentMode === 'hybrid'
-  const niche: Niche = raw?.niche ?? 'general'
-  const bookingMode: BookingMode = raw?.bookingMode ?? 'direct'
-  const forwardImages: boolean = raw?.forwardImages ?? false
-  const requiresDeposit: boolean = raw?.requiresDeposit ?? false
-  const depositAmount: string = raw?.depositAmount ?? ''
-  const depositMethods: DepositPaymentMethod[] = Array.isArray(raw?.depositPaymentMethods)
-    ? (raw.depositPaymentMethods as DepositPaymentMethod[])
-    : []
-  const initialServiceCount = Math.max(services.length, 1)
-  const initialSpecialDayCount = specialDays.length
-  const initialDepositMethodCount = depositMethods.length
-
-  const hoursRows = DAYS.map(({ key, label }) =>
-    renderDayRow(key, label, effectiveHours[key]),
-  ).join('')
-
-  const slotOptions = [15, 20, 30, 45, 60, 90, 120]
-    .map(
-      (v) => `<option value="${v}" ${slotDuration === v ? 'selected' : ''}>${v} minutos</option>`,
-    )
-    .join('')
-
   const body = `
     <div class="config-page">
     <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
     <div class="page-header">
-      <h1 class="page-title">Configurar — ${esc(business.name)}</h1>
+      <h1 class="page-title">Conexión — ${esc(business.name)}</h1>
     </div>
     <div class="toast-stack" role="status" aria-live="polite">${toasts}</div>
 
     <div class="config-layout">
       <nav class="config-nav">
-        <a class="config-nav-item is-active" data-section="seccion-info" href="#seccion-info">Información</a>
-        <a class="config-nav-item" data-section="seccion-horarios" href="#seccion-horarios">Horarios</a>
-        <a class="config-nav-item" data-section="seccion-servicios" href="#seccion-servicios">Servicios</a>
-        <a class="config-nav-item" data-section="seccion-citas" href="#seccion-citas">Citas y turnos</a>
-        <a class="config-nav-item" data-section="seccion-pagos" href="#seccion-pagos">Pagos</a>
-        <a class="config-nav-item" data-section="seccion-conocimiento" href="#seccion-conocimiento">Conocimiento</a>
+        <a class="config-nav-item is-active" data-section="seccion-numeros" href="#seccion-numeros">Números</a>
         <a class="config-nav-item" data-section="seccion-google" href="#seccion-google">Google Calendar</a>
         <a class="config-nav-item" data-section="seccion-peligro" href="#seccion-peligro">Zona de peligro</a>
       </nav>
 
       <div class="config-col">
 
+      ${panelHandoffSection(business, se)}
+
       <form id="config-form" class="config-form" method="post"
         action="/admin/dashboard/${bid}/configure?secret=${se}"
         onsubmit="return confirmNumberChange()">
 
-        <section id="seccion-info" class="config-section">
+        <section id="seccion-numeros" class="config-section">
           <div class="section-header">
-            <h2 class="section-title">Información del negocio</h2>
-            <p class="section-desc">Nombre, tipo de negocio, contacto y ubicación</p>
+            <h2 class="section-title">Números</h2>
+            <p class="section-desc">
+              El número por el que responde Emma y el del dueño, que la usa como asistente.
+              Todo lo demás se configura desde el panel del cliente.
+            </p>
           </div>
+
           <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="name">Nombre del negocio</label>
-              <input id="name" name="name" type="text" class="form-input"
-                value="${esc(business.name)}" required>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="niche">Tipo de negocio</label>
-              <select id="niche" name="niche" class="form-input form-select">
-                ${Object.entries(NICHE_LABELS)
-                  .map(
-                    ([v, l]) =>
-                      `<option value="${v}" ${niche === v ? 'selected' : ''}>${esc(l)}</option>`,
-                  )
-                  .join('')}
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="timezone">Zona horaria</label>
-              <select id="timezone" name="timezone" class="form-input form-select">
-                ${[
-                  ['America/Lima', 'América/Lima (Perú)'],
-                  ['America/Bogota', 'América/Bogotá (Colombia)'],
-                  ['America/Mexico_City', 'América/Ciudad de México'],
-                  ['America/Santiago', 'América/Santiago (Chile)'],
-                  ['America/Buenos_Aires', 'América/Buenos Aires'],
-                  ['America/Guayaquil', 'América/Guayaquil (Ecuador)'],
-                  ['America/Caracas', 'América/Caracas (Venezuela)'],
-                  ['America/La_Paz', 'América/La Paz (Bolivia)'],
-                ]
-                  .map(
-                    ([v, l]) =>
-                      `<option value="${v}" ${business.timezone === v ? 'selected' : ''}>${l}</option>`,
-                  )
-                  .join('')}
-              </select>
-            </div>
             <div class="form-group">
               <label class="form-label" for="whatsappNumber">Número de WhatsApp del bot</label>
-              <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
-                value="${esc(business.whatsappNumber)}" placeholder="+51987654321" required
-                data-original="${esc(business.whatsappNumber)}">
-              <p class="form-hint" style="color:#b45309">
-                Cambiar este número desconecta la sesión actual y hay que escanear un QR nuevo
-                con el teléfono del número nuevo. Las citas, conversaciones e historial NO se pierden.
+              <input type="text" id="whatsappNumber" name="whatsappNumber" class="form-input mono"
+                value="${esc(business.whatsappNumber)}" data-original="${esc(business.whatsappNumber)}">
+              <p class="form-hint">
+                Cambiarlo desconecta la sesión actual: hay que escanear un QR nuevo con el teléfono del número nuevo.
               </p>
             </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="ownerName">Nombre del dueño</label>
-              <input id="ownerName" name="ownerName" type="text" class="form-input"
-                value="${esc(business.ownerName ?? '')}" placeholder="ej. Carlos Ramos">
-            </div>
+
             <div class="form-group">
               <label class="form-label" for="ownerWhatsappNumber">WhatsApp del dueño</label>
-              <input id="ownerWhatsappNumber" name="ownerWhatsappNumber" type="text"
-                class="form-input" value="${esc(business.ownerWhatsappNumber ?? '')}"
-                placeholder="+51987654321">
-              <p class="form-hint">Diferente al número del bot</p>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="address">Dirección del negocio</label>
-              <input id="address" name="address" type="text" class="form-input"
-                value="${esc(business.address ?? '')}"
-                placeholder="ej. Av. Ejército 820, Yanahuara, Arequipa">
-              <p class="form-hint">Emma la responde cuando preguntan dónde están o cómo llegar</p>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="googleMapsUrl">Link de Google Maps</label>
-              <input id="googleMapsUrl" name="googleMapsUrl" type="url" class="form-input"
-                value="${esc(business.googleMapsUrl ?? '')}" placeholder="https://maps.app.goo.gl/...">
-              <p class="form-hint">Complementario a la dirección — Emma manda los dos juntos</p>
-            </div>
-          </div>
-        </section>
-
-        <section id="seccion-horarios" class="config-section">
-          <div class="section-header">
-            <h2 class="section-title">Horarios de atención</h2>
-            <p class="section-desc">Horario semanal, modo de atención y fechas puntuales</p>
-          </div>
-          <div class="table-wrap">
-            <table class="hours-table">
-              <thead>
-                <tr>
-                  <th>Día</th>
-                  <th>Abierto</th>
-                  <th>Apertura</th>
-                  <th>Cierre</th>
-                  <th>Break</th>
-                  <th>Inicio break</th>
-                  <th>Fin break</th>
-                </tr>
-              </thead>
-              <tbody>${hoursRows}</tbody>
-            </table>
-          </div>
-
-          <div class="subsection">
-            <h3 class="subsection-title">Modo de atención</h3>
-            <p class="subsection-desc">Qué le ofrece Emma a alguien que escribe queriendo venir</p>
-            <div class="mode-options">
-            <label class="mode-option">
-              <input type="radio" name="appointmentMode" value="appointments_only"
-                ${isHybrid ? '' : 'checked'}>
-              <span>
-                <span class="mode-option-title">Solo con cita previa</span>
-                <span class="mode-option-desc" style="display:block">
-                  Emma siempre ofrece agendar. Es el modo por defecto.
-                </span>
-              </span>
-            </label>
-            <label class="mode-option">
-              <input type="radio" name="appointmentMode" value="hybrid" ${isHybrid ? 'checked' : ''}>
-              <span>
-                <span class="mode-option-title">Presencial + citas opcionales</span>
-                <span class="mode-option-desc" style="display:block">
-                  Atienden por orden de llegada y además aceptan reservas. Emma pregunta
-                  al cliente qué prefiere en vez de asumir que quiere cita.
-                </span>
-              </span>
-            </label>
-            </div>
-          </div>
-
-          <div class="subsection">
-            <h3 class="subsection-title">Días especiales</h3>
-            <p class="subsection-desc">
-              Feriados u horarios puntuales que reemplazan el horario semanal para una fecha específica.
-            </p>
-            <div id="special-days-container">
-              ${renderSpecialDayRows(specialDays)}
-            </div>
-            <input type="hidden" name="special_count" id="special_count" value="${initialSpecialDayCount}">
-            <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addSpecialDay()">
-              + Agregar día especial
-            </button>
-          </div>
-        </section>
-
-        <section id="seccion-servicios" class="config-section">
-          <div class="section-header">
-            <h2 class="section-title">Servicios</h2>
-            <p class="section-desc">
-              La duración es opcional: si la dejás vacía, ese servicio no tiene duración propia.
-              El precio mínimo es obligatorio salvo que marques "Requiere evaluación previa".
-            </p>
-          </div>
-          <div class="svc-head">
-            <span style="flex:1">Servicio</span>
-            <span style="width:90px">Duración (min)</span>
-            <span style="width:130px">Precio mín. (S/)</span>
-            <span style="width:130px">Precio máx. (S/)</span>
-            <span style="width:32px"></span>
-          </div>
-          <div id="services-container">
-            ${renderServiceRows(services)}
-          </div>
-          <input type="hidden" name="service_count" id="service_count" value="${initialServiceCount}">
-          <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem" onclick="addService()">
-            + Agregar servicio
-          </button>
-        </section>
-
-        <section id="seccion-citas" class="config-section">
-          <div class="section-header">
-            <h2 class="section-title">Citas y turnos</h2>
-            <p class="section-desc">Cómo Emma reserva, con cuánta anticipación y qué te reenvía</p>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="bookingMode">Modo de reserva</label>
-              <select id="bookingMode" name="bookingMode" class="form-input form-select">
-                ${Object.entries(BOOKING_MODE_LABELS)
-                  .map(
-                    ([v, l]) =>
-                      `<option value="${v}" ${bookingMode === v ? 'selected' : ''}>${esc(l)}</option>`,
-                  )
-                  .join('')}
-              </select>
+              <input type="text" id="ownerWhatsappNumber" name="ownerWhatsappNumber" class="form-input mono"
+                value="${esc(business.ownerWhatsappNumber ?? '')}" placeholder="+51...">
               <p class="form-hint">
-                Con "Requiere aprobación" Emma no confirma la cita: la deja por aprobar
-                y te manda la solicitud por WhatsApp.
+                Desde este número el dueño le habla a Emma como asistente. Tiene que ser distinto al del bot.
               </p>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="slotDurationMinutes">Duración de cada turno</label>
-              <select id="slotDurationMinutes" name="slotDurationMinutes" class="form-input form-select">
-                ${slotOptions}
-              </select>
-              <p class="form-hint">Intervalo entre turnos disponibles en el calendario</p>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="minBookingNoticeMinutes">Anticipación mínima (minutos)</label>
-              <input id="minBookingNoticeMinutes" name="minBookingNoticeMinutes" type="number"
-                class="form-input" min="0" max="1440" value="${minNotice}">
-              <p class="form-hint">Mínimo tiempo entre "ahora" y el primer turno agendable (0 = sin restricción, default: 30)</p>
-            </div>
-          </div>
-          <div class="subsection">
-            <label class="check-field" for="forwardImages">
-              <input type="checkbox" id="forwardImages" name="forwardImages"
-                ${forwardImages ? 'checked' : ''}>
-              Reenviar imágenes de clientes al dueño
-            </label>
-            <p class="form-hint">
-              Emma te manda la foto por WhatsApp cuando ella misma la pidió (por ejemplo
-              un comprobante de pago) o cuando el paciente tiene una cita por aprobar.
-              Las fotos que nadie pidió no se reenvían.
-            </p>
           </div>
         </section>
-
-        <section id="seccion-pagos" class="config-section">
-          <div class="section-header">
-            <h2 class="section-title">Pagos</h2>
-            <p class="section-desc">
-              Si pedís adelanto, Emma no agenda hasta recibir la captura del pago.
-            </p>
-          </div>
-          <div class="subsection">
-            <label class="check-field" for="requiresDeposit">
-              <input type="checkbox" id="requiresDeposit" name="requiresDeposit"
-                ${requiresDeposit ? 'checked' : ''} onchange="toggleDeposit()">
-              ¿Requiere adelanto para confirmar cita?
-            </label>
-            <p class="form-hint">
-              Con esto activo, Emma le pide la captura al cliente antes de agendar y te
-              reenvía la imagen aunque el reenvío de imágenes esté desactivado.
-            </p>
-          </div>
-          <div id="deposit-fields" ${requiresDeposit ? '' : 'hidden'}>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label" for="depositAmount">Monto del adelanto</label>
-                <input id="depositAmount" name="depositAmount" type="text" class="form-input"
-                  value="${esc(depositAmount)}" placeholder="ej. S/ 20">
-                <p class="form-hint">Texto libre: "S/ 20", "el 50%", "S/ 20 por persona"</p>
-              </div>
-            </div>
-            <div class="svc-head">
-              <span style="width:150px">Método</span>
-              <span style="width:160px">Número</span>
-              <span style="flex:1">Nombre de referencia</span>
-              <span style="width:32px"></span>
-            </div>
-            <div id="deposit-methods-container">
-              ${renderDepositMethodRows(depositMethods)}
-            </div>
-            <input type="hidden" name="deposit_method_count" id="deposit_method_count"
-              value="${initialDepositMethodCount}">
-            <button type="button" class="btn btn-ghost btn-sm" style="margin-top:.5rem"
-              onclick="addDepositMethod()">
-              + Agregar método de pago
-            </button>
-          </div>
-        </section>
-
       </form>
-
-      <section id="seccion-conocimiento" class="config-section">
-        <div class="section-header">
-          <h2 class="section-title">Conocimiento del negocio</h2>
-          <p class="section-desc">
-            Qué temas puede responder Emma más allá de los datos de esta página. Se edita aparte.
-          </p>
-        </div>
-        ${
-          kbResult.ok
-            ? renderKbChecklist({
-                entries: kbResult.data,
-                serviceCount: services.length,
-                hasHours: DAYS.some(({ key }) => effectiveHours[key] !== null),
-                hasLocation: (business.address ?? '').trim() !== '',
-              })
-            : '<p class="section-desc">No pudimos cargar la base de conocimiento.</p>'
-        }
-        <div style="margin-top:20px">
-          <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost btn-sm">
-            Editar base de conocimiento →
-          </a>
-        </div>
-      </section>
 
       <section id="seccion-google" class="config-section">
         <div class="section-header">
@@ -1963,8 +1278,6 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     </div>
 
     <script>
-    let _svcCounter = ${initialServiceCount};
-
     function confirmNumberChange() {
       const el = document.getElementById('whatsappNumber');
       if (!el) return true;
@@ -1979,205 +1292,12 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
       );
     }
 
-    function toggleDay(day) {
-      const enabled = document.getElementById('day_' + day + '_enabled').checked;
-      ['open','close','break','break_start','break_end'].forEach(function(f) {
-        const el = document.getElementById('day_' + day + '_' + f);
-        if (el) el.disabled = !enabled;
-      });
-      if (!enabled) {
-        const brk = document.getElementById('day_' + day + '_break');
-        if (brk) brk.checked = false;
-        ['break_start','break_end'].forEach(function(f) {
-          const el = document.getElementById('day_' + day + '_' + f);
-          if (el) el.disabled = true;
-        });
-      }
-    }
-
-    function toggleBreak(day) {
-      const enabled = document.getElementById('day_' + day + '_break').checked;
-      ['break_start','break_end'].forEach(function(f) {
-        const el = document.getElementById('day_' + day + '_' + f);
-        if (el) el.disabled = !enabled;
-      });
-    }
-
-    function addService() {
-      const idx = _svcCounter++;
-      const row = document.createElement('div');
-      row.className = 'service-row';
-      row.id = 'service-row-' + idx;
-      row.innerHTML =
-        '<input type="text" class="form-input" name="service_' + idx + '_name" data-field="name"' +
-        ' placeholder="ej. Corte de cabello" style="flex:1" required>' +
-        '<input type="number" class="form-input" name="service_' + idx + '_duration" data-field="duration"' +
-        ' min="5" max="480" placeholder="ej. 45" style="width:90px">' +
-        '<input type="number" class="form-input" name="service_' + idx + '_price_min" data-field="price_min"' +
-        ' min="0" step="0.01" placeholder="Precio mínimo (S/)" style="width:130px">' +
-        '<input type="number" class="form-input" name="service_' + idx + '_price_max" data-field="price_max"' +
-        ' min="0" step="0.01" placeholder="Precio máximo (S/)" style="width:130px">' +
-        '<label class="service-eval"><input type="checkbox" name="service_' + idx + '_requires_evaluation"' +
-        ' data-field="requires_evaluation" onchange="toggleServiceRef(this)"> Requiere evaluación previa</label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeService(this)">✕</button>' +
-        '<div class="service-ref" data-ref-row style="display:none">' +
-        '<input type="url" class="form-input" name="service_' + idx + '_reference_url"' +
-        ' data-field="reference_url" placeholder="Link de referencia (Canva, Drive, portafolio...)">' +
-        '</div>';
-      document.getElementById('services-container').appendChild(row);
-      document.getElementById('service_count').value = _svcCounter;
-    }
-
-    // The reference link is only meaningful for evaluation-first services.
-    // Hiding keeps the value: unchecking by accident must not drop a saved link.
-    function toggleServiceRef(checkbox) {
-      const row = checkbox.closest('.service-row');
-      const ref = row.querySelector('[data-ref-row]');
-      if (ref) ref.style.display = checkbox.checked ? '' : 'none';
-    }
-
-    function removeService(btn) {
-      const row = btn.closest('.service-row');
-      if (document.querySelectorAll('#services-container .service-row').length <= 1) {
-        alert('El negocio debe tener al menos un servicio.');
-        return;
-      }
-      row.remove();
-      reindexServices();
-    }
-
-    function reindexServices() {
-      const rows = document.querySelectorAll('#services-container .service-row');
-      rows.forEach(function(row, i) {
-        row.querySelector('[data-field="name"]').name = 'service_' + i + '_name';
-        row.querySelector('[data-field="duration"]').name = 'service_' + i + '_duration';
-        row.querySelector('[data-field="price_min"]').name = 'service_' + i + '_price_min';
-        row.querySelector('[data-field="price_max"]').name = 'service_' + i + '_price_max';
-        row.querySelector('[data-field="requires_evaluation"]').name = 'service_' + i + '_requires_evaluation';
-        row.querySelector('[data-field="reference_url"]').name = 'service_' + i + '_reference_url';
-      });
-      _svcCounter = rows.length;
-      document.getElementById('service_count').value = _svcCounter;
-    }
-
-    let _depositCounter = ${initialDepositMethodCount};
-
-    function toggleDeposit() {
-      const on = document.getElementById('requiresDeposit').checked;
-      document.getElementById('deposit-fields').hidden = !on;
-    }
-
-    // 'efectivo' has no number to type. Hidden rather than removed so switching
-    // back to Yape restores whatever was already there.
-    function toggleDepositNumber(select) {
-      const row = select.closest('.deposit-row');
-      const number = row.querySelector('[data-field="number"]');
-      if (number) number.hidden = select.value === 'efectivo';
-    }
-
-    function addDepositMethod() {
-      const idx = _depositCounter++;
-      const row = document.createElement('div');
-      row.className = 'service-row deposit-row';
-      row.id = 'deposit-row-' + idx;
-      row.innerHTML =
-        '<select class="form-input form-select" name="deposit_method_' + idx + '_method"' +
-        ' data-field="method" style="width:150px" onchange="toggleDepositNumber(this)">' +
-        ${jsonForScript(
-          DEPOSIT_METHODS.map(
-            (v) => `<option value="${v}">${DEPOSIT_METHOD_LABELS[v]}</option>`,
-          ).join(''),
-        )} +
-        '</select>' +
-        '<input type="text" class="form-input" name="deposit_method_' + idx + '_number"' +
-        ' data-field="number" placeholder="ej. 987654321" style="width:160px">' +
-        '<input type="text" class="form-input" name="deposit_method_' + idx + '_label"' +
-        ' data-field="label" placeholder="Nombre de referencia (ej. Dr. Pérez)" style="flex:1">' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeDepositMethod(this)">✕</button>';
-      document.getElementById('deposit-methods-container').appendChild(row);
-      document.getElementById('deposit_method_count').value = _depositCounter;
-    }
-
-    function removeDepositMethod(btn) {
-      btn.closest('.deposit-row').remove();
-      reindexDepositMethods();
-    }
-
-    function reindexDepositMethods() {
-      const rows = document.querySelectorAll('#deposit-methods-container .deposit-row');
-      rows.forEach(function(row, i) {
-        row.querySelector('[data-field="method"]').name = 'deposit_method_' + i + '_method';
-        row.querySelector('[data-field="number"]').name = 'deposit_method_' + i + '_number';
-        row.querySelector('[data-field="label"]').name = 'deposit_method_' + i + '_label';
-      });
-      _depositCounter = rows.length;
-      document.getElementById('deposit_method_count').value = _depositCounter;
-    }
-
-    let _specialCounter = ${initialSpecialDayCount};
-
-    function addSpecialDay() {
-      const idx = _specialCounter++;
-      const row = document.createElement('div');
-      row.className = 'service-row special-row';
-      row.id = 'special-row-' + idx;
-      row.innerHTML =
-        '<input type="date" class="form-input" name="special_' + idx + '_date" data-field="date" style="width:150px">' +
-        '<input type="text" class="form-input" name="special_' + idx + '_label" data-field="label"' +
-        ' placeholder="ej. Navidad" style="flex:1">' +
-        '<label style="display:flex;align-items:center;gap:.3rem;font-size:12px;white-space:nowrap">' +
-        '<input type="checkbox" name="special_' + idx + '_closed" data-field="closed" onchange="toggleSpecialClosed(' + idx + ')"> Cerrado</label>' +
-        '<input type="time" class="time-input" name="special_' + idx + '_open" id="special_' + idx + '_open" data-field="open" value="09:00">' +
-        '<input type="time" class="time-input" name="special_' + idx + '_close" id="special_' + idx + '_close" data-field="close" value="13:00">' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="removeSpecialDay(this)">✕</button>';
-      document.getElementById('special-days-container').appendChild(row);
-      document.getElementById('special_count').value = _specialCounter;
-    }
-
-    function removeSpecialDay(btn) {
-      btn.closest('.special-row').remove();
-      reindexSpecialDays();
-    }
-
-    function reindexSpecialDays() {
-      const rows = document.querySelectorAll('#special-days-container .special-row');
-      rows.forEach(function(row, i) {
-        row.querySelector('[data-field="date"]').name = 'special_' + i + '_date';
-        row.querySelector('[data-field="label"]').name = 'special_' + i + '_label';
-        row.querySelector('[data-field="closed"]').name = 'special_' + i + '_closed';
-        row.querySelector('[data-field="closed"]').setAttribute('onchange', 'toggleSpecialClosed(' + i + ')');
-        row.querySelector('[data-field="open"]').name = 'special_' + i + '_open';
-        row.querySelector('[data-field="open"]').id = 'special_' + i + '_open';
-        row.querySelector('[data-field="close"]').name = 'special_' + i + '_close';
-        row.querySelector('[data-field="close"]').id = 'special_' + i + '_close';
-      });
-      _specialCounter = rows.length;
-      document.getElementById('special_count').value = _specialCounter;
-    }
-
-    function toggleSpecialClosed(i) {
-      const closed = document.querySelector('#special-row-' + i + ' [data-field="closed"]').checked;
-      const openEl = document.getElementById('special_' + i + '_open');
-      const closeEl = document.getElementById('special_' + i + '_close');
-      if (openEl) openEl.disabled = closed;
-      if (closeEl) closeEl.disabled = closed;
-    }
-
-    // Only toasts that opted in disappear on their own. The error and rebind
-    // ones stay until dismissed — see renderToast.
-    document.querySelectorAll('.toast[data-autoclose]').forEach(function(t) {
-      setTimeout(function() { t.remove() }, parseInt(t.getAttribute('data-autoclose'), 10));
-    });
-
-    // Scroll spy. The rootMargin band ignores the sticky topbar and the bottom
-    // half of the viewport, so the highlighted item is the section the operator
-    // is actually reading, not whatever is barely poking into view.
     (function() {
       var items = Array.prototype.slice.call(document.querySelectorAll('.config-nav-item'));
       var sections = items
-        .map(function(i) { return document.getElementById(i.getAttribute('data-section')) })
+        .map(function(it) { return document.getElementById(it.getAttribute('data-section')) })
         .filter(Boolean);
-      if (sections.length === 0 || !('IntersectionObserver' in window)) return;
+      if (!sections.length) return;
 
       var visible = {};
       var obs = new IntersectionObserver(function(entries) {
@@ -2197,7 +1317,7 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
     </script>
     </div>`
 
-  return c.html(layout(`Configurar — ${business.name}`, body, secret))
+  return c.html(layout(`Conexión — ${business.name}`, body, secret))
 })
 
 dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
@@ -2213,15 +1333,9 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
 
   const formData = await c.req.formData()
 
-  // Update basic business info
-  const name = formData.get('name')?.toString().trim() ?? ''
-  const timezone = formData.get('timezone')?.toString().trim() ?? business.timezone
-  const ownerName = formData.get('ownerName')?.toString().trim() || null
   // Stored normalized so the routing comparison in whatsapp/handler has a
   // canonical value to match against, whatever shape the operator typed.
   const ownerWhatsappNumber = normalizePhone(formData.get('ownerWhatsappNumber')?.toString())
-  const googleMapsUrl = formData.get('googleMapsUrl')?.toString().trim() || null
-  const address = formData.get('address')?.toString().trim() || null
   const whatsappNumber =
     formData.get('whatsappNumber')?.toString().trim() || business.whatsappNumber
 
@@ -2249,71 +1363,19 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     }
   }
 
-  // Validate settings BEFORE any write: a number change tears down the WhatsApp
-  // session, and we must not do that only to bail out on an unrelated form error.
-  const parsed = await parseSettingsFromForm(formData)
-  if (!parsed.ok) {
-    return configureError(parsed.errors.join(' | '))
+  if (ownerWhatsappNumber !== business.ownerWhatsappNumber) {
+    await businessRepo.update(businessId, { ownerWhatsappNumber })
   }
-
-  if (numberChanged) {
-    try {
-      await businessRepo.update(businessId, { whatsappNumber })
-    } catch (err) {
-      logger.error({ err, businessId, whatsappNumber }, 'dashboard: whatsapp number update failed')
-      return configureError('No se pudo actualizar el número. ¿Ya está registrado en otro negocio?')
-    }
-    logger.info(
-      { businessId, from: business.whatsappNumber, to: whatsappNumber },
-      'dashboard: bot whatsapp number changed by admin',
-    )
-  }
-
-  if (name && name !== business.name) {
-    await businessRepo.update(businessId, { name })
-  }
-  if (
-    timezone !== business.timezone ||
-    ownerName !== business.ownerName ||
-    ownerWhatsappNumber !== business.ownerWhatsappNumber ||
-    googleMapsUrl !== business.googleMapsUrl ||
-    address !== business.address
-  ) {
-    await businessRepo.update(businessId, {
-      timezone,
-      ownerName,
-      ownerWhatsappNumber,
-      googleMapsUrl,
-      address,
-    })
-  }
-
-  // Preserve settings the bot or an operator manages outside this form.
-  const existingRaw = business.settings as Partial<BusinessSettings>
-  const newSettings = {
-    ...parsed.data,
-    botPaused: existingRaw?.botPaused ?? null,
-    // Not rendered by the form yet — set by hand in Drizzle Studio. Without
-    // this a save would silently reset them to their schema defaults.
-    ...(existingRaw?.flowType ? { flowType: existingRaw.flowType } : {}),
-    ...(existingRaw?.collectDataFields ? { collectDataFields: existingRaw.collectDataFields } : {}),
-    ...(existingRaw?.postBooking ? { postBooking: existingRaw.postBooking } : {}),
-    // Same reasoning, one level down: the form has no active switch, so every
-    // service came back from the parse as active. Matching on the name is what
-    // is available — services have no stable id — so renaming one here does
-    // reactivate it. Accepted: this form is going away in favour of the panel,
-    // and the alternative is every save silently switching the whole catalogue
-    // back on.
-    services: parsed.data.services.map((service) => {
-      const previous = existingRaw?.services?.find((p) => p.name === service.name)
-      return previous ? { ...service, active: previous.active } : service
-    }),
-  }
-
-  await businessRepo.update(businessId, { settings: newSettings as Record<string, unknown> })
 
   if (!numberChanged) {
     return c.redirect(`/admin/dashboard/${bid}/configure?secret=${se}&saved=1`, 302)
+  }
+
+  try {
+    await businessRepo.update(businessId, { whatsappNumber })
+  } catch (err) {
+    logger.error({ err, businessId, whatsappNumber }, 'dashboard: whatsapp number update failed')
+    return configureError('No se pudo guardar el número nuevo.')
   }
 
   // The DB now points at the new number but the live socket is still logged in
@@ -2491,729 +1553,4 @@ dashboardRoutes.post('/admin/dashboard/:id/disconnect', async (c) => {
       : `/admin/dashboard/${encodeURIComponent(businessId)}`
 
   return c.redirect(`${target}?secret=${encodeURIComponent(secret)}`, 302)
-})
-
-// ── Vista: Base de conocimiento (listar + crear + editar + eliminar) ──────────
-
-function kbCategoryOptions(selected?: string): string {
-  return KB_CATEGORIES.map(
-    (cat) =>
-      `<option value="${cat}" ${selected === cat ? 'selected' : ''}>${esc(KB_CATEGORY_LABELS[cat])}</option>`,
-  ).join('')
-}
-
-function kbSendModeOptions(selected?: string): string {
-  return KB_SEND_MODES.map(
-    (mode) =>
-      `<option value="${mode}" ${selected === mode ? 'selected' : ''}>${esc(KB_SEND_MODE_LABELS[mode])}</option>`,
-  ).join('')
-}
-
-function kbAttachmentTypeOptions(selected?: string): string {
-  return KB_ATTACHMENT_TYPES.map(
-    (type) =>
-      `<option value="${type}" ${selected === type ? 'selected' : ''}>${esc(KB_ATTACHMENT_TYPE_LABELS[type])}</option>`,
-  ).join('')
-}
-
-function kbSendModeTag(mode: KbSendMode): string {
-  return `<span class="kb-tag">${esc(KB_SEND_MODE_LABELS[mode])}</span>`
-}
-
-// ── KB entry suggestions ──────────────────────────────────────────────────────
-//
-// Frontend-only templates: nothing here is stored, validated or sent anywhere.
-// They exist because an owner staring at an empty textarea writes nothing, and
-// an empty knowledge base is the single most common reason Emma has to say "no
-// tengo esa información".
-//
-// Keyed by niche because the panel is multi-tenant. A barbershop owner offered a
-// template about whether teeth whitening damages enamel learns that this panel
-// was not built for them — so the clinical set is gated to dental/salud and
-// every other niche gets its own vocabulary.
-//
-// Square brackets mark what the owner must replace. The form counts them and
-// selects the first one after inserting, since a textarea cannot render them
-// styled.
-
-interface KbSuggestion {
-  label: string
-  title: string
-  content: string
-}
-
-type KbSuggestionMap = Partial<Record<ActiveKbCategory, KbSuggestion[]>>
-
-// Payment terms and appointment rules read the same for a barbershop and a
-// dental clinic, so every niche gets these two.
-const KB_SUGGESTIONS_COMMON: KbSuggestion[] = [
-  {
-    label: 'Formas de pago',
-    title: 'Formas de pago',
-    content:
-      'Aceptamos [efectivo / Yape / Plin / transferencia]. Para confirmar tu cita se requiere un adelanto de S/ [monto]. Puedes pagar por [Yape/Plin] al [número] ([nombre de referencia]). Mándanos la captura del pago para confirmar.',
-  },
-  {
-    label: 'Citas y cancelaciones',
-    title: 'Citas y cancelaciones',
-    content:
-      'Las citas se confirman con [el local]. Llegar [10] minutos antes de la hora agendada. Cancelaciones con al menos [24] horas de anticipación. Reprogramación sin costo si se avisa a tiempo. [Menores de edad deben venir acompañados de un adulto.]',
-  },
-]
-
-const KB_EVALUATION_SUGGESTION: KbSuggestion = {
-  label: 'Consulta de evaluación',
-  title: 'Consulta de evaluación',
-  content:
-    'Antes de iniciar cualquier tratamiento, el doctor realiza una evaluación para determinar el plan adecuado. La consulta tiene un costo de S/ [monto]. [Si decides realizarte el tratamiento, el costo de la consulta se descuenta del precio total. / El costo de la consulta es independiente del tratamiento.]',
-}
-
-const KB_FAQ_BY_NICHE: Record<Niche, KbSuggestion[]> = {
-  dental: [
-    {
-      label: 'Preguntas sobre tratamientos',
-      title: 'Preguntas frecuentes',
-      content:
-        '¿Duele la limpieza dental? No, es un procedimiento indoloro.\n¿Cada cuánto debo hacerme limpieza? Cada 6 meses idealmente.\n¿El blanqueamiento daña los dientes? No, es seguro y supervisado por el doctor.\n¿Atienden niños? [Sí, desde los X años.]',
-    },
-    {
-      label: 'Primera visita',
-      title: 'Primera visita',
-      content:
-        'En tu primera cita el doctor realiza una evaluación general. Traer DNI. Si tomas algún medicamento, informar antes del tratamiento. [Cepillarse los dientes antes de venir. Si tienes miedo o ansiedad, avísanos para que el doctor tome las precauciones necesarias.]',
-    },
-    {
-      label: 'Urgencias',
-      title: 'Urgencias dentales',
-      content:
-        'Si tienes dolor severo, un diente roto, golpe en la boca o sangrado que no para, comunícate inmediatamente. Atendemos urgencias dentro del horario de atención.',
-    },
-  ],
-  salud: [
-    {
-      label: 'Preguntas sobre la atención',
-      title: 'Preguntas frecuentes',
-      content:
-        '¿Cuánto dura una sesión? [X] minutos.\n¿Necesito una orden médica? [Sí / No].\n¿Atienden por seguro? [Sí, trabajamos con X / No, solo particular].\n¿Cada cuánto debo venir a control? [Cada X meses.]',
-    },
-    {
-      label: 'Primera visita',
-      title: 'Primera visita',
-      content:
-        'En tu primera cita [el especialista] realiza una evaluación general. Traer DNI [y los exámenes previos que tengas]. Si tomas algún medicamento o tienes alguna condición de salud, informar antes de la consulta.',
-    },
-    {
-      label: 'Urgencias',
-      title: 'Urgencias',
-      content:
-        'Si presentas [dolor severo / fiebre alta / un síntoma que empeora de golpe], comunícate inmediatamente. Atendemos urgencias dentro del horario de atención.',
-    },
-  ],
-  barberia: [
-    {
-      label: 'Preguntas frecuentes',
-      title: 'Preguntas frecuentes',
-      content:
-        '¿Atienden sin cita? [Sí, pero con cita no esperas.]\n¿Cortan a niños? [Sí, desde los X años.]\n¿Cada cuánto conviene cortarse? [Cada 3 o 4 semanas para mantener la forma.]\n¿El tinte incluye el corte? [No, son servicios aparte.]',
-    },
-    {
-      label: 'Primera visita',
-      title: 'Primera visita',
-      content:
-        'Si es tu primera vez, cuéntanos qué corte buscas o trae una foto de referencia. [Llegar X minutos antes.] Si tienes alguna alergia a tintes o productos, avísanos antes.',
-    },
-  ],
-  estetica: [
-    {
-      label: 'Preguntas frecuentes',
-      title: 'Preguntas frecuentes',
-      content:
-        '¿Cuánto duran las uñas en gel? [3 a 4 semanas.]\n¿Puedo venir con trabajo de otro salón? [Sí, el retiro se cobra aparte.]\n¿El tratamiento duele? [No, es indoloro.]\n¿Atienden menores? [Sí, acompañadas de un adulto.]',
-    },
-    {
-      label: 'Primera visita',
-      title: 'Primera visita',
-      content:
-        'Cuéntanos qué servicio buscas y si tienes alguna alergia o condición en la piel o las uñas. [Llegar X minutos antes.] Si vienes con trabajo previo de otro salón, avísanos para calcular el tiempo del retiro.',
-    },
-  ],
-  general: [
-    {
-      label: 'Preguntas frecuentes',
-      title: 'Preguntas frecuentes',
-      content:
-        '¿Atienden sin cita? [Sí / No, solo con cita previa.]\n¿Cuánto dura la atención? [X minutos.]\n¿Atienden menores? [Sí, acompañados de un adulto.]\n[Agrega acá las preguntas que más te hacen por WhatsApp.]',
-    },
-  ],
-}
-
-// `promociones` deliberately has no templates: an offer is specific to the
-// business and the month, and a canned one would be worse than an empty box.
-function kbSuggestionsFor(niche: Niche): KbSuggestionMap {
-  const clinical = niche === 'dental' || niche === 'salud'
-  return {
-    politicas: clinical
-      ? [...KB_SUGGESTIONS_COMMON, KB_EVALUATION_SUGGESTION]
-      : KB_SUGGESTIONS_COMMON,
-    informacion_general: KB_FAQ_BY_NICHE[niche],
-  }
-}
-
-// `settings` is unvalidated jsonb, so an unknown or missing niche falls back to
-// the schema default instead of indexing the suggestion map with garbage.
-function nicheOf(settings: unknown): Niche {
-  const raw = (settings as Partial<BusinessSettings> | null)?.niche
-  return raw && raw in NICHE_LABELS ? (raw as Niche) : 'general'
-}
-
-// JSON destined for a <script> block. Escaping `<` is what stops a future
-// suggestion containing "</script>" from closing the tag early.
-function jsonForScript(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, '\\u003c')
-}
-
-// The create form and the edit form share every field; only the action URL and
-// the prefilled values differ. A null `entry` renders the "new entry" variant.
-function kbEntryForm(
-  businessId: string,
-  secret: string,
-  entry: KnowledgeBaseEntry | null,
-  niche: Niche,
-): string {
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-  const action = entry
-    ? `/admin/dashboard/${bid}/kb/${esc(entry.id)}?secret=${se}`
-    : `/admin/dashboard/${bid}/kb?secret=${se}`
-  const keywords = entry?.triggerKeywords?.join(', ') ?? ''
-
-  return `
-    <form method="post" action="${action}">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="title">Título</label>
-          <input id="title" name="title" type="text" class="form-input" maxlength="120"
-            value="${esc(entry?.title ?? '')}" placeholder="Nombre corto de la entrada">
-          <p class="form-hint">Si lo dejás vacío se genera con los primeros 50 caracteres del contenido.</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="category">Categoría</label>
-          <select id="category" name="category" class="form-input form-select" required
-            onchange="kbRenderSuggestions()">
-            ${kbCategoryOptions(entry?.category)}
-          </select>
-        </div>
-      </div>
-
-      <div class="form-group" id="kb-suggestions-group">
-        <p class="form-hint" id="kb-suggestions-hint" style="margin-top:0"></p>
-        <div class="kb-chips" id="kb-chips"></div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="content">Contenido</label>
-        <textarea id="content" name="content" class="form-input" rows="6" required
-          oninput="kbUpdatePlaceholderCount()"
-          placeholder="Lo que Emma debe saber">${esc(entry?.content ?? '')}</textarea>
-        <p class="form-hint" id="kb-placeholder-count" style="display:none"></p>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="attachmentType">Tipo de adjunto</label>
-          <select id="attachmentType" name="attachmentType" class="form-input form-select"
-            onchange="kbToggleAttachment()">
-            ${kbAttachmentTypeOptions(entry?.attachmentType)}
-          </select>
-        </div>
-        <div class="form-group" id="kb-attachment-url-group">
-          <label class="form-label" for="attachmentUrl">URL del adjunto</label>
-          <input id="attachmentUrl" name="attachmentUrl" type="url" class="form-input"
-            value="${esc(entry?.attachmentUrl ?? '')}" placeholder="https://...">
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="sendMode">Modo de envío</label>
-          <select id="sendMode" name="sendMode" class="form-input form-select"
-            onchange="kbToggleKeywords()">
-            ${kbSendModeOptions(entry?.sendMode)}
-          </select>
-          <p class="form-hint">
-            <strong>Siempre</strong>: entra en todas las respuestas.
-            <strong>Bajo pedido</strong>: solo si el cliente pregunta por esa categoría.
-            <strong>Por palabras clave</strong>: solo si el mensaje contiene alguna keyword.
-          </p>
-        </div>
-        <div class="form-group" id="kb-keywords-group">
-          <label class="form-label" for="triggerKeywords">Palabras clave</label>
-          <input id="triggerKeywords" name="triggerKeywords" type="text" class="form-input"
-            value="${esc(keywords)}" placeholder="estacionamiento, parqueo, cochera">
-          <p class="form-hint">Separadas por coma. Solo se usan con "Por palabras clave".</p>
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="active">Estado</label>
-          <select id="active" name="active" class="form-input form-select">
-            <option value="1" ${entry?.active !== false ? 'selected' : ''}>Activa</option>
-            <option value="0" ${entry?.active === false ? 'selected' : ''}>Desactivada</option>
-          </select>
-          <p class="form-hint">Desactivar la saca del prompt sin borrarla.</p>
-        </div>
-      </div>
-
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">${entry ? 'Guardar cambios' : 'Crear entrada'}</button>
-        <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="btn btn-ghost">Cancelar</a>
-      </div>
-    </form>
-
-    <script>
-      function kbToggleAttachment() {
-        var type = document.getElementById('attachmentType').value
-        document.getElementById('kb-attachment-url-group').style.display = type === 'none' ? 'none' : ''
-      }
-      function kbToggleKeywords() {
-        var mode = document.getElementById('sendMode').value
-        document.getElementById('kb-keywords-group').style.display = mode === 'trigger_based' ? '' : 'none'
-      }
-
-      // Templates only — nothing here is submitted. The owner can ignore them
-      // entirely and type their own text.
-      var KB_SUGGESTIONS = ${jsonForScript(kbSuggestionsFor(niche))}
-      var KB_PLACEHOLDER = /\\[[^\\]]*\\]/
-
-      function kbRenderSuggestions() {
-        var cat = document.getElementById('category').value
-        var list = KB_SUGGESTIONS[cat] || []
-        var chips = document.getElementById('kb-chips')
-        var hint = document.getElementById('kb-suggestions-hint')
-
-        chips.innerHTML = ''
-        if (list.length > 0) {
-          hint.textContent = 'Sugerencias: hacé click para rellenar el formulario. Lo que quede entre corchetes lo reemplazás vos.'
-        } else if (cat === 'promociones') {
-          hint.textContent = 'Agrega ofertas temporales, campañas o descuentos vigentes.'
-        } else {
-          hint.textContent = ''
-        }
-
-        list.forEach(function(s, i) {
-          var chip = document.createElement('button')
-          chip.type = 'button'
-          chip.className = 'suggestion-chip'
-          chip.textContent = s.label
-          chip.onclick = function() { kbApplySuggestion(cat, i, chip) }
-          chips.appendChild(chip)
-        })
-
-        // Restart the fade so switching category reads as a change, not a jump.
-        chips.classList.remove('is-in')
-        void chips.offsetWidth
-        chips.classList.add('is-in')
-      }
-
-      function kbApplySuggestion(cat, index, chip) {
-        var suggestion = (KB_SUGGESTIONS[cat] || [])[index]
-        if (!suggestion) return
-        var titleEl = document.getElementById('title')
-        var contentEl = document.getElementById('content')
-
-        var hasText = titleEl.value.trim() !== '' || contentEl.value.trim() !== ''
-        if (hasText && !confirm('¿Reemplazar el contenido actual?')) return
-
-        titleEl.value = suggestion.title
-        contentEl.value = suggestion.content
-
-        Array.prototype.forEach.call(document.querySelectorAll('.suggestion-chip'), function(c) {
-          c.classList.remove('selected')
-        })
-        chip.classList.add('selected')
-
-        kbUpdatePlaceholderCount()
-
-        // A textarea cannot render the [placeholders] styled, so instead we drop
-        // the caret on the first one already selected: the owner starts typing
-        // and it is replaced.
-        var match = KB_PLACEHOLDER.exec(contentEl.value)
-        contentEl.focus()
-        if (match) contentEl.setSelectionRange(match.index, match.index + match[0].length)
-      }
-
-      function kbUpdatePlaceholderCount() {
-        var value = document.getElementById('content').value
-        var out = document.getElementById('kb-placeholder-count')
-        var found = value.match(new RegExp(KB_PLACEHOLDER.source, 'g')) || []
-        out.style.display = found.length > 0 ? '' : 'none'
-        out.textContent = found.length === 1
-          ? '1 campo entre corchetes por completar'
-          : found.length + ' campos entre corchetes por completar'
-      }
-
-      kbToggleAttachment()
-      kbToggleKeywords()
-      kbRenderSuggestions()
-      kbUpdatePlaceholderCount()
-    </script>`
-}
-
-function kbEntryCard(businessId: string, secret: string, e: KnowledgeBaseEntry): string {
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-  const preview = e.content.length > 180 ? `${e.content.slice(0, 180)}…` : e.content
-  const attachment = e.attachmentUrl
-    ? `<a href="${esc(e.attachmentUrl)}" target="_blank" rel="noopener">${esc(KB_ATTACHMENT_TYPE_LABELS[e.attachmentType])} adjunto</a>`
-    : ''
-  const keywords =
-    e.sendMode === 'trigger_based' && e.triggerKeywords && e.triggerKeywords.length > 0
-      ? `Palabras clave: ${esc(e.triggerKeywords.join(', '))}`
-      : ''
-  const meta = [attachment, keywords].filter((s) => s !== '').join(' · ')
-
-  return `<div class="kb-card">
-    <div class="kb-card-main">
-      <div class="kb-card-title">
-        ${esc(e.title)}
-        ${kbSendModeTag(e.sendMode)}
-        ${e.active ? '' : '<span class="kb-tag">Desactivada</span>'}
-      </div>
-      <div class="kb-card-preview">${esc(preview)}</div>
-      ${meta ? `<div class="kb-card-meta">${meta}</div>` : ''}
-    </div>
-    <div class="kb-card-actions">
-      <a href="/admin/dashboard/${bid}/kb/${esc(e.id)}/edit?secret=${se}" class="btn btn-ghost btn-sm">Editar</a>
-      <form method="post" action="/admin/dashboard/${bid}/kb/${esc(e.id)}/delete?secret=${se}" style="display:inline"
-        onsubmit="return confirm('¿Eliminar esta entrada? No se puede deshacer.')">
-        <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
-      </form>
-    </div>
-  </div>`
-}
-
-dashboardRoutes.get('/admin/dashboard/:id/kb', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const businessId = c.req.param('id')
-  const business = await businessRepo.findById(businessId)
-  if (!business) return c.html('<h1>404</h1>', 404) as Response
-
-  const result = await knowledgeBaseService.getByBusiness(businessId)
-  if (!result.ok) {
-    logger.error({ err: result.error, businessId }, 'dashboard: failed to load knowledge base')
-    return c.html(
-      layout(
-        'Base de conocimiento',
-        `<div class="alert alert-error">${esc(result.error.userMessage)}</div>`,
-        secret,
-      ),
-      500,
-    ) as Response
-  }
-
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-  const saved = c.req.query('saved') === '1'
-  const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
-  const showNew = c.req.query('new') === '1'
-  const rawFilter = c.req.query('category')
-  const activeFilter = KB_CATEGORIES.find((cat) => cat === rawFilter) ?? null
-
-  const visible = activeFilter
-    ? result.data.filter((e) => e.category === activeFilter)
-    : result.data
-
-  const filterLinks = [
-    `<a href="/admin/dashboard/${bid}/kb?secret=${se}" class="kb-filter ${activeFilter ? '' : 'is-active'}">Todas (${result.data.length})</a>`,
-    ...KB_CATEGORIES.map((cat) => {
-      const count = result.data.filter((e) => e.category === cat).length
-      const cls = activeFilter === cat ? 'is-active' : ''
-      return `<a href="/admin/dashboard/${bid}/kb?secret=${se}&category=${cat}" class="kb-filter ${cls}">${esc(KB_CATEGORY_LABELS[cat])} (${count})</a>`
-    }),
-  ].join('')
-
-  const groups = KB_CATEGORIES.map((cat) => {
-    const entries = visible.filter((e) => e.category === cat)
-    if (entries.length === 0) return ''
-    const cards = entries.map((e) => kbEntryCard(businessId, secret, e)).join('')
-
-    // Entries load oldest-first and the lookup is capped, so anything past the
-    // cap in one category never reaches Emma. Say so where the operator can see
-    // it — there is no ordering lever left to work around it.
-    const activeCount = result.data.filter((e) => e.category === cat && e.active).length
-    const overflow =
-      activeCount > MAX_ENTRIES_PER_QUERY
-        ? `<div class="alert alert-warning">
-             Esta categoría tiene ${activeCount} entradas activas y Emma solo carga las
-             ${MAX_ENTRIES_PER_QUERY} más antiguas. Las ${activeCount - MAX_ENTRIES_PER_QUERY}
-             más nuevas no le llegan — desactivá las que ya no apliquen o juntá varias en una sola entrada.
-           </div>`
-        : ''
-
-    return `
-      <div class="kb-group">
-        <div class="kb-group-header">${esc(KB_CATEGORY_LABELS[cat])}</div>
-        ${overflow}
-        ${cards}
-      </div>`
-  }).join('')
-
-  // Rows filed under a retired category are excluded from everything Emma reads,
-  // but they must stay visible here: hiding them would leave the operator with
-  // undeletable rows they cannot even see. Only shown when some actually exist.
-  const retired = result.data.filter((e) =>
-    (LEGACY_KB_CATEGORIES as readonly string[]).includes(e.category),
-  )
-  const retiredGroup =
-    retired.length > 0 && !activeFilter
-      ? `<div class="kb-group">
-           <div class="kb-group-header">Categorías retiradas</div>
-           <div class="alert alert-warning">
-             Estas ${retired.length} ${retired.length === 1 ? 'entrada duplicaba' : 'entradas duplicaban'}
-             datos que ahora viven en <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>
-             (servicios, precios, ubicación, contacto). Emma ya no las lee. Revisá que el dato esté
-             en Configuración y borralas.
-           </div>
-           ${retired.map((e) => kbEntryCard(businessId, secret, e)).join('')}
-         </div>`
-      : ''
-
-  const emptyState =
-    visible.length === 0 && retiredGroup === ''
-      ? `<div class="kb-empty">${
-          activeFilter
-            ? 'No hay entradas en esta categoría.'
-            : 'Este negocio todavía no tiene entradas en su base de conocimiento.'
-        }</div>`
-      : ''
-
-  const newForm = showNew
-    ? `<div class="config-section" style="margin-bottom:32px">
-         <div class="section-header">
-           <h2 class="section-title">Nueva entrada</h2>
-           <p class="section-desc">Se guarda desactivable y podés editarla en cualquier momento</p>
-         </div>
-         ${kbEntryForm(businessId, secret, null, nicheOf(business.settings))}
-       </div>`
-    : ''
-
-  const toasts = [
-    saved ? renderToast('success', 'Cambios guardados', 'La entrada quedó actualizada.', 4000) : '',
-    error ? renderToast('error', 'No se pudo guardar', esc(error)) : '',
-  ].join('')
-
-  const body = `
-    <div class="config-page kb-page">
-    <a href="/admin/dashboard/${bid}?secret=${se}" class="back">← ${esc(business.name)}</a>
-    <div class="page-header">
-      <h1 class="page-title">Base de conocimiento</h1>
-      <div class="actions">
-        <a href="/admin/dashboard/${bid}/kb?secret=${se}&new=1" class="btn btn-primary">Nueva entrada</a>
-      </div>
-    </div>
-    <div class="toast-stack" role="status" aria-live="polite">${toasts}</div>
-    <div class="kb-banner">
-      Información complementaria que Emma comparte con los clientes. Los datos básicos
-      (servicios, precios, horarios, ubicación y contacto) ya están en
-      <a href="/admin/dashboard/${bid}/configure?secret=${se}">Configuración</a>.
-    </div>
-    ${newForm}
-    <div class="kb-filters">${filterLinks}</div>
-    ${groups}
-    ${emptyState}
-    </div>`
-
-  return c.html(layout(`Base de conocimiento — ${business.name}`, body, secret))
-})
-
-dashboardRoutes.get('/admin/dashboard/:id/kb/:kbId/edit', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const businessId = c.req.param('id')
-  const business = await businessRepo.findById(businessId)
-  if (!business) return c.html('<h1>404</h1>', 404) as Response
-
-  const result = await knowledgeBaseService.getById(businessId, c.req.param('kbId'))
-  if (!result.ok) {
-    return c.html(
-      layout('Base de conocimiento', '<p class="muted">Entrada no encontrada.</p>', secret),
-      404,
-    ) as Response
-  }
-
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-  const error = c.req.query('error') ? decodeURIComponent(c.req.query('error') ?? '') : null
-  const body = `
-    <div class="config-page kb-page">
-    <a href="/admin/dashboard/${bid}/kb?secret=${se}" class="back">← Base de conocimiento</a>
-    <div class="page-header">
-      <h1 class="page-title">Editar entrada</h1>
-    </div>
-    <div class="toast-stack" role="status" aria-live="polite">${
-      error ? renderToast('error', 'No se pudo guardar', esc(error)) : ''
-    }</div>
-    <div class="config-section">
-      ${kbEntryForm(businessId, secret, result.data, nicheOf(business.settings))}
-    </div>
-    </div>`
-
-  return c.html(layout(`Editar entrada — ${business.name}`, body, secret))
-})
-
-interface ParsedKbForm {
-  title: string | null
-  // Narrowed by the KB_CATEGORIES lookup in parseKbForm: the form can only ever
-  // produce an active category, never a retired one.
-  category: ActiveKbCategory
-  content: string
-  attachmentType: KbAttachmentType
-  attachmentUrl: string | null
-  sendMode: KbSendMode
-  triggerKeywords: string[]
-  active: boolean
-}
-
-// Parses the shared KB form. Returns a message instead of throwing so the caller
-// can redirect back with it rendered in the error banner.
-function parseKbForm(
-  formData: FormData,
-): { ok: true; data: ParsedKbForm } | { ok: false; message: string } {
-  const rawCategory = formData.get('category')?.toString() ?? ''
-  const category = KB_CATEGORIES.find((cat) => cat === rawCategory)
-  if (!category) return { ok: false, message: 'Categoría inválida.' }
-
-  const content = formData.get('content')?.toString().trim() ?? ''
-  if (content.length === 0) return { ok: false, message: 'El contenido no puede estar vacío.' }
-
-  const rawSendMode = formData.get('sendMode')?.toString() ?? 'on_request'
-  const sendMode = KB_SEND_MODES.find((mode) => mode === rawSendMode)
-  if (!sendMode) return { ok: false, message: 'Modo de envío inválido.' }
-
-  const rawAttachmentType = formData.get('attachmentType')?.toString() ?? 'none'
-  const attachmentType = KB_ATTACHMENT_TYPES.find((type) => type === rawAttachmentType)
-  if (!attachmentType) return { ok: false, message: 'Tipo de adjunto inválido.' }
-
-  const attachmentUrl = formData.get('attachmentUrl')?.toString().trim() || null
-  if (attachmentType !== 'none' && !attachmentUrl) {
-    return { ok: false, message: 'Elegiste un tipo de adjunto pero no pusiste la URL.' }
-  }
-
-  const triggerKeywords = (formData.get('triggerKeywords')?.toString() ?? '')
-    .split(',')
-    .map((k) => k.trim())
-    .filter((k) => k.length > 0)
-  if (sendMode === 'trigger_based' && triggerKeywords.length === 0) {
-    return {
-      ok: false,
-      message: 'El modo "Por palabras clave" necesita al menos una palabra clave.',
-    }
-  }
-
-  return {
-    ok: true,
-    data: {
-      title: formData.get('title')?.toString().trim() || null,
-      category,
-      content,
-      attachmentType,
-      // A stale URL left over from a previous type would otherwise keep being
-      // rendered into the prompt.
-      attachmentUrl: attachmentType === 'none' ? null : attachmentUrl,
-      sendMode,
-      triggerKeywords,
-      active: formData.get('active')?.toString() !== '0',
-    },
-  }
-}
-
-dashboardRoutes.post('/admin/dashboard/:id/kb', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const businessId = c.req.param('id')
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-
-  const business = await businessRepo.findById(businessId)
-  if (!business) return c.html('<h1>404</h1>', 404) as Response
-
-  const parsed = parseKbForm(await c.req.formData())
-  if (!parsed.ok) {
-    return c.redirect(
-      `/admin/dashboard/${bid}/kb?secret=${se}&new=1&error=${encodeURIComponent(parsed.message)}`,
-      302,
-    )
-  }
-
-  const result = await knowledgeBaseService.create({ businessId, ...parsed.data })
-  if (!result.ok) {
-    logger.error({ err: result.error, businessId }, 'dashboard: failed to create KB entry')
-    return c.redirect(
-      `/admin/dashboard/${bid}/kb?secret=${se}&new=1&error=${encodeURIComponent(result.error.userMessage)}`,
-      302,
-    )
-  }
-
-  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
-})
-
-dashboardRoutes.post('/admin/dashboard/:id/kb/:kbId', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const businessId = c.req.param('id')
-  const kbId = c.req.param('kbId')
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-
-  const parsed = parseKbForm(await c.req.formData())
-  if (!parsed.ok) {
-    return c.redirect(
-      `/admin/dashboard/${bid}/kb/${encodeURIComponent(kbId)}/edit?secret=${se}&error=${encodeURIComponent(parsed.message)}`,
-      302,
-    )
-  }
-
-  // A blank title on edit keeps the existing one instead of wiping it.
-  const { title, ...rest } = parsed.data
-  const result = await knowledgeBaseService.update(businessId, kbId, {
-    ...rest,
-    ...(title ? { title } : {}),
-  })
-  if (!result.ok) {
-    logger.error({ err: result.error, businessId, kbId }, 'dashboard: failed to update KB entry')
-    return c.redirect(
-      `/admin/dashboard/${bid}/kb?secret=${se}&error=${encodeURIComponent(result.error.userMessage)}`,
-      302,
-    )
-  }
-
-  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
-})
-
-dashboardRoutes.post('/admin/dashboard/:id/kb/:kbId/delete', async (c) => {
-  const secret = getSecret(c)
-  if (!secret) return unauthorized(c)
-
-  const businessId = c.req.param('id')
-  const kbId = c.req.param('kbId')
-  const se = encodeURIComponent(secret)
-  const bid = esc(businessId)
-
-  const result = await knowledgeBaseService.remove(businessId, kbId)
-  if (!result.ok) {
-    logger.error({ err: result.error, businessId, kbId }, 'dashboard: failed to delete KB entry')
-    return c.redirect(
-      `/admin/dashboard/${bid}/kb?secret=${se}&error=${encodeURIComponent(result.error.userMessage)}`,
-      302,
-    )
-  }
-
-  logger.warn({ businessId, kbId }, 'dashboard: knowledge base entry deleted by admin')
-  return c.redirect(`/admin/dashboard/${bid}/kb?secret=${se}&saved=1`, 302)
 })

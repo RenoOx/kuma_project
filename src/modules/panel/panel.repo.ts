@@ -516,10 +516,7 @@ const AWAITING_REPLY_AFTER_MS = 2 * 60 * 60 * 1000
  * thread came from the customer AND it is older than two hours. A thread where
  * Emma spoke last is not waiting on anybody.
  */
-export async function getOverview(
-  businessId: string,
-  exec: Executor = db,
-): Promise<PanelOverview> {
+export async function getOverview(businessId: string, exec: Executor = db): Promise<PanelOverview> {
   const cutoff = new Date(Date.now() - AWAITING_REPLY_AFTER_MS)
   const scope = and(eq(conversations.businessId, businessId), CUSTOMER_THREAD)
 

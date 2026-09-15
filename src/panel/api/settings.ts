@@ -16,10 +16,7 @@ export function getSettings(session: PanelSession): Promise<PanelSettings> {
 }
 
 /** Identity, niche and attention mode. Answers with the whole view — it writes columns too. */
-export function updateGeneral(
-  session: PanelSession,
-  patch: GeneralPatch,
-): Promise<PanelSettings> {
+export function updateGeneral(session: PanelSession, patch: GeneralPatch): Promise<PanelSettings> {
   return apiSend<PanelSettings>(session, 'PATCH', '/settings/general', patch)
 }
 

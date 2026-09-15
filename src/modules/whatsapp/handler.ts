@@ -686,7 +686,7 @@ async function relayImage(params: {
 // the LID migration, '@lid' JIDs where the real phone can live in any of:
 // senderPn (older Baileys), remoteJidAlt (newer), or participant (fallback).
 function jidToPhone(jid: string | undefined): string | null {
-  if (!jid || !jid.endsWith('@s.whatsapp.net')) return null
+  if (!jid?.endsWith('@s.whatsapp.net')) return null
   const left = jid.slice(0, jid.indexOf('@'))
   if (!/^\d+$/.test(left)) return null
   return `+${left}`
@@ -774,8 +774,9 @@ async function processMessage(
   if (env.DEMO_ADMIN_PHONE && phone === env.DEMO_ADMIN_PHONE) {
     const trimmed = text.trim()
     const demoMatch = /^#demo\s+(\w+)$/i.exec(trimmed)
-    if (demoMatch) {
-      const keyword = demoMatch[1]!.toLowerCase()
+    const demoKeyword = demoMatch?.[1]
+    if (demoKeyword) {
+      const keyword = demoKeyword.toLowerCase()
       const result = await demoService.applyDemoProfile(businessId, keyword)
       let reply: string
       if (result.ok) {

@@ -87,6 +87,19 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : DATE_FMT.format(d)
 }
 
+/**
+ * Today as YYYY-MM-DD, the shape `<input type="date">` wants.
+ *
+ * Reads the local calendar day instead of slicing an ISO string, which is in
+ * UTC and therefore the NEXT day in Lima from 7pm on.
+ */
+export function todayISO(): string {
+  const now = new Date()
+  const month = `${now.getMonth() + 1}`.padStart(2, '0')
+  const day = `${now.getDate()}`.padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }

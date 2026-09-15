@@ -3,11 +3,18 @@ import {
   approveAppointment,
   cancelAppointment,
   completeAppointment,
+  createAppointment,
   type DateRange,
   getAppointments,
   rejectAppointment,
 } from '../api/appointments.js'
-import type { AppointmentActionResult, AppointmentsResponse } from '../api/types.js'
+import { PanelApiError } from '../api/client.js'
+import type {
+  AppointmentActionResult,
+  AppointmentsResponse,
+  CreateAppointmentPayload,
+  CreateAppointmentResult,
+} from '../api/types.js'
 import { POLL_MS } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
@@ -89,4 +96,58 @@ export function useAppointmentAction() {
       void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
     },
   })
+}
+
+export interface CreateAppointmentMutation {
+  create: (payload: CreateAppointmentPayload) => void
+  saving: boolean
+  error: string | null
+}
+
+/**
+ * The owner booking someone by hand.
+ *
+ * Only the branch that actually created a row invalidates: a response full of
+ * warnings changed nothing on the server, and refetching the calendar to show
+ * the same appointments would make the modal flicker for no reason.
+ *
+ * `onCreated` carries the result so the caller can tell the two branches apart —
+ * close the modal, or show what the slot breaks.
+ */
+export function useCreateAppointment(
+  onCreated: (result: CreateAppointmentResult) => void,
+): CreateAppointmentMutation {
+  const session = useSession()
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation<CreateAppointmentResult, Error, CreateAppointmentPayload>({
+    mutationFn: (payload) => createAppointment(session, payload),
+    onSuccess: (result) => {
+      if (result.created) {
+        void queryClient.invalidateQueries({ queryKey: ['appointments', session.businessId] })
+        void queryClient.invalidateQueries({
+          queryKey: ['appointments-pending', session.businessId],
+        })
+        // Booking a phone-in contact creates the customer row, so the contacts
+        // list is stale too — and the confirmation, when the owner asked for
+        // one, lands in that customer's thread.
+        void queryClient.invalidateQueries({ queryKey: ['customers', session.businessId] })
+        void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
+      }
+      onCreated(result)
+    },
+  })
+
+  return {
+    create: (payload) => mutation.mutate(payload),
+    saving: mutation.isPending,
+    error: mutation.error ? errorText(mutation.error) : null,
+  }
+}
+
+function errorText(error: Error): string {
+  // The server's userMessage names the rule that was hit — an unknown service,
+  // a contact from another business, a phone that is not one.
+  if (error instanceof PanelApiError && error.userMessage) return error.userMessage
+  return 'No pudimos agendar la cita. Intentá de nuevo.'
 }

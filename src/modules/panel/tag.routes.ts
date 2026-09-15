@@ -4,11 +4,7 @@ import { z } from 'zod'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as panelRepo from '@/modules/panel/panel.repo.js'
 import * as tagService from '@/modules/tag/tag.service.js'
-import {
-  assignTagsSchema,
-  createTagSchema,
-  updateTagSchema,
-} from '@/modules/tag/tag.types.js'
+import { assignTagsSchema, createTagSchema, updateTagSchema } from '@/modules/tag/tag.types.js'
 import type { AppError } from '@/shared/errors.js'
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import type { Result } from '@/shared/result.js'
@@ -90,11 +86,7 @@ panelTagRoutes.put('/api/panel/:businessId/conversations/:conversationId/tags', 
 
   return respond(
     c,
-    await tagService.assign(
-      panelBusiness(c).id,
-      c.req.param('conversationId'),
-      body.data.tagIds,
-    ),
+    await tagService.assign(panelBusiness(c).id, c.req.param('conversationId'), body.data.tagIds),
   )
 })
 

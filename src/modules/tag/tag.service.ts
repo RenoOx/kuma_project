@@ -5,8 +5,8 @@ import * as panelRepo from '@/modules/panel/panel.repo.js'
 import { AppError, ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as tagRepo from './tag.repo.js'
-import { MAX_TAGS_PER_BUSINESS } from './tag.types.js'
 import type { CreateTagInput, UpdateTagInput } from './tag.types.js'
+import { MAX_TAGS_PER_BUSINESS } from './tag.types.js'
 
 function wrap(cause: unknown, code: string, logContext: Record<string, unknown>): AppError {
   return new AppError({
@@ -32,10 +32,7 @@ export async function list(businessId: string): Promise<Result<Tag[]>> {
   }
 }
 
-export async function create(
-  businessId: string,
-  input: CreateTagInput,
-): Promise<Result<Tag>> {
+export async function create(businessId: string, input: CreateTagInput): Promise<Result<Tag>> {
   try {
     const count = await tagRepo.countByBusiness(businessId)
     if (count >= MAX_TAGS_PER_BUSINESS) {

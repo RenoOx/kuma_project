@@ -21,9 +21,6 @@ export function updateKnowledge(
   return apiSend<KnowledgeEntry>(session, 'PATCH', `/knowledge/${id}`, input)
 }
 
-export function deleteKnowledge(
-  session: PanelSession,
-  id: string,
-): Promise<{ deleted: string }> {
+export function deleteKnowledge(session: PanelSession, id: string): Promise<{ deleted: string }> {
   return apiSend<{ deleted: string }>(session, 'DELETE', `/knowledge/${id}`)
 }

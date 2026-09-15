@@ -1,6 +1,6 @@
+import type { TagColor } from '../lib/constants.js'
 import { apiGet, apiSend, type PanelSession } from './client.js'
 import type { PanelTag } from './types.js'
-import type { TagColor } from '../lib/constants.js'
 
 export interface TagInput {
   name: string

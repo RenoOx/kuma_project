@@ -1,9 +1,9 @@
+import { z } from 'zod'
 import type { Business } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import { ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import { z } from 'zod'
 
 // Pure half of the settings module: the patch schemas, the merge, and the read
 // projection. Split from settings.service.ts so none of it depends on the
@@ -15,6 +15,31 @@ import { z } from 'zod'
 // break-inside-hours rules are written once, in business.settings.ts, and the
 // panel inherits them — a rule added there applies here without an edit.
 const shape = businessSettingsSchema.shape
+
+/**
+ * A field of the settings schema, made safe to appear in a PATCH.
+ *
+ * `.partial()` alone is not enough: it marks a key optional but leaves its
+ * `.default()`/`.prefault()` in place, so `parse({ bookingMode: 'direct' })`
+ * came back carrying `postBooking` with every module switched off. The merge
+ * only drops `undefined`, so saving "modo de reserva" from the panel silently
+ * turned the owner's reminders off — and saving "pagos" without touching the
+ * methods list wiped it to `[]`.
+ *
+ * Unwrapping the default makes an absent key stay absent all the way through
+ * the merge, which is the whole contract of a section patch: it changes the
+ * fields the owner edited and nothing else.
+ */
+type Unwrapped<T extends z.ZodTypeAny> =
+  T extends z.ZodDefault<infer Inner> ? Inner : T extends z.ZodPrefault<infer Inner> ? Inner : T
+
+function patchable<T extends z.ZodTypeAny>(field: T): z.ZodOptional<Unwrapped<T>> {
+  let inner = field as z.ZodTypeAny
+  while (inner.def.type === 'default' || inner.def.type === 'prefault') {
+    inner = (inner.def as unknown as { innerType: z.ZodTypeAny }).innerType
+  }
+  return inner.optional() as z.ZodOptional<Unwrapped<T>>
+}
 
 /**
  * A timezone the host's ICU data actually knows.
@@ -67,8 +92,8 @@ export const generalPatchSchema = z
     address: optionalText(300),
     googleMapsUrl: z.union([z.string().trim().url().max(500), z.literal('')]).optional(),
     timezone: timezoneSchema,
-    niche: shape.niche,
-    appointmentMode: shape.appointmentMode,
+    niche: patchable(shape.niche),
+    appointmentMode: patchable(shape.appointmentMode),
   })
   .partial()
 
@@ -84,11 +109,11 @@ export const specialDaysPatchSchema = z.object({
 
 export const bookingPatchSchema = z
   .object({
-    bookingMode: shape.bookingMode,
-    slotDurationMinutes: shape.slotDurationMinutes,
-    minBookingNoticeMinutes: shape.minBookingNoticeMinutes,
-    forwardImages: shape.forwardImages,
-    postBooking: shape.postBooking,
+    bookingMode: patchable(shape.bookingMode),
+    slotDurationMinutes: patchable(shape.slotDurationMinutes),
+    minBookingNoticeMinutes: patchable(shape.minBookingNoticeMinutes),
+    forwardImages: patchable(shape.forwardImages),
+    postBooking: patchable(shape.postBooking),
   })
   .partial()
 
@@ -125,9 +150,9 @@ export const servicesPatchSchema = z
  */
 export const paymentsPatchSchema = z
   .object({
-    requiresDeposit: shape.requiresDeposit,
-    depositAmount: shape.depositAmount,
-    depositPaymentMethods: shape.depositPaymentMethods,
+    requiresDeposit: patchable(shape.requiresDeposit),
+    depositAmount: patchable(shape.depositAmount),
+    depositPaymentMethods: patchable(shape.depositPaymentMethods),
   })
   .partial()
 
@@ -260,4 +285,3 @@ export function readSettings(business: Business): PanelSettingsView {
         ),
   }
 }
-

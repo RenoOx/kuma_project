@@ -4,11 +4,11 @@ import {
   assignTags,
   createTag,
   deleteTag,
+  getTags,
   setEmmaEnabled,
   type TagInput,
   updateTag,
 } from '../api/tags.js'
-import { getTags } from '../api/tags.js'
 import type { PanelTag } from '../api/types.js'
 import { useSession } from '../lib/session.js'
 

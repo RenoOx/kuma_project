@@ -2,7 +2,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { PanelTag } from '../../api/types.js'
 import { useTagMutation, useTags } from '../../hooks/useTags.js'
-import { MAX_TAGS, TAG_COLORS, TAG_COLOR_META, type TagColor } from '../../lib/constants.js'
+import { MAX_TAGS, TAG_COLOR_META, TAG_COLORS, type TagColor } from '../../lib/constants.js'
 import { cn } from '../../lib/utils.js'
 import { Button } from '../ui/button.js'
 import {
@@ -65,7 +65,8 @@ export function TagManager({
                   key={tag.id}
                   tag={tag}
                   onRename={(next) =>
-                    next !== tag.name && mutate({ action: 'update', id: tag.id, input: { name: next } })
+                    next !== tag.name &&
+                    mutate({ action: 'update', id: tag.id, input: { name: next } })
                   }
                   onDelete={() => mutate({ action: 'delete', id: tag.id })}
                 />

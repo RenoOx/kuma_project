@@ -55,6 +55,47 @@ export async function getOrCreate(
   }
 }
 
+/**
+ * Finds or creates the customer behind a phone the OWNER typed in.
+ *
+ * Not `getOrCreate`: that one is written for an inbound message and carries two
+ * side effects that would be lies here. It stamps `lastSeenAt` — booking someone
+ * is not that someone getting in touch — and it clears `whatsappUnreachableAt`,
+ * which would reopen sending to a number WhatsApp already told us is dead, the
+ * exact pattern that gets a line flagged.
+ *
+ * So: an existing row comes back untouched, and a new one is created with no
+ * `lastSeenAt` at all. `phone` must already be normalized by the caller.
+ */
+export async function getOrCreateManual(
+  businessId: string,
+  phone: string,
+  name?: string,
+): Promise<Result<Customer>> {
+  try {
+    const existing = await customerRepo.findByPhone(businessId, phone)
+    if (existing) return ok(existing)
+
+    return ok(
+      await customerRepo.create({
+        businessId,
+        phone,
+        name: name?.trim() || null,
+      }),
+    )
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'customer_get_or_create_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos registrar a ese contacto, intentá de nuevo.',
+        logContext: { businessId, phone },
+        cause,
+      }),
+    )
+  }
+}
+
 export async function getById(businessId: string, id: string): Promise<Result<Customer>> {
   try {
     const found = await customerRepo.findById(businessId, id)
