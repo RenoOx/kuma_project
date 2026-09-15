@@ -1,9 +1,5 @@
 import { logger } from '@/config/logger.js'
-import type {
-  Conversation,
-  ConversationQualification,
-  ConversationStatus,
-} from '@/db/schema/index.js'
+import type { Conversation, ConversationStatus } from '@/db/schema/index.js'
 import type { FlowType } from '@/modules/business/business.settings.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -171,63 +167,6 @@ export async function escalate(businessId: string, conversationId: string): Prom
   )
 }
 
-/**
- * Writes a qualification a FIXED RULE decided: a booking was filed, the thread
- * was escalated, a human took over. Always wins over the model — see
- * conversation.repo's LLM_PINNED_QUALIFICATIONS.
- */
-export async function setQualification(
-  businessId: string,
-  conversationId: string,
-  qualification: ConversationQualification,
-): Promise<Result<void>> {
-  try {
-    await conversationRepo.updateQualification(businessId, conversationId, qualification)
-    return ok(undefined)
-  } catch (cause) {
-    return err(
-      new AppError({
-        code: 'conversation_qualification_failed',
-        message: cause instanceof Error ? cause.message : 'unknown error',
-        userMessage: 'No pudimos actualizar la conversación.',
-        logContext: { businessId, conversationId, qualification },
-        cause,
-      }),
-    )
-  }
-}
-
-/**
- * Writes the qualification the MODEL read off the conversation. Yields to any
- * fixed rule already on the row.
- *
- * Never fails the caller's turn: this is a label on an inbox, and losing it is
- * not a reason to drop the reply the customer is waiting for. Failures are
- * logged and swallowed, which is why this returns void rather than a Result.
- */
-export async function applyLlmQualification(
-  businessId: string,
-  conversationId: string,
-  qualification: ConversationQualification,
-): Promise<void> {
-  try {
-    const written = await conversationRepo.updateQualificationIfNotPinned(
-      businessId,
-      conversationId,
-      qualification,
-    )
-    logger.debug(
-      { component: 'conversation.service', businessId, conversationId, qualification, written },
-      written ? 'llm qualification applied' : 'llm qualification skipped, row is pinned',
-    )
-  } catch (cause) {
-    logger.warn(
-      { component: 'conversation.service', businessId, conversationId, qualification, err: cause },
-      'llm qualification write failed, continuing',
-    )
-  }
-}
-
 async function changeStatus(
   businessId: string,
   conversationId: string,
@@ -254,35 +193,6 @@ async function changeStatus(
         message: cause instanceof Error ? cause.message : 'unknown error',
         userMessage,
         logContext: { businessId, conversationId, status },
-        cause,
-      }),
-    )
-  }
-}
-
-/**
- * A customer who had gone quiet writes again (Feature B).
- *
- * Clears both the label and the owner's lock on it. Unlike setQualification
- * this is not a rule about what the conversation IS — it is a rule about what
- * just happened, and a message arriving outranks every earlier read of a thread
- * that was silent at the time.
- */
-export async function reactivate(
-  businessId: string,
-  conversationId: string,
-): Promise<Result<void>> {
-  try {
-    await conversationRepo.updateQualification(businessId, conversationId, 'new')
-    await conversationRepo.clearQualificationLock(businessId, conversationId)
-    return ok(undefined)
-  } catch (cause) {
-    return err(
-      new AppError({
-        code: 'conversation_reactivate_failed',
-        message: cause instanceof Error ? cause.message : 'unknown error',
-        userMessage: 'No pudimos reactivar la conversación.',
-        logContext: { businessId, conversationId },
         cause,
       }),
     )

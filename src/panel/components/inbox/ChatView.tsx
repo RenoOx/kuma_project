@@ -1,26 +1,17 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react'
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage, ConversationListItem } from '../../api/types.js'
 import { useMessages } from '../../hooks/useMessages.js'
-import { useReply, useReturnToEmma, useSetQualification } from '../../hooks/useReply.js'
-import {
-  MANUAL_QUALIFICATIONS,
-  QUALIFICATION_META,
-  type Qualification,
-} from '../../lib/constants.js'
-import { cn, formatPhone } from '../../lib/utils.js'
+import { useReply, useReturnToEmma } from '../../hooks/useReply.js'
+import { formatPhone } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Button } from '../ui/button.js'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu.js'
+import { EmmaToggle } from './EmmaToggle.js'
 import { MessageBubble } from './MessageBubble.js'
-import { QualificationBadge } from './QualificationBadge.js'
 import { ReplyInput } from './ReplyInput.js'
+import { TagBadge } from './TagBadge.js'
+import { TagManager } from './TagManager.js'
+import { TagPicker } from './TagPicker.js'
 
 // How close to the bottom still counts as "reading the latest". Anything above
 // this and the owner is reading history, so we leave their scroll alone.
@@ -35,11 +26,19 @@ export function ChatView({
   ownerName: string | null
   onBack: () => void
 }): React.JSX.Element {
-  const { messages, qualification, isLoading, isError, hasEarlier, loadEarlier, isLoadingEarlier } =
-    useMessages(conversation.id)
+  const {
+    messages,
+    humanTakeoverAt,
+    emmaEnabled: emmaEnabledFromServer,
+    isLoading,
+    isError,
+    hasEarlier,
+    loadEarlier,
+    isLoadingEarlier,
+  } = useMessages(conversation.id)
   const { pending, send, retry, dismiss, isSending } = useReply(conversation.id)
   const returnMutation = useReturnToEmma(conversation.id)
-  const qualificationMutation = useSetQualification(conversation.id)
+  const [managingTags, setManagingTags] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
@@ -77,12 +76,12 @@ export function ChatView({
     if (stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [all.length])
 
-  // The badge flips the moment the owner sends, not when the server confirms:
+  // The state flips the moment the owner sends, not when the server confirms:
   // replying IS taking the conversation over, and showing the two a second
   // apart reads as a glitch.
-  const shownQualification: Qualification =
-    pending.length > 0 ? 'human_takeover' : (qualification ?? conversation.qualification)
-  const isTakenOver = shownQualification === 'human_takeover'
+  const isTakenOver =
+    pending.length > 0 || (humanTakeoverAt ?? conversation.humanTakeoverAt) !== null
+  const emmaEnabled = emmaEnabledFromServer ?? conversation.emmaEnabled
 
   return (
     // The one block that keeps the page's own fill instead of the lighter block
@@ -108,33 +107,21 @@ export function ChatView({
           <NameTags names={conversation.appointmentNames} />
         </div>
 
-        {/* The badge is the control: the owner reads the label here, so this is
-            where they reach to correct it. The two event-backed labels are not
-            in the list — see MANUAL_QUALIFICATIONS. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            disabled={qualificationMutation.isPending}
-            aria-label="Cambiar etiqueta"
-            className="rounded-full transition-opacity hover:opacity-80 disabled:opacity-50"
-          >
-            <QualificationBadge qualification={shownQualification} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Cambiar etiqueta</DropdownMenuLabel>
-            {MANUAL_QUALIFICATIONS.map((option) => (
-              <DropdownMenuItem
-                key={option}
-                onSelect={() => qualificationMutation.mutate(option)}
-                className={cn(option === shownQualification && 'font-medium')}
-              >
-                <span
-                  className={cn('size-2 rounded-full', QUALIFICATION_META[option].dotClassName)}
-                />
-                {QUALIFICATION_META[option].label}
-              </DropdownMenuItem>
+        {conversation.tags.length > 0 && (
+          <div className="hidden shrink-0 items-center gap-1 sm:flex">
+            {conversation.tags.map((tag) => (
+              <TagBadge key={tag.id} tag={tag} />
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </div>
+        )}
+
+        <TagPicker
+          conversationId={conversation.id}
+          assigned={conversation.tags}
+          onManage={() => setManagingTags(true)}
+        />
+
+        <EmmaToggle conversationId={conversation.id} enabled={emmaEnabled} />
 
         {isTakenOver && (
           <Button
@@ -184,12 +171,6 @@ export function ChatView({
         </div>
       </div>
 
-      {qualificationMutation.isError && (
-        <p className="text-destructive shrink-0 px-3 py-1.5 text-center text-xs">
-          No pudimos cambiar la etiqueta. Intentá de nuevo.
-        </p>
-      )}
-
       {returnMutation.isError && (
         <p className="text-destructive shrink-0 px-3 py-1.5 text-center text-xs">
           No pudimos devolver la conversación a Emma. Intentá de nuevo.
@@ -197,6 +178,8 @@ export function ChatView({
       )}
 
       <ReplyInput ownerName={ownerName} disabled={isSending} onSend={send} />
+
+      <TagManager open={managingTags} onClose={() => setManagingTags(false)} />
     </div>
   )
 }

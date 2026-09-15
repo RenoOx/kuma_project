@@ -2,48 +2,55 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Emma's palette — Vamvu Labs dark.
+/* Emma's palette — Vamvu Labs, crema pastel.
 
    Declared as Tailwind v4 theme variables so every token is also a utility
    class: --color-emma-accent gives bg-emma-accent, text-emma-accent and the
    rest for free, instead of a parallel set of hand-written classes.
 
-   The panel is dark end to end, the way PANEL_SPEC.md specifies it: a near
-   black page, content in bordered blocks one step lighter, cream text, Emma's
-   green for anything the owner can act on. No white surfaces anywhere — the
-   only white left in the panel is type sitting on green. */
+   Light end to end EXCEPT the nav rail, which stays near-black: it is the one
+   surface that is not content, and leaving it dark is what keeps the eye on
+   the cream page beside it. Depth comes from the 1px border and from white
+   cards sitting on cream — never from a shadow.
+
+   Warm, deliberately. Every neutral here leans brown rather than blue: the
+   muted grey is #8C8478 and not #6B7280, the border is #E8E2D9 and not a cool
+   slate. That warmth is the whole difference between this panel and a generic
+   admin template. */
+
 @theme {
-  /* Surfaces. Two steps and nothing in between: the page, and the blocks that
-     sit on it. Depth comes from the 1px border, never from a shadow. */
-  --color-emma-bg: #0a0f0d;
-  --color-emma-bg-secondary: #141a17;
+  /* Surfaces — crema pastel como fondo, blanco para cards */
+  --color-emma-bg: #faf7f2;
+  --color-emma-bg-secondary: #ffffff;
   --color-emma-sidebar: #0a0f0d;
 
-  /* One step above a block, for the surfaces shadcn raises off a card: hover
-     fills, muted backgrounds, the tab strip. */
-  --color-emma-elevated: #1c2521;
+  /* Elevated: hover fills, muted backgrounds, tab strip */
+  --color-emma-elevated: #f0ebe3;
 
   /* Brand */
   --color-emma-accent: #059669;
   --color-emma-accent-hover: #047857;
-  --color-emma-cream: #f0e6da;
+  --color-emma-cream: #faf7f2;
 
-  /* Text */
-  --color-emma-text: #f0e6da;
-  --color-emma-text-muted: #9ca3af;
+  /* Text — tonos cálidos oscuros, no gris frío */
+  --color-emma-text: #2d2a26;
+  --color-emma-text-muted: #8c8478;
   --color-emma-sidebar-text: #f0e6da;
 
-  --color-emma-border: #1f2937;
+  --color-emma-border: #e8e2d9;
 
-  /* Chat bubbles. One token per speaker, because who said it is the only thing
-     that decides the colour. The customer reuses the block surface, so only the
-     two sides that speak for the business need a token of their own. */
+  /* The rail kept its dark surface, so it cannot keep using the border above:
+     #e8e2d9 on near-black draws a bright line where the old #1f2937 drew a
+     seam. Third member of the sidebar family, alongside --color-emma-sidebar
+     and --color-emma-sidebar-text, and it exists for the same reason they do —
+     that surface does not follow the page. */
+  --color-emma-sidebar-border: #1f2937;
+
+  /* Chat bubbles */
   --color-emma-bubble-bot: #059669;
-  --color-emma-bubble-human: #f0e6da;
+  --color-emma-bubble-human: #2d2a26;
 
-  /* Qualification colors — one per conversations.qualification value.
-     They carry meaning rather than style, so they are the same seven hues the
-     spec lists, and they read on near-black as well as they did on cream. */
+  /* Qualification colors — mismos valores, ya funcionan sobre crema */
   --color-q-new: #3b82f6;
   --color-q-qualified: #10b981;
   --color-q-needs-info: #f59e0b;
@@ -56,20 +63,22 @@
 }
 
 /* shadcn's token contract, wired to the palette above.
+
    shadcn/ui components are written against a fixed set of semantic names
    (--primary, --border, --muted-foreground…). Rather than let it install its
    own neutral scale — which would leave two palettes in one panel — every one
    of its names points at an Emma color. A shadcn Button is Emma green because
    --primary IS --color-emma-accent, not because it was restyled after the fact.
 
-   Dark-only, so there is one block and no `.dark` variant to keep in sync. */
+   That indirection is what made the move from dark to cream a change to the
+   block above and nothing else: one block, and no `.dark` variant to keep in
+   sync. */
 :root {
   --radius: 0.5rem;
 
   --background: var(--color-emma-bg);
   --foreground: var(--color-emma-text);
 
-  /* Anything raised off the page background: cards, sheets, popovers, menus. */
   --card: var(--color-emma-bg-secondary);
   --card-foreground: var(--color-emma-text);
   --popover: var(--color-emma-bg-secondary);
@@ -81,13 +90,9 @@
   --secondary: var(--color-emma-elevated);
   --secondary-foreground: var(--color-emma-text);
 
-  /* A step above a block, so a muted surface still reads as a surface on a
-     near-black page instead of dissolving into it. */
   --muted: var(--color-emma-elevated);
   --muted-foreground: var(--color-emma-text-muted);
 
-  /* shadcn uses --accent for hover surfaces, not for the brand color. Naming it
-     after Emma's accent green here would tint every hover state. */
   --accent: var(--color-emma-elevated);
   --accent-foreground: var(--color-emma-text);
 
@@ -98,12 +103,27 @@
   --input: var(--color-emma-border);
   --ring: var(--color-emma-accent);
 
-  /* Recharts series, in the qualification vocabulary the panel already uses. */
   --chart-1: var(--color-emma-accent);
   --chart-2: var(--color-q-new);
   --chart-3: var(--color-q-needs-info);
   --chart-4: var(--color-q-human);
   --chart-5: var(--color-q-waiting);
+}
+
+/* The panel is light-only on purpose: it is one product surface with one look,
+   not a document that has to survive the reader's theme. Declaring the scheme
+   is what keeps native form controls — the date and time inputs in the booking
+   modal, selects, scrollbars, autofill — from rendering dark on top of it. */
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-emma-bg);
+  color: var(--color-emma-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Exposes the tokens above as utilities (bg-background, text-muted-foreground,
@@ -141,22 +161,6 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* The panel is dark-only on purpose: it is one product surface with one look,
-   not a document that has to survive the reader's theme. Declaring the scheme
-   is what keeps native form controls and scrollbars from rendering light on top
-   of it. */
-html {
-  color-scheme: dark;
-}
-
-body {
-  margin: 0;
-  background-color: var(--color-emma-bg);
-  color: var(--color-emma-text);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
-
 /* The qualification tabs scroll sideways when they do not fit, and a scrollbar
    under a row of pills reads as a broken layout rather than an affordance. The
    row stays scrollable by touch and wheel; only the bar is hidden.
@@ -180,20 +184,25 @@ body {
    v6 injects its own stylesheet and exposes the parts worth changing as CSS
    variables, so this overrides tokens rather than fighting its selectors. The
    handful of real rules below are for the button chrome, which predates the
-   variables and is still hardcoded to a light theme. */
+   variables and ships its own blue-grey — close enough to a light theme to look
+   almost right, which is exactly why it has to be set explicitly. */
 .emma-calendar {
   --fc-border-color: var(--color-emma-border);
   --fc-page-bg-color: var(--color-emma-bg-secondary);
   --fc-neutral-bg-color: var(--color-emma-bg);
   --fc-neutral-text-color: var(--color-emma-text-muted);
-  --fc-today-bg-color: rgb(5 150 105 / 0.1);
-  /* Outside business hours. On a dark grid the recess has to be darker than the
-     block it sits in, not lighter: closed hours read as the page showing
-     through the calendar. */
-  --fc-non-business-color: rgb(10 15 13 / 0.55);
+  /* Today and the slot being dragged. Both are washes of the accent, and on a
+     white grid they need a fraction of the strength they needed on black —
+     0.15 green over cream reads as a filled cell, not as a highlight. */
+  --fc-today-bg-color: rgb(5 150 105 / 0.08);
+  /* Outside business hours. A recess, so on a white grid it darkens rather than
+     lightens — the inverse of what it did on the dark theme, where closed hours
+     were the page showing through the calendar. Kept very low: closed time has
+     to read as unavailable, not as a second grid drawn on top. */
+  --fc-non-business-color: rgb(45 42 38 / 0.04);
   --fc-now-indicator-color: var(--color-q-lost);
   --fc-list-event-hover-bg-color: var(--color-emma-elevated);
-  --fc-highlight-color: rgb(5 150 105 / 0.15);
+  --fc-highlight-color: rgb(5 150 105 / 0.08);
 
   font-size: 0.85rem;
 }
@@ -205,7 +214,7 @@ body {
 }
 
 .emma-calendar .fc-button {
-  background-color: var(--color-emma-bg);
+  background-color: var(--color-emma-bg-secondary);
   border-color: var(--color-emma-border);
   color: var(--color-emma-text);
   font-size: 0.8rem;

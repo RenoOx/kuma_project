@@ -1,4 +1,3 @@
-import type { ManualQualification, Qualification } from '../lib/constants.js'
 import { apiGet, apiSend, type PanelSession } from './client.js'
 import type { ConversationListItem, MessagePage, Paged, UpdatesMarker } from './types.js'
 
@@ -14,7 +13,7 @@ export function getUpdates(session: PanelSession): Promise<UpdatesMarker> {
 }
 
 export interface ConversationQuery {
-  qualification?: Qualification
+  tagId?: string
   search?: string
   page?: number
   limit?: number
@@ -25,7 +24,7 @@ export function getConversations(
   query: ConversationQuery,
 ): Promise<Paged<ConversationListItem>> {
   return apiGet<Paged<ConversationListItem>>(session, '/conversations', {
-    ...(query.qualification ? { qualification: query.qualification } : {}),
+    ...(query.tagId ? { tagId: query.tagId } : {}),
     ...(query.search ? { search: query.search } : {}),
     page: String(query.page ?? 1),
     limit: String(query.limit ?? 20),
@@ -64,20 +63,4 @@ export function returnToEmma(
   conversationId: string,
 ): Promise<{ success: boolean }> {
   return apiSend(session, 'POST', `/conversations/${conversationId}/return-to-emma`)
-}
-
-/**
- * The owner overriding the label (Feature A).
- *
- * Only the five opinion labels are accepted; 'appointment' and 'human_takeover'
- * are records of something that happened and the API refuses them.
- */
-export function setQualification(
-  session: PanelSession,
-  conversationId: string,
-  qualification: ManualQualification,
-): Promise<{ success: boolean; qualification: Qualification }> {
-  return apiSend(session, 'PATCH', `/conversations/${conversationId}/qualification`, {
-    qualification,
-  })
 }

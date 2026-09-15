@@ -6,7 +6,6 @@ import {
   type DepositPaymentMethod,
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
-import * as conversationService from '@/modules/conversation/conversation.service.js'
 import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
@@ -55,10 +54,6 @@ const bookAppointmentArgs = z.object({
 
 const confirmPendingArgs = z.object({
   customer_name: z.string().optional(),
-})
-
-const classifyInterestArgs = z.object({
-  estado_interes: z.enum(['qualified', 'browsing', 'disengaged']),
 })
 
 const requestImageArgs = z.object({
@@ -273,28 +268,6 @@ export function groupIntoBlocks(slots: string[], slotDurationMinutes: number): A
   return blocks
 }
 
-/**
- * Fixed rule (US-02 AC5): a filed booking is the strongest signal the inbox has,
- * and it outranks whatever classify_interest said this turn. A 'pending' row
- * counts — the customer did everything asked of them, the rest is the owner's.
- *
- * Never fails the tool call: the appointment already exists, and losing its
- * inbox label is not a reason to hand the model an error it would relay.
- */
-async function markConversationBooked(context: ToolContext): Promise<void> {
-  const r = await conversationService.setQualification(
-    context.businessId,
-    context.conversationId,
-    'appointment',
-  )
-  if (!r.ok) {
-    logger.warn(
-      { conversationId: context.conversationId, code: r.error.code },
-      'could not mark conversation as appointment',
-    )
-  }
-}
-
 export async function executeTool(
   name: string,
   args: unknown,
@@ -496,8 +469,6 @@ export async function executeTool(
       const businessResult = await businessService.getById(context.businessId)
       const timezone = businessResult.ok ? businessResult.data.timezone : 'America/Lima'
 
-      await markConversationBooked(context)
-
       return {
         result: JSON.stringify({
           appointment_id: r.data.id,
@@ -569,8 +540,6 @@ export async function executeTool(
         }
       }
 
-      await markConversationBooked(context)
-
       return {
         result: JSON.stringify({
           status: 'confirmed',
@@ -625,43 +594,7 @@ export async function executeTool(
           error: r.error.code,
         }
       }
-      // Fixed rule (US-02 AC5): an escalated thread reads as 'needs_info' in the
-      // inbox no matter what the model thinks of the lead. Not fatal if it
-      // fails — the escalation itself already happened.
-      const qualified = await conversationService.setQualification(
-        context.businessId,
-        context.conversationId,
-        'needs_info',
-      )
-      if (!qualified.ok) {
-        logger.warn(
-          { conversationId: context.conversationId, code: qualified.error.code },
-          'could not mark escalated conversation as needs_info',
-        )
-      }
-
       return { result: JSON.stringify({ status: 'escalated', reason: parsed.data.reason }) }
-    }
-
-    // Panel-only bookkeeping. Deliberately the flattest branch in this file: it
-    // emits no trigger, so it cannot move the state machine, and it returns a
-    // bare ack so the model has nothing to relay to the customer.
-    if (name === 'classify_interest') {
-      const parsed = classifyInterestArgs.safeParse(args)
-      if (!parsed.success) return malformedArgs(name, parsed.error)
-
-      const interest = parsed.data.estado_interes
-      // 'browsing' is the no-op: it means the model learned nothing new, and
-      // writing 'new' back over a 'qualified' row would lose real information.
-      if (interest !== 'browsing') {
-        await conversationService.applyLlmQualification(
-          context.businessId,
-          context.conversationId,
-          interest === 'qualified' ? 'qualified' : 'lost',
-        )
-      }
-
-      return { result: JSON.stringify({ status: 'ok' }) }
     }
 
     return {

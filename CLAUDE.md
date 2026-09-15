@@ -433,31 +433,34 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 | `type` | ¿quién está del otro lado? | `conversation.service` |
 | `status` | ¿abierta, cerrada, escalada? | `conversation.service` |
 | `state` | ¿en qué paso del flujo? | SOLO `stateMachine.ts` |
-| `qualification` | ¿qué tan caliente está el lead? | ver abajo |
+| etiquetas (`tags`) | ¿cómo lo clasifica el dueño? | el dueño, desde el panel |
+| `emma_enabled` | ¿Emma responde en este chat? | el dueño, desde el panel |
+| `human_takeover_at` | ¿el dueño tomó el control? | `panel.service` / worker |
 
 `messages.sender_type` (`customer`/`bot`/`human`) **complementa** `role`, no lo
 reemplaza: `role` es el vocabulario de OpenAI y es lo que se le replica al
 modelo; `sender_type` responde lo que `role` no puede — si ese turno de
 assistant lo escribió Emma o lo tipeó el dueño desde el panel.
 
-### Quién escribe `qualification`
+### Etiquetas, no `qualification`
 
-Las reglas fijas le ganan SIEMPRE al LLM:
-- Cita agendada → `appointment` (toolExecutor + paymentVerification)
-- Emma escaló → `needs_info`
-- El dueño respondió desde el panel → `human_takeover`
-- La tool `classify_interest` → `qualified` / `lost`, y solo si la fila no está
-  ya fijada por una regla (`updateQualificationIfNotPinned`)
+La columna `conversations.qualification` está marcada `@deprecated` en el schema
+(se conserva solo para que `drizzle-kit generate` no emita un DROP). El enum fijo
+de siete valores que escribían el LLM y un worker ya no existe: lo reemplazaron
+las **etiquetas** que el dueño inventa (`tags` + `conversation_tags`), porque él
+sabe qué importa en su negocio mejor que un enum shippeado desde acá.
 
-`classify_interest` está disponible en TODOS los estados vía `withClassifier()`
-en stateMachine.ts. NO emite trigger: no puede mover la máquina de estados.
+No hay `classify_interest` ni `updateQualificationIfNotPinned`. Lo que antes se
+plegaba en ese campo se lee directo de donde vive: `human_takeover_at` para el
+control manual, `emma_enabled` para el switch por chat, y la tabla
+`appointments` para saber si el lead agendó.
 
 ### Human takeover
 
 El gate vive en `handler.ts`, después de persistir el mensaje del cliente y
 antes del gate de pausa. Guarda en BD, no llama al LLM, no envía nada, early
 return. El dueño recupera el control manualmente (US-11) o por timeout de 30
-min (worker `qualificationTransitions.ts`).
+min (worker `takeoverTimeout.ts`).
 
 ## Referencias (no cargar al inicio)
 
@@ -495,7 +498,18 @@ Al terminar la ejecución, reporta:
 - Qué queda pendiente si algo
 - Sin correr tests salvo que yo lo pida
 
-## Pendiente de implementar
-- flowType (appointments | sales) reemplazará appointmentMode
-- stateMachine.ts se creará en src/modules/conversation/
-- conversation.state se agregará como campo en la tabla conversations
+## Superficies de configuración
+
+Hay dos, y no se pisan:
+
+- **Panel del cliente** (`/panel/:businessId?token=`) — lo usa el dueño. Es el
+  dueño de la configuración operativa: horarios, días especiales, servicios,
+  pagos y adelanto, modo de reserva, recordatorios, nicho, datos del negocio y
+  base de conocimiento. Escribe por sección, mergeando sobre lo guardado
+  (`settings.merge.ts`).
+- **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
+  solo con lo que el panel no puede tocar: crear negocios, el número de WhatsApp
+  del bot y el del dueño (con el rebind del socket), vinculación por QR, session
+  guard, Google Calendar y desvincular WhatsApp. **No edita `business.settings`
+  ni la KB**: tener dos editores del mismo jsonb significaba que un guardado de
+  un lado revertía lo que el dueño acababa de configurar del otro.

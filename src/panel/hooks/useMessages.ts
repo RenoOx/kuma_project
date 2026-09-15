@@ -2,14 +2,14 @@ import { useInfiniteQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { getMessages } from '../api/conversations.js'
 import type { MessagePage, PanelMessage } from '../api/types.js'
-import type { Qualification } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
 const PAGE_SIZE = 50
 
 export interface UseMessagesResult {
   messages: PanelMessage[]
-  qualification: Qualification | undefined
+  humanTakeoverAt: string | null | undefined
+  emmaEnabled: boolean | undefined
   isLoading: boolean
   isError: boolean
   hasEarlier: boolean
@@ -49,7 +49,8 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
   return {
     messages,
     // Read off page 1, which is the only page guaranteed to be present.
-    qualification: query.data?.pages[0]?.qualification,
+    humanTakeoverAt: query.data?.pages[0]?.humanTakeoverAt,
+    emmaEnabled: query.data?.pages[0]?.emmaEnabled,
     isLoading: query.isLoading,
     isError: query.isError,
     hasEarlier: query.hasNextPage,

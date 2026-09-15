@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import type { StatsPeriod } from '../api/types.js'
 import { ActivityChart } from '../components/dashboard/ActivityChart.js'
-import { QualificationBar } from '../components/dashboard/QualificationBar.js'
+import { OverviewStats } from '../components/dashboard/OverviewStats.js'
 import { StatsCards } from '../components/dashboard/StatsCards.js'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js'
 import { useMe } from '../hooks/useMeta.js'
-import { useActivity, useQualificationBreakdown, useStats } from '../hooks/useStats.js'
+import { useActivity, useOverview, useStats } from '../hooks/useStats.js'
 import { nicheCopy } from '../lib/constants.js'
 
 const PERIODS: Array<{ value: StatsPeriod; label: string }> = [
@@ -25,7 +25,7 @@ export function DashboardPage(): React.JSX.Element {
   const copy = nicheCopy(me?.niche)
 
   const stats = useStats(period)
-  const breakdown = useQualificationBreakdown()
+  const overview = useOverview()
   const activity = useActivity(30)
 
   return (
@@ -54,12 +54,12 @@ export function DashboardPage(): React.JSX.Element {
 
         <section className="space-y-2">
           <h2 className="text-emma-text text-xs font-medium">Conversaciones por estado</h2>
-          <QualificationBar breakdown={breakdown.data} isLoading={breakdown.isLoading} />
+          <OverviewStats overview={overview.data} isLoading={overview.isLoading} />
         </section>
 
         <ActivityChart data={activity.data} isLoading={activity.isLoading} />
 
-        {(stats.isError || breakdown.isError || activity.isError) && (
+        {(stats.isError || overview.isError || activity.isError) && (
           <p className="text-destructive text-xs">
             Algunas métricas no cargaron. Se reintenta solo en unos segundos.
           </p>

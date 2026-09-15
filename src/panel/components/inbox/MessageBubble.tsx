@@ -37,8 +37,7 @@ export function MessageBubble({
       <div
         className={cn(
           'max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap md:max-w-[70%]',
-          fromCustomer &&
-            'bg-emma-bg-secondary text-emma-text rounded-bl-sm border border-emma-border',
+          fromCustomer && 'bg-emma-elevated text-emma-text rounded-bl-sm border border-emma-border',
           !fromCustomer && !pending && !fromOwner && 'bg-emma-bubble-bot rounded-br-sm text-white',
           !fromCustomer &&
             !pending &&

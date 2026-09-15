@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { CustomerListItem } from '../../api/types.js'
 import { useCustomers } from '../../hooks/useCustomers.js'
 import { formatPhone, timeAgo } from '../../lib/utils.js'
@@ -14,10 +14,21 @@ const PAGE_SIZE = 20
 export function CustomerList({
   contactsLabel,
   onSelect,
+  /**
+   * False when the list is embedded in a tab, which already has a heading.
+   * Two <h1>s on one screen is one too many, and the tab label says the same
+   * thing the heading would.
+   */
+  showHeading = true,
 }: {
   contactsLabel: string
   onSelect: (customerId: string) => void
+  showHeading?: boolean
 }): React.JSX.Element {
+  // Unique per mount: embedding this beside the inbox's own search box would
+  // otherwise put two elements with the same id in one document, and a click on
+  // the label would focus the wrong one.
+  const searchId = useId()
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -37,9 +48,13 @@ export function CustomerList({
   return (
     <div className="bg-emma-bg-secondary border-border flex h-full min-h-0 flex-col overflow-hidden rounded-xl border">
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <h1 className="text-base font-semibold text-emma-text">{contactsLabel}</h1>
+        {showHeading ? (
+          <h1 className="text-base font-semibold text-emma-text">{contactsLabel}</h1>
+        ) : (
+          <span className="sr-only">{contactsLabel}</span>
+        )}
         <div className="relative w-full sm:w-64">
-          <label htmlFor="customers-search" className="sr-only">
+          <label htmlFor={searchId} className="sr-only">
             Buscar por nombre o teléfono
           </label>
           <Search
@@ -48,7 +63,7 @@ export function CustomerList({
             className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 z-10 -translate-y-1/2"
           />
           <Input
-            id="customers-search"
+            id={searchId}
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}

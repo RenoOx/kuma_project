@@ -26,7 +26,7 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
       sent.push({ jid, text })
     },
     async sendImage(jid, image, caption) {
-      sent.push({ jid, text: '[image ' + image.length + 'b] ' + (caption || '') })
+      sent.push({ jid, text: `[image ${image.length}b] ${caption || ''}` })
     },
     onMessage() {
       // noop
@@ -95,6 +95,7 @@ async function main(): Promise<void> {
           priceMin: 30,
           priceMax: 30,
           requiresEvaluation: false,
+          active: true,
         },
         {
           name: 'barba',
@@ -102,6 +103,7 @@ async function main(): Promise<void> {
           priceMin: 20,
           priceMax: 20,
           requiresEvaluation: false,
+          active: true,
         },
       ],
     })

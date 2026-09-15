@@ -75,3 +75,67 @@ export function deriveTitle(content: string): string {
   const flat = content.replace(/\s+/g, ' ').trim()
   return flat.length <= KB_TITLE_MAX_LENGTH ? flat : flat.slice(0, KB_TITLE_MAX_LENGTH).trimEnd()
 }
+
+// ── Write-side request schemas ───────────────────────────────────────────────
+//
+// Shared by the admin API and the owner's panel. They live here rather than
+// next to either set of routes because both write the same table under the same
+// rules: a second copy would be a second place for the attachment and keyword
+// rules to drift.
+
+// An attachment type other than 'none' is meaningless without a URL, and a URL
+// is meaningless without a type. Rejected up front rather than stored half-set.
+function hasCoherentAttachment(v: {
+  attachmentType?: KbAttachmentType
+  attachmentUrl?: string | null
+}): boolean {
+  if (v.attachmentType === undefined) return true
+  return v.attachmentType === 'none' ? !v.attachmentUrl : Boolean(v.attachmentUrl)
+}
+
+const attachmentRefinement = {
+  message:
+    'attachmentUrl is required when attachmentType is not "none", and must be omitted when it is',
+  path: ['attachmentUrl'],
+}
+
+const triggerKeywordsRefinement = {
+  message: 'triggerKeywords is required when sendMode is "trigger_based"',
+  path: ['triggerKeywords'],
+}
+
+function hasKeywordsWhenTriggerBased(v: {
+  sendMode?: KbSendMode
+  triggerKeywords?: string[] | null
+}): boolean {
+  return v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0
+}
+
+const kbFields = {
+  title: z.string().min(1).max(120).optional(),
+  content: z.string().min(1),
+  category: kbCategorySchema,
+  attachmentType: kbAttachmentTypeSchema.optional(),
+  attachmentUrl: z.string().url().nullable().optional(),
+  sendMode: kbSendModeSchema.optional(),
+  triggerKeywords: z.array(z.string().min(1)).nullable().optional(),
+  active: z.boolean().optional(),
+}
+
+export const createKbBodySchema = z
+  .object(kbFields)
+  .refine(hasCoherentAttachment, attachmentRefinement)
+  .refine(hasKeywordsWhenTriggerBased, triggerKeywordsRefinement)
+
+export const patchKbBodySchema = z
+  .object({
+    ...kbFields,
+    content: kbFields.content.optional(),
+    category: kbFields.category.optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
+  .refine(hasCoherentAttachment, attachmentRefinement)
+  .refine(hasKeywordsWhenTriggerBased, triggerKeywordsRefinement)
+
+export type CreateKbBody = z.infer<typeof createKbBodySchema>
+export type PatchKbBody = z.infer<typeof patchKbBodySchema>

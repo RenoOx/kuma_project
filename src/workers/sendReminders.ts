@@ -2,6 +2,7 @@ import { logger } from '@/config/logger.js'
 import type { Appointment } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
+import { remindersExplicitlyDisabled } from '@/modules/business/business.settings.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import { customerJid } from '@/modules/whatsapp/customerJid.js'
@@ -29,8 +30,11 @@ export interface ReminderRunResult {
  *   at the flag before touching WhatsApp, and the window expires on its own.
  * - `retryable`: something transient (WhatsApp down, DB blip). Counts an
  *   attempt against the cap below.
+ * - `disabled`: the business switched reminders off. Nothing was sent and
+ *   nothing is wrong, so it is neither an error nor a retry — the row is left
+ *   unmarked and the window simply expires.
  */
-type DispatchOutcome = 'sent' | 'unreachable' | 'retryable'
+type DispatchOutcome = 'sent' | 'unreachable' | 'retryable' | 'disabled'
 
 const HOUR_MS = 60 * 60 * 1000
 
@@ -117,6 +121,15 @@ async function dispatchReminder(appt: Appointment, kind: '24h' | '2h'): Promise<
     return 'retryable'
   }
   const business = businessResult.data
+
+  // The owner's reminder switch (panel > Configuración > Reservas y avisos).
+  // Checked here rather than in the query above so the decision sits next to
+  // the send it prevents. Explicit opt-out only — see
+  // remindersExplicitlyDisabled for why an unset value still sends.
+  if (remindersExplicitlyDisabled(business.settings)) {
+    log.info('reminder skipped: business turned automatic reminders off')
+    return 'disabled'
+  }
 
   const customer = await customerRepo.findById(appt.businessId, appt.customerId)
   if (!customer) {
@@ -272,6 +285,14 @@ async function runDueReminders(): Promise<ReminderRunResult> {
     if (outcome === 'retryable') {
       recordAttempt(item.appt.id, item.kind, Date.now())
       errors++
+      continue
+    }
+
+    if (outcome === 'disabled') {
+      // Not an error and not a retry: the business asked for no reminders. The
+      // row stays unmarked so turning the switch back on inside the window
+      // still lets this one go out.
+      skipped++
       continue
     }
 

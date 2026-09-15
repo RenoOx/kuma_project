@@ -19,13 +19,16 @@ import {
   type Appointment,
   type AppointmentStatus,
   appointments,
-  type ConversationQualification,
   type Customer,
   conversations,
+  conversationTags,
   customers,
   messages,
+  type Tag,
+  tags as tagsTable,
 } from '@/db/schema/index.js'
 import { toPanelDisplay } from '@/modules/message/messageDisplay.js'
+import * as tagRepo from '@/modules/tag/tag.repo.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
 
 // Every query in this file filters on business_id, without exception — the
@@ -105,15 +108,20 @@ export interface ConversationListItem {
   /** Names this number has booked under, newest booking first. See `appointmentNamesByCustomer`. */
   appointmentNames: string[]
   phone: string
-  qualification: ConversationQualification
+  /** The owner's own labels on this thread. Empty for an unlabelled conversation. */
+  tags: Tag[]
   status: string
   lastMessageAt: string | null
   lastMessagePreview: string
+  /** Non-null while a human holds the thread; the inbox badges it. */
   humanTakeoverAt: string | null
+  /** False when the owner switched Emma off for this chat specifically. */
+  emmaEnabled: boolean
 }
 
 export interface ConversationFilters {
-  qualification?: ConversationQualification
+  /** One of the owner's labels. Ids, not names, so renaming a label keeps the filter working. */
+  tagId?: string
   search?: string
   page: number
   limit: number
@@ -125,8 +133,22 @@ export async function listConversations(
   exec: Executor = db,
 ): Promise<Page<ConversationListItem>> {
   const clauses = [eq(conversations.businessId, businessId), CUSTOMER_THREAD]
-  if (filters.qualification) {
-    clauses.push(eq(conversations.qualification, filters.qualification))
+  if (filters.tagId) {
+    // Expressed as a subquery rather than a join so the row count stays one per
+    // conversation: a thread carrying three labels must not appear three times
+    // in the page, and `count()` below has to agree with what the list shows.
+    clauses.push(
+      inArray(
+        conversations.id,
+        exec
+          .select({ id: conversationTags.conversationId })
+          .from(conversationTags)
+          .innerJoin(tagsTable, eq(conversationTags.tagId, tagsTable.id))
+          .where(
+            and(eq(conversationTags.tagId, filters.tagId), eq(tagsTable.businessId, businessId)),
+          ),
+      ),
+    )
   }
   if (filters.search) {
     // Phone or a name the number has booked under — the two things the list
@@ -147,10 +169,10 @@ export async function listConversations(
         customerId: conversations.customerId,
         name: customers.name,
         phone: customers.phone,
-        qualification: conversations.qualification,
         status: conversations.status,
         lastMessageAt: conversations.lastMessageAt,
         humanTakeoverAt: conversations.humanTakeoverAt,
+        emmaEnabled: conversations.emmaEnabled,
       })
       .from(conversations)
       .leftJoin(customers, eq(conversations.customerId, customers.id))
@@ -165,7 +187,7 @@ export async function listConversations(
       .where(where),
   ])
 
-  const [previews, names] = await Promise.all([
+  const [previews, names, tagRows] = await Promise.all([
     lastMessagePreviews(
       businessId,
       rows.map((r) => r.id),
@@ -176,7 +198,21 @@ export async function listConversations(
       rows.flatMap((r) => (r.customerId === null ? [] : [r.customerId])),
       exec,
     ),
+    // One query for the whole page, same as the two above — twenty rows must
+    // not become twenty round trips to render one screen.
+    tagRepo.findForConversations(
+      businessId,
+      rows.map((r) => r.id),
+      exec,
+    ),
   ])
+
+  const tagsByConversation = new Map<string, Tag[]>()
+  for (const row of tagRows) {
+    const list = tagsByConversation.get(row.conversationId)
+    if (list) list.push(row.tag)
+    else tagsByConversation.set(row.conversationId, [row.tag])
+  }
 
   return {
     data: rows.map((r) => ({
@@ -185,11 +221,12 @@ export async function listConversations(
       customerName: formatPersonName(r.name),
       appointmentNames: r.customerId === null ? [] : (names.get(r.customerId) ?? []),
       phone: r.phone ?? '',
-      qualification: r.qualification,
+      tags: tagsByConversation.get(r.id) ?? [],
       status: r.status,
       lastMessageAt: r.lastMessageAt?.toISOString() ?? null,
       lastMessagePreview: previews.get(r.id) ?? '',
       humanTakeoverAt: r.humanTakeoverAt?.toISOString() ?? null,
+      emmaEnabled: r.emmaEnabled,
     })),
     total: Number(totalRow?.n ?? 0),
     page: filters.page,
@@ -312,13 +349,15 @@ export async function findConversation(
 ): Promise<{
   id: string
   customerId: string | null
-  qualification: ConversationQualification
+  humanTakeoverAt: Date | null
+  emmaEnabled: boolean
 } | null> {
   const [row] = await exec
     .select({
       id: conversations.id,
       customerId: conversations.customerId,
-      qualification: conversations.qualification,
+      humanTakeoverAt: conversations.humanTakeoverAt,
+      emmaEnabled: conversations.emmaEnabled,
     })
     .from(conversations)
     .where(and(eq(conversations.businessId, businessId), eq(conversations.id, conversationId)))
@@ -452,33 +491,84 @@ function readScalar(result: unknown, column: string): unknown {
   return null
 }
 
-export type QualificationBreakdown = Record<ConversationQualification, number>
+export interface PanelOverview {
+  /** Threads still open, owner threads excluded. */
+  openConversations: number
+  /** Bookings that have not happened yet and are not cancelled. */
+  upcomingAppointments: number
+  /** Threads a human is currently holding. */
+  handledByOwner: number
+  /** The customer spoke last and nobody answered for over two hours. */
+  awaitingReply: number
+}
 
-export async function getQualificationBreakdown(
-  businessId: string,
-  exec: Executor = db,
-): Promise<QualificationBreakdown> {
-  const rows = await exec
-    .select({ qualification: conversations.qualification, n: count() })
-    .from(conversations)
-    .where(and(eq(conversations.businessId, businessId), CUSTOMER_THREAD))
-    .groupBy(conversations.qualification)
+const AWAITING_REPLY_AFTER_MS = 2 * 60 * 60 * 1000
 
-  // Every key present at zero rather than absent: the dashboard renders a tile
-  // per state, and a missing key would collapse the row's layout.
-  const breakdown: QualificationBreakdown = {
-    new: 0,
-    qualified: 0,
-    needs_info: 0,
-    appointment: 0,
-    waiting: 0,
-    lost: 0,
-    human_takeover: 0,
+/**
+ * The dashboard's headline numbers.
+ *
+ * Facts the database already knows, rather than a read of how warm each lead
+ * is: nothing here depends on anyone having labelled anything, so it has real
+ * numbers on day one and for a business that never creates a single tag. That
+ * is the whole reason it replaced the qualification breakdown.
+ *
+ * `awaitingReply` is the one worth stating precisely: the last message in the
+ * thread came from the customer AND it is older than two hours. A thread where
+ * Emma spoke last is not waiting on anybody.
+ */
+export async function getOverview(businessId: string, exec: Executor = db): Promise<PanelOverview> {
+  const cutoff = new Date(Date.now() - AWAITING_REPLY_AFTER_MS)
+  const scope = and(eq(conversations.businessId, businessId), CUSTOMER_THREAD)
+
+  const [[open], [upcoming], [handled], [awaiting]] = await Promise.all([
+    exec
+      .select({ n: count() })
+      .from(conversations)
+      .where(and(scope, eq(conversations.status, 'open'))),
+    exec
+      .select({ n: count() })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.businessId, businessId),
+          gte(appointments.scheduledAt, new Date()),
+          inArray(appointments.status, ['pending', 'scheduled', 'confirmed']),
+        ),
+      ),
+    exec
+      .select({ n: count() })
+      .from(conversations)
+      .where(and(scope, isNotNull(conversations.humanTakeoverAt))),
+    exec
+      .select({ n: count() })
+      .from(conversations)
+      .where(
+        and(
+          scope,
+          lt(conversations.lastMessageAt, cutoff),
+          // The newest message in this thread was written by the customer.
+          exists(
+            exec
+              .select({ one: sql`1` })
+              .from(messages)
+              .where(
+                and(
+                  eq(messages.conversationId, conversations.id),
+                  eq(messages.senderType, 'customer'),
+                  eq(messages.createdAt, conversations.lastMessageAt),
+                ),
+              ),
+          ),
+        ),
+      ),
+  ])
+
+  return {
+    openConversations: Number(open?.n ?? 0),
+    upcomingAppointments: Number(upcoming?.n ?? 0),
+    handledByOwner: Number(handled?.n ?? 0),
+    awaitingReply: Number(awaiting?.n ?? 0),
   }
-  for (const row of rows) {
-    breakdown[row.qualification] = Number(row.n)
-  }
-  return breakdown
 }
 
 export interface ActivityPoint {
@@ -734,7 +824,6 @@ export interface CustomerDetail {
   }>
   conversations: Array<{
     id: string
-    qualification: ConversationQualification
     status: string
     lastMessageAt: string | null
   }>
@@ -761,7 +850,6 @@ export async function getCustomerDetail(
     exec
       .select({
         id: conversations.id,
-        qualification: conversations.qualification,
         status: conversations.status,
         lastMessageAt: conversations.lastMessageAt,
       })
@@ -786,7 +874,6 @@ export async function getCustomerDetail(
     })),
     conversations: convs.map((c) => ({
       id: c.id,
-      qualification: c.qualification,
       status: c.status,
       lastMessageAt: c.lastMessageAt?.toISOString() ?? null,
     })),

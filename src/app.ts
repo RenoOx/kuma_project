@@ -1,25 +1,28 @@
-import { type Context, Hono } from "hono";
-import qrcode from "qrcode";
-import { env } from "./config/env.js";
-import { logger } from "./config/logger.js";
-import { adminRoutes } from "./modules/admin/admin.routes.js";
-import { dashboardRoutes } from "./modules/admin/dashboard.routes.js";
-import * as businessRepo from "./modules/business/business.repo.js";
-import { googleAuthRoutes } from "./modules/google/auth.routes.js";
-import { panelRoutes } from "./modules/panel/panel.routes.js";
-import { panelStaticRoutes } from "./modules/panel/panelStatic.js";
+import { type Context, Hono } from 'hono'
+import qrcode from 'qrcode'
+import { env } from './config/env.js'
+import { logger } from './config/logger.js'
+import { adminRoutes } from './modules/admin/admin.routes.js'
+import { dashboardRoutes } from './modules/admin/dashboard.routes.js'
+import * as businessRepo from './modules/business/business.repo.js'
+import { googleAuthRoutes } from './modules/google/auth.routes.js'
+import { panelKnowledgeRoutes } from './modules/panel/knowledge.routes.js'
+import { panelRoutes } from './modules/panel/panel.routes.js'
+import { panelStaticRoutes } from './modules/panel/panelStatic.js'
+import { panelSettingsRoutes } from './modules/panel/settings.routes.js'
+import { panelTagRoutes } from './modules/panel/tag.routes.js'
 import {
   getClient,
   getConnectionState,
   storePairingCode,
-} from "./modules/whatsapp/clientRegistry.js";
-import { summarize } from "./modules/whatsapp/healthMonitor.js";
-import * as sessionGuard from "./modules/whatsapp/sessionGuard.service.js";
-import { SessionGuardError } from "./shared/errors.js";
+} from './modules/whatsapp/clientRegistry.js'
+import { summarize } from './modules/whatsapp/healthMonitor.js'
+import * as sessionGuard from './modules/whatsapp/sessionGuard.service.js'
+import { SessionGuardError } from './shared/errors.js'
 
-const VERSION = "0.1.0";
+const VERSION = '0.1.0'
 
-export const app = new Hono();
+export const app = new Hono()
 
 // Always 200, even with every WhatsApp number offline. This is deliberate: a
 // failing healthcheck makes Railway restart the container, and a restart is a
@@ -30,61 +33,59 @@ export const app = new Hono();
 // The whatsapp block is an aggregate on purpose. This endpoint is
 // unauthenticated, so it must not enumerate which businesses exist, and it must
 // never carry a QR or a pairing code.
-app.get("/health", (c) => {
+app.get('/health', (c) => {
   return c.json({
-    status: "ok",
+    status: 'ok',
     timestamp: new Date().toISOString(),
     version: VERSION,
     whatsapp: summarize(),
-  });
-});
+  })
+})
 
-app.route("/", googleAuthRoutes);
+app.route('/', googleAuthRoutes)
 
 const STATUS_LABEL: Record<string, string> = {
-  connecting: "⏳ Conectando",
-  qr_pending: "📱 Escanear QR",
-  connected: "✅ Conectado",
-  logged_out: "❌ Sesión cerrada",
-};
+  connecting: '⏳ Conectando',
+  qr_pending: '📱 Escanear QR',
+  connected: '✅ Conectado',
+  logged_out: '❌ Sesión cerrada',
+}
 
-app.get("/admin/whatsapp/qr", async (c) => {
+app.get('/admin/whatsapp/qr', async (c) => {
   if (!env.ADMIN_SECRET) {
-    return c.html("<h1>501 — ADMIN_SECRET not configured</h1>", 501);
+    return c.html('<h1>501 — ADMIN_SECRET not configured</h1>', 501)
   }
-  const secret = c.req.query("secret");
+  const secret = c.req.query('secret')
   if (secret !== env.ADMIN_SECRET) {
-    return c.html("<h1>401 — Unauthorized</h1>", 401);
+    return c.html('<h1>401 — Unauthorized</h1>', 401)
   }
 
-  const businessId = c.req.query("businessId");
+  const businessId = c.req.query('businessId')
 
   // No businessId → index with all businesses and their connection status
   if (!businessId) {
-    const all = await businessRepo.findAll();
+    const all = await businessRepo.findAll()
     if (all.length === 0) {
       return c.html(
         renderPage(
-          "Sin negocios",
-          "<p>No hay negocios registrados. Creá uno con la API admin.</p>",
+          'Sin negocios',
+          '<p>No hay negocios registrados. Creá uno con la API admin.</p>',
         ),
         200,
-      );
+      )
     }
     const rows = all
       .map((b) => {
-        const state = getConnectionState(b.id);
-        const label = state
-          ? (STATUS_LABEL[state.status] ?? state.status)
-          : "⚫ Sin iniciar";
-        const href = `/admin/whatsapp/qr?secret=${encodeURIComponent(secret ?? "")}&businessId=${b.id}`;
+        const state = getConnectionState(b.id)
+        const label = state ? (STATUS_LABEL[state.status] ?? state.status) : '⚫ Sin iniciar'
+        const href = `/admin/whatsapp/qr?secret=${encodeURIComponent(secret ?? '')}&businessId=${b.id}`
         return `<tr>
           <td style="padding:0.5rem 1rem;text-align:left"><a href="${href}">${b.name}</a></td>
           <td style="padding:0.5rem 1rem;color:#555">${b.whatsappNumber}</td>
           <td style="padding:0.5rem 1rem">${label}</td>
-        </tr>`;
+        </tr>`
       })
-      .join("");
+      .join('')
     const body = `<table style="margin:1rem auto;border-collapse:collapse">
       <thead><tr style="border-bottom:1px solid #ccc">
         <th style="padding:0.5rem 1rem;text-align:left">Negocio</th>
@@ -92,12 +93,12 @@ app.get("/admin/whatsapp/qr", async (c) => {
         <th style="padding:0.5rem 1rem">Estado</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
-    return c.html(renderPage("Negocios", body, 15), 200);
+    </table>`
+    return c.html(renderPage('Negocios', body, 15), 200)
   }
 
   // businessId provided → show QR for that business
-  const state = getConnectionState(businessId);
+  const state = getConnectionState(businessId)
 
   // "No state" is now a normal condition: creating a business no longer boots a
   // socket, so a business that has never been linked lands here. Point at the
@@ -106,142 +107,133 @@ app.get("/admin/whatsapp/qr", async (c) => {
   if (!state) {
     return c.html(
       renderPage(
-        "Sin iniciar",
+        'Sin iniciar',
         `<p>Este negocio todavía no inició sesión de WhatsApp.</p>
          <p style="margin-top:1rem">Andá al panel y usá el botón <strong>Conectar</strong> del negocio para generar el QR.</p>
-         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? "")}">← Ir al panel</a></p>`,
+         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? '')}">← Ir al panel</a></p>`,
       ),
       200,
-    );
+    )
   }
 
-  if (state.status === "logged_out") {
+  if (state.status === 'logged_out') {
     return c.html(
       renderPage(
-        "Sesión cerrada",
+        'Sesión cerrada',
         `<p>La sesión de WhatsApp está cerrada.</p>
          <p style="margin-top:1rem">Usá el botón <strong>Conectar</strong> del panel para reintentar la vinculación.</p>
-         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? "")}">← Ir al panel</a></p>`,
+         <p style="margin-top:1.5rem"><a href="/admin/dashboard?secret=${encodeURIComponent(secret ?? '')}">← Ir al panel</a></p>`,
       ),
       200,
-    );
+    )
   }
 
-  if (state.status === "connected") {
+  if (state.status === 'connected') {
     return c.html(
-      renderPage(
-        "Conectado",
-        '<p style="color:green;font-size:1.5rem">✅ WhatsApp conectado</p>',
-      ),
+      renderPage('Conectado', '<p style="color:green;font-size:1.5rem">✅ WhatsApp conectado</p>'),
       200,
-    );
+    )
   }
 
-  const qrBase = `/admin/whatsapp/qr?secret=${encodeURIComponent(secret ?? "")}&businessId=${businessId}`;
-  const cycle = refreshCycle(c);
-  const nextUrl = nextRefreshUrl(qrBase, cycle);
+  const qrBase = `/admin/whatsapp/qr?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
+  const cycle = refreshCycle(c)
+  const nextUrl = nextRefreshUrl(qrBase, cycle)
 
-  if (state.status === "connecting") {
+  if (state.status === 'connecting') {
     return c.html(
       renderPage(
-        "Iniciando...",
-        `<p>Iniciando conexión…</p>${nextUrl ? "" : REFRESH_STOPPED_NOTE}`,
+        'Iniciando...',
+        `<p>Iniciando conexión…</p>${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
         nextUrl ? 5 : undefined,
         nextUrl ?? undefined,
       ),
       200,
-    );
+    )
   }
 
   // qr_pending
   if (!state.qr) {
     return c.html(
       renderPage(
-        "Esperando QR...",
-        `<p>Generando QR…</p>${nextUrl ? "" : REFRESH_STOPPED_NOTE}`,
+        'Esperando QR...',
+        `<p>Generando QR…</p>${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
         nextUrl ? 3 : undefined,
         nextUrl ?? undefined,
       ),
       200,
-    );
+    )
   }
 
-  const dataUrl = await qrcode.toDataURL(state.qr, { width: 300, margin: 2 });
+  const dataUrl = await qrcode.toDataURL(state.qr, { width: 300, margin: 2 })
   return c.html(
     renderPage(
-      "Escanear QR",
+      'Escanear QR',
       `<p>Escaneá este código con WhatsApp en tu teléfono.</p>
        <img src="${dataUrl}" alt="WhatsApp QR" style="display:block;margin:1rem auto"/>
-       ${nextUrl ? "" : REFRESH_STOPPED_NOTE}`,
+       ${nextUrl ? '' : REFRESH_STOPPED_NOTE}`,
       nextUrl ? 10 : undefined,
       nextUrl ?? undefined,
     ),
     200,
-  );
-});
+  )
+})
 
-app.get("/admin/whatsapp/pair", async (c) => {
+app.get('/admin/whatsapp/pair', async (c) => {
   if (!env.ADMIN_SECRET) {
-    return c.html("<h1>501 — ADMIN_SECRET not configured</h1>", 501);
+    return c.html('<h1>501 — ADMIN_SECRET not configured</h1>', 501)
   }
-  const secret = c.req.query("secret");
+  const secret = c.req.query('secret')
   if (secret !== env.ADMIN_SECRET) {
-    return c.html("<h1>401 — Unauthorized</h1>", 401);
+    return c.html('<h1>401 — Unauthorized</h1>', 401)
   }
 
-  const businessId = c.req.query("businessId");
+  const businessId = c.req.query('businessId')
 
   if (!businessId) {
-    const all = await businessRepo.findAll();
+    const all = await businessRepo.findAll()
     if (all.length === 0) {
-      return c.html(
-        renderPage("Sin negocios", "<p>No hay negocios registrados.</p>"),
-        200,
-      );
+      return c.html(renderPage('Sin negocios', '<p>No hay negocios registrados.</p>'), 200)
     }
     const rows = all
       .map((b) => {
-        const href = `/admin/whatsapp/pair?secret=${encodeURIComponent(secret ?? "")}&businessId=${b.id}`;
+        const href = `/admin/whatsapp/pair?secret=${encodeURIComponent(secret ?? '')}&businessId=${b.id}`
         return `<tr>
           <td style="padding:0.5rem 1rem;text-align:left"><a href="${href}">${b.name}</a></td>
           <td style="padding:0.5rem 1rem;color:#555">${b.whatsappNumber}</td>
-        </tr>`;
+        </tr>`
       })
-      .join("");
+      .join('')
     const body = `<table style="margin:1rem auto;border-collapse:collapse">
       <thead><tr style="border-bottom:1px solid #ccc">
         <th style="padding:0.5rem 1rem;text-align:left">Negocio</th>
         <th style="padding:0.5rem 1rem">WhatsApp</th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
-    return c.html(renderPage("Código de vinculación", body), 200);
+    </table>`
+    return c.html(renderPage('Código de vinculación', body), 200)
   }
 
-  const state = getConnectionState(businessId);
-  if (state?.status === "connected") {
+  const state = getConnectionState(businessId)
+  if (state?.status === 'connected') {
     return c.html(
-      renderPage(
-        "Conectado",
-        '<p style="color:green;font-size:1.5rem">✅ WhatsApp conectado</p>',
-      ),
+      renderPage('Conectado', '<p style="color:green;font-size:1.5rem">✅ WhatsApp conectado</p>'),
       200,
-    );
+    )
   }
 
-  const client = getClient(businessId);
+  const client = getClient(businessId)
   if (!client) {
     return c.html(
       renderPage(
-        "Sin cliente",
-        "<p>El cliente de WhatsApp no está iniciado. Esperá unos segundos y recargá.</p>",
+        'Sin cliente',
+        '<p>El cliente de WhatsApp no está iniciado. Esperá unos segundos y recargá.</p>',
         5,
       ),
       200,
-    );
+    )
   }
 
-  const refreshUrl = `?secret=${encodeURIComponent(secret ?? "")}&businessId=${businessId}`;
+  const refreshUrl = `?secret=${encodeURIComponent(secret ?? '')}&businessId=${businessId}`
 
   // Requesting a pairing code is an EXPLICIT act, never a side effect of loading
   // this page. It used to fire whenever no code was cached — and since booting a
@@ -249,13 +241,13 @@ app.get("/admin/whatsapp/pair", async (c) => {
   // page asked WhatsApp for a new code roughly every 90s on its own. Five of
   // those trip the circuit breaker: six hours blocked without anyone clicking
   // anything. The QR flow is the supported path now; this one waits for a click.
-  const forceNew = c.req.query("new") === "1";
-  let code = state?.pairingCode ?? null;
+  const forceNew = c.req.query('new') === '1'
+  let code = state?.pairingCode ?? null
 
   if (!code && !forceNew) {
     return c.html(
       renderPage(
-        "Código de vinculación",
+        'Código de vinculación',
         `<p>Generá un código para vincular este número.</p>
          <p style="font-size:.85rem;color:#888;margin:1rem 0">
            Cada código pedido cuenta contra el límite de WhatsApp para el número.
@@ -264,13 +256,13 @@ app.get("/admin/whatsapp/pair", async (c) => {
          <p><a href="${refreshUrl}&new=1" class="btn">Generar código de vinculación</a></p>`,
       ),
       200,
-    );
+    )
   }
 
   if (forceNew || !code) {
-    const business = await businessRepo.findById(businessId);
+    const business = await businessRepo.findById(businessId)
     if (!business) {
-      return c.html(renderPage("Error", "<p>Negocio no encontrado.</p>"), 404);
+      return c.html(renderPage('Error', '<p>Negocio no encontrado.</p>'), 404)
     }
 
     // Guard EVERY path that reaches WhatsApp, not just the explicit "new code"
@@ -278,60 +270,56 @@ app.get("/admin/whatsapp/pair", async (c) => {
     // would quietly request a fresh pairing code on a timer — the fastest way
     // to get a number rate-limited.
     try {
-      await sessionGuard.assertCanRequestPairingCode(business.whatsappNumber);
+      await sessionGuard.assertCanRequestPairingCode(business.whatsappNumber)
     } catch (err) {
       if (err instanceof SessionGuardError) {
-        return renderGuardBlocked(c, err, refreshUrl);
+        return renderGuardBlocked(c, err, refreshUrl)
       }
-      throw err;
+      throw err
     }
 
     try {
-      code = await client.requestPairingCode(business.whatsappNumber);
-      await sessionGuard.recordPairingCode(
-        business.whatsappNumber,
-        business.id,
-      );
-      storePairingCode(businessId, code);
+      code = await client.requestPairingCode(business.whatsappNumber)
+      await sessionGuard.recordPairingCode(business.whatsappNumber, business.id)
+      storePairingCode(businessId, code)
     } catch (err) {
-      const msg = (err as Error).message ?? "error desconocido";
+      const msg = (err as Error).message ?? 'error desconocido'
       const isAlreadyRegistered =
-        msg.toLowerCase().includes("already") ||
-        msg.toLowerCase().includes("registered");
+        msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')
       if (isAlreadyRegistered) {
         return c.html(
           renderPage(
-            "Ya vinculado",
+            'Ya vinculado',
             '<p style="color:green">✅ Este número ya tiene sesión activa. No es necesario vincular.</p>',
           ),
           200,
-        );
+        )
       }
       return c.html(
         renderPage(
-          "Error",
+          'Error',
           `<p style="color:red">No se pudo generar el código: ${msg}</p><p><a href="${refreshUrl}">Reintentar</a></p>`,
         ),
         500,
-      );
+      )
     }
   }
 
   if (!code) {
     return c.html(
       renderPage(
-        "Sin código",
+        'Sin código',
         `<p>No se pudo obtener un código.</p><p><a href="${refreshUrl}&new=1">Generar código nuevo</a></p>`,
       ),
       200,
-    );
+    )
   }
 
   // Format as XXXX-XXXX
   const formatted = code
-    .replace(/[^A-Z0-9]/gi, "")
+    .replace(/[^A-Z0-9]/gi, '')
     .toUpperCase()
-    .replace(/^(.{4})(.{4})$/, "$1-$2");
+    .replace(/^(.{4})(.{4})$/, '$1-$2')
 
   // No auto-refresh here. This page used to reload every 60s, and a reload with
   // no cached code meant another request to WhatsApp. Expiry is handled by the
@@ -350,53 +338,10 @@ app.get("/admin/whatsapp/pair", async (c) => {
     </p>
     <p style="margin-top:1.5rem">
       <a href="${refreshUrl}&new=1" style="color:#059669;font-size:0.9rem">Generar nuevo código</a>
-    </p>`;
+    </p>`
 
-  return c.html(renderPage("Código de vinculación", body), 200);
-});
-
-// Enpoint para WA oficial
-
-// 1. EL GET: Solo sirve una vez en la vida para conectar Facebook con tu Hono
-app.get("/webhook/whatsapp", (c) => {
-  const mode = c.req.query("hub.mode");
-  const token = c.req.query("hub.verify_token");
-  const challenge = c.req.query("hub.challenge");
-
-  if (mode === "subscribe" && token === "emma_verify_token_2026") {
-    return c.text(challenge ?? "", 200);
-  }
-  return c.text("Forbidden", 403);
-});
-
-// 2. EL POST: Aquí es donde Facebook te "tira" los mensajes de tus clientes
-app.post("/webhook/whatsapp", async (c) => {
-  try {
-    const body = await c.req.json();
-
-    // Verificamos que el evento venga de WhatsApp
-    if (body.object === "whatsapp_business_account") {
-      // Aquí extraes el número del cliente y lo que escribió
-      // (La estructura del JSON de Meta es un poco profunda)
-      const entry = body.entry?.[0];
-      const changes = entry?.changes?.[0]?.value;
-
-      if (changes?.messages) {
-        const mensaje = changes.messages[0];
-        const numeroCliente = mensaje.from;
-        const texto = mensaje.text?.body;
-
-        console.log(`Nuevo mensaje de ${numeroCliente}: ${texto}`);
-        // Aquí llamas a tu lógica de base de datos o bot...
-      }
-    }
-
-    // REGLA DE ORO DE LOS WEBHOOKS: Siempre devolver 200 OK rapidísimo
-    return c.text("EVENT_RECEIVED", 200);
-  } catch (error) {
-    return c.text("Error", 500);
-  }
-});
+  return c.html(renderPage('Código de vinculación', body), 200)
+})
 
 function renderPage(
   title: string,
@@ -404,26 +349,22 @@ function renderPage(
   refreshSecs?: number,
   refreshUrl?: string,
 ): string {
-  const content = refreshUrl
-    ? `${refreshSecs};url=${refreshUrl}`
-    : `${refreshSecs}`;
-  const refresh = refreshSecs
-    ? `<meta http-equiv="refresh" content="${content}">`
-    : "";
+  const content = refreshUrl ? `${refreshSecs};url=${refreshUrl}` : `${refreshSecs}`
+  const refresh = refreshSecs ? `<meta http-equiv="refresh" content="${content}">` : ''
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">${refresh}
 <title>Emma — ${title}</title>
 <style>body{font-family:sans-serif;max-width:480px;margin:3rem auto;text-align:center}</style>
-</head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`;
+</head><body><h1>WhatsApp — ${title}</h1>${body}</body></html>`
 }
 
 // A linking page left open in a tab used to auto-refresh forever, keeping a
 // pairing socket alive indefinitely. Cap the cycles and make the operator opt
 // back in by reloading.
-const MAX_AUTO_REFRESH_CYCLES = 20;
+const MAX_AUTO_REFRESH_CYCLES = 20
 
 function refreshCycle(c: Context): number {
-  const raw = Number.parseInt(c.req.query("r") ?? "0", 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const raw = Number.parseInt(c.req.query('r') ?? '0', 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
 }
 
 /**
@@ -431,46 +372,42 @@ function refreshCycle(c: Context): number {
  * `base` must already carry secret/businessId.
  */
 function nextRefreshUrl(base: string, cycle: number): string | null {
-  if (cycle >= MAX_AUTO_REFRESH_CYCLES) return null;
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}r=${cycle + 1}`;
+  if (cycle >= MAX_AUTO_REFRESH_CYCLES) return null
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}r=${cycle + 1}`
 }
 
 const REFRESH_STOPPED_NOTE = `<p style="margin-top:1.5rem;font-size:.85rem;color:#888">
   La actualización automática se detuvo para no mantener la sesión abierta de más.
   <a href="javascript:location.reload()">Actualizar manualmente</a>
-</p>`;
+</p>`
 
 /** Renders a SessionGuardError as a countdown (cooldown) or a hard stop (block). */
-function renderGuardBlocked(
-  c: Context,
-  err: SessionGuardError,
-  backUrl: string,
-): Response {
-  const secs = Math.ceil(err.retryAfterMs / 1000);
+function renderGuardBlocked(c: Context, err: SessionGuardError, backUrl: string): Response {
+  const secs = Math.ceil(err.retryAfterMs / 1000)
 
-  if (err.reason === "cooldown") {
+  if (err.reason === 'cooldown') {
     // Static countdown, no timer. This page used to redirect itself back to the
     // pairing page when the countdown hit zero — and that page then asked
     // WhatsApp for another code, which bounced back here. The loop drove roughly
     // one real pairing request every 90s until the breaker tripped at five.
     return c.html(
       renderPage(
-        "Espera un momento",
+        'Espera un momento',
         `<p style="color:#b45309">⏳ Podés pedir un nuevo código en <strong>${secs}</strong> segundos.</p>
          <p style="font-size:.85rem;color:#888">WhatsApp bloquea los números que piden códigos muy seguido.</p>
          <p style="margin-top:1.5rem"><a href="${backUrl}">← Volver</a></p>`,
       ),
       429,
-    ) as Response;
+    ) as Response
   }
 
-  const hours = Math.floor(secs / 3600);
-  const mins = Math.ceil((secs % 3600) / 60);
-  const wait = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`;
+  const hours = Math.floor(secs / 3600)
+  const mins = Math.ceil((secs % 3600) / 60)
+  const wait = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`
   return c.html(
     renderPage(
-      "Vinculación bloqueada",
+      'Vinculación bloqueada',
       `<p style="color:#b91c1c;font-size:1.1rem">🛑 Este número está bloqueado por protección anti-ban.</p>
        <p>Se hicieron demasiados intentos de vinculación. Reintentar ahora puede hacer que
           WhatsApp banee el número de forma permanente.</p>
@@ -482,26 +419,29 @@ function renderGuardBlocked(
        <p><a href="${backUrl}">← Volver</a></p>`,
     ),
     429,
-  ) as Response;
+  ) as Response
 }
 
-app.route("/", dashboardRoutes);
-app.route("/", adminRoutes);
+app.route('/', dashboardRoutes)
+app.route('/', adminRoutes)
 
 // The panel's JSON API. Before the static mount below, which owns the SPA
 // fallback for everything under /panel.
-app.route("/", panelRoutes);
+app.route('/', panelRoutes)
+app.route('/', panelSettingsRoutes)
+app.route('/', panelKnowledgeRoutes)
+app.route('/', panelTagRoutes)
 
 // LAST of the route mounts on purpose: the SPA fallback answers every
 // unmatched path under /panel, so anything that needs to win over it —
 // every /api/panel/* route included — has to be registered above.
-app.route("/", panelStaticRoutes);
+app.route('/', panelStaticRoutes)
 
 app.onError((err, c) => {
-  logger.error({ err, path: c.req.path }, "unhandled error");
-  return c.json({ error: "internal_error" }, 500);
-});
+  logger.error({ err, path: c.req.path }, 'unhandled error')
+  return c.json({ error: 'internal_error' }, 500)
+})
 
 app.notFound((c) => {
-  return c.json({ error: "not_found" }, 404);
-});
+  return c.json({ error: 'not_found' }, 404)
+})

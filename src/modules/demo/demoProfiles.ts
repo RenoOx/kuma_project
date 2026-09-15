@@ -39,6 +39,7 @@ function service(
       priceMin: price.min,
       priceMax: price.max,
       requiresEvaluation: false,
+      active: true,
     }
   }
   return {
@@ -47,6 +48,7 @@ function service(
     priceMin: null,
     priceMax: null,
     requiresEvaluation: true,
+    active: true,
   }
 }
 

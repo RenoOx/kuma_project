@@ -1,11 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { getActivity, getQualificationBreakdown, getStats } from '../api/stats.js'
-import type {
-  ActivityPoint,
-  PanelStats,
-  QualificationBreakdown,
-  StatsPeriod,
-} from '../api/types.js'
+import { getActivity, getOverview, getStats } from '../api/stats.js'
+import type { ActivityPoint, PanelOverview, PanelStats, StatsPeriod } from '../api/types.js'
 import { POLL_MS } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
@@ -19,12 +14,12 @@ export function useStats(period: StatsPeriod) {
   })
 }
 
-export function useQualificationBreakdown() {
+export function useOverview() {
   const session = useSession()
 
-  return useQuery<QualificationBreakdown>({
-    queryKey: ['qualification-breakdown', session.businessId],
-    queryFn: () => getQualificationBreakdown(session),
+  return useQuery<PanelOverview>({
+    queryKey: ['overview', session.businessId],
+    queryFn: () => getOverview(session),
     refetchInterval: POLL_MS.dashboard,
   })
 }

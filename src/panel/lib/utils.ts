@@ -87,6 +87,19 @@ export function formatDate(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : DATE_FMT.format(d)
 }
 
+/**
+ * Today as YYYY-MM-DD, the shape `<input type="date">` wants.
+ *
+ * Reads the local calendar day instead of slicing an ISO string, which is in
+ * UTC and therefore the NEXT day in Lima from 7pm on.
+ */
+export function todayISO(): string {
+  const now = new Date()
+  const month = `${now.getMonth() + 1}`.padStart(2, '0')
+  const day = `${now.getDate()}`.padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`
 }
@@ -127,4 +140,29 @@ export function formatPhone(raw: string | null | undefined): string {
   const country = digits.slice(0, -9)
   const grouped = local.replace(/(\d{3})(?=\d)/g, '$1 ')
   return country ? `+${country} ${grouped}` : `+${grouped}`
+}
+
+/**
+ * A service's price, in the three shapes it can take.
+ *
+ * Mirrors formatServicePrice on the server so the catalogue in the panel reads
+ * exactly like the line Emma puts in her prompt. Kept in sync by hand, like the
+ * rest of api/types.ts — the two builds cannot share a module.
+ */
+export function formatServicePrice(service: {
+  priceMin: number | null
+  priceMax: number | null
+  requiresEvaluation: boolean
+}): string {
+  const { priceMin, priceMax, requiresEvaluation } = service
+
+  if (requiresEvaluation) {
+    return priceMin === null
+      ? 'requiere evaluación previa'
+      : `desde S/ ${priceMin} (requiere evaluación previa)`
+  }
+  if (priceMin === null) return 'precio no configurado'
+  if (priceMax === null) return `desde S/ ${priceMin}`
+  if (priceMin === priceMax) return `S/ ${priceMin}`
+  return `S/ ${priceMin} a S/ ${priceMax}`
 }

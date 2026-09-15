@@ -2,12 +2,14 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { logger } from '@/config/logger.js'
-import { conversationQualifications } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
+import * as customerService from '@/modules/customer/customer.service.js'
+import type { Customer } from '@/modules/customer/customer.types.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
 import type { AppError } from '@/shared/errors.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
-import type { Result } from '@/shared/result.js'
+import { normalizePhone } from '@/shared/phone.js'
+import { err, type Result } from '@/shared/result.js'
 import * as panelRepo from './panel.repo.js'
 import * as panelService from './panel.service.js'
 import { panelAuth, panelBusiness } from './panelAuth.js'
@@ -108,7 +110,10 @@ panelRoutes.get('/api/panel/:businessId/updates', async (c) => {
 })
 
 const conversationsSchema = paginationSchema.extend({
-  qualification: z.enum(conversationQualifications).optional(),
+  // Filter by one of the owner's own labels. A tag id rather than a name: names
+  // are editable, and a filter that breaks when a label is renamed is a filter
+  // the owner stops trusting.
+  tagId: z.string().min(1).optional(),
   search: z.string().trim().max(100).optional(),
   sort: z.literal('recent').default('recent'),
 })
@@ -118,7 +123,7 @@ panelRoutes.get('/api/panel/:businessId/conversations', async (c) => {
   if (!query.ok) return query.res
 
   const page = await panelRepo.listConversations(panelBusiness(c).id, {
-    ...(query.data.qualification ? { qualification: query.data.qualification } : {}),
+    ...(query.data.tagId ? { tagId: query.data.tagId } : {}),
     ...(query.data.search ? { search: query.data.search } : {}),
     page: query.data.page,
     limit: query.data.limit,
@@ -152,7 +157,13 @@ panelRoutes.get('/api/panel/:businessId/conversations/:conversationId/messages',
     query.data.limit,
     query.data.order,
   )
-  return c.json({ ...page, qualification: conversation.qualification })
+  // The chat header needs to know whether a human is holding this thread, which
+  // used to ride along as a qualification. The timestamp is the fact itself.
+  return c.json({
+    ...page,
+    humanTakeoverAt: conversation.humanTakeoverAt?.toISOString() ?? null,
+    emmaEnabled: conversation.emmaEnabled,
+  })
 })
 
 // ── Human takeover ───────────────────────────────────────────────────────────
@@ -183,36 +194,6 @@ panelRoutes.post(
     if (!unwrapped.ok) return unwrapped.res
 
     return c.json({ success: true })
-  },
-)
-
-/**
- * The owner re-labelling a thread by hand (Feature A).
- *
- * The enum comes from panel.service rather than from the full
- * conversationQualifications tuple: 'appointment' and 'human_takeover' are
- * facts the system records, not opinions a person may assert, so they are not
- * offered here and a request carrying one is a 400.
- */
-const qualificationSchema = z.object({
-  qualification: z.enum(panelService.MANUALLY_SETTABLE_QUALIFICATIONS),
-})
-
-panelRoutes.patch(
-  '/api/panel/:businessId/conversations/:conversationId/qualification',
-  async (c) => {
-    const body = await parseBody(c, qualificationSchema)
-    if (!body.ok) return body.res
-
-    const result = await panelService.setQualificationByOwner(
-      panelBusiness(c).id,
-      c.req.param('conversationId'),
-      body.data.qualification,
-    )
-    const unwrapped = unwrap(c, result)
-    if (!unwrapped.ok) return unwrapped.res
-
-    return c.json({ success: true, qualification: body.data.qualification })
   },
 )
 
@@ -317,6 +298,113 @@ panelRoutes.patch('/api/panel/:businessId/appointments/:id/complete', async (c) 
   return c.json({ success: true, status: unwrapped.data.status })
 })
 
+/**
+ * The appointment the owner books themselves (BLOQUE D).
+ *
+ * The one write on this surface that creates a row rather than moving one, and
+ * the only one that can touch `customers`: a patient who phoned in has no
+ * WhatsApp thread, so the contact may not exist yet.
+ *
+ * Answers 200 with `created: false` when the slot breaks a rule — closed day,
+ * outside hours, the break, too soon, or a clash. That is not an error: the
+ * owner is allowed to book through any of it, and the panel re-posts with
+ * `force` once they say so. Modelling it as a 4xx would push a normal branch of
+ * the flow through the error path, and `failure()` above has no mapping for
+ * ConflictError anyway.
+ */
+const createAppointmentSchema = z
+  .object({
+    customerId: z.string().min(1).optional(),
+    phone: z.string().trim().min(6).max(20).optional(),
+    customerName: z.string().trim().min(1).max(80).optional(),
+    service: z.string().trim().min(1),
+    // Wall clock in the business's timezone. The conversion to an instant lives
+    // in appointmentService, with the rest of the timezone maths.
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    notes: z.string().trim().max(500).optional(),
+    notifyCustomer: z.boolean().default(true),
+    force: z.boolean().default(false),
+  })
+  .refine((v) => Boolean(v.customerId) || Boolean(v.phone), {
+    message: 'customerId or phone is required',
+    path: ['customerId'],
+  })
+
+/**
+ * The contact this appointment is for: an existing row, or a new one built from
+ * the phone the owner typed.
+ *
+ * `businessId` comes from the authenticated token, never the body, and
+ * `getById` filters by it — so another tenant's customer id reads as not found.
+ */
+async function resolveAppointmentCustomer(
+  businessId: string,
+  data: z.infer<typeof createAppointmentSchema>,
+): Promise<Result<Customer>> {
+  if (data.customerId) return customerService.getById(businessId, data.customerId)
+
+  // Without this the form quietly creates a second row for someone Emma already
+  // knows: the old admin stored "51987654321" and the WhatsApp handler stores
+  // "+51987654321", and only one of them is what a lookup will match.
+  const phone = normalizePhone(data.phone)
+  if (!phone) {
+    return err(
+      new ValidationError({
+        code: 'invalid_phone',
+        message: `cannot normalize phone: ${data.phone}`,
+        userMessage: 'Ese número no parece válido.',
+        logContext: { businessId },
+      }),
+    )
+  }
+  return customerService.getOrCreateManual(businessId, phone, data.customerName)
+}
+
+panelRoutes.post('/api/panel/:businessId/appointments', async (c) => {
+  const body = await parseBody(c, createAppointmentSchema)
+  if (!body.ok) return body.res
+
+  const businessId = panelBusiness(c).id
+  const customer = unwrap(c, await resolveAppointmentCustomer(businessId, body.data))
+  if (!customer.ok) return customer.res
+
+  const result = await appointmentService.createManualAppointment({
+    businessId,
+    customerId: customer.data.id,
+    service: body.data.service,
+    dateISO: body.data.date,
+    timeHHmm: body.data.time,
+    // Only for a contact typed in by hand. Passing an existing customer's own
+    // name back would be a rename that renames nothing.
+    ...(body.data.customerId ? {} : { customerName: body.data.customerName ?? undefined }),
+    ...(body.data.notes ? { notes: body.data.notes } : {}),
+    force: body.data.force,
+    notifyCustomer: body.data.notifyCustomer,
+  })
+  const unwrapped = unwrap(c, result)
+  if (!unwrapped.ok) return unwrapped.res
+
+  if (!unwrapped.data.created) {
+    return c.json({ created: false, warnings: unwrapped.data.warnings })
+  }
+
+  const { appointment, warnings, patientNotified, patientNotifyError } = unwrapped.data
+  return c.json(
+    {
+      created: true,
+      warnings,
+      appointmentId: appointment.id,
+      status: appointment.status,
+      scheduledAt: appointment.scheduledAt.toISOString(),
+      customerId: appointment.customerId,
+      patientNotified,
+      ...(patientNotifyError ? { patientNotifyError } : {}),
+    },
+    201,
+  )
+})
+
 // ── Dashboard ────────────────────────────────────────────────────────────────
 
 const statsSchema = z.object({
@@ -337,8 +425,11 @@ panelRoutes.get('/api/panel/:businessId/stats', async (c) => {
   return c.json(stats)
 })
 
-panelRoutes.get('/api/panel/:businessId/stats/qualification-breakdown', async (c) => {
-  return c.json(await panelRepo.getQualificationBreakdown(panelBusiness(c).id))
+// Facts the system already knows, rather than a read of how warm each lead is.
+// Nothing here depends on anyone having labelled anything, so it has numbers on
+// day one and for a business that never creates a single tag.
+panelRoutes.get('/api/panel/:businessId/stats/overview', async (c) => {
+  return c.json(await panelRepo.getOverview(panelBusiness(c).id))
 })
 
 const activitySchema = z.object({

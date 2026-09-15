@@ -6,15 +6,14 @@ import { z } from 'zod'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import { db } from '@/db/client.js'
-import { businesses, type KbAttachmentType } from '@/db/schema/index.js'
+import { businesses } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import * as knowledgeBaseService from '@/modules/knowledgeBase/knowledgeBase.service.js'
 import {
-  kbAttachmentTypeSchema,
-  kbCategorySchema,
-  kbSendModeSchema,
+  createKbBodySchema,
+  patchKbBodySchema,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
 import { SessionGuardError } from '@/shared/errors.js'
@@ -22,7 +21,7 @@ import { normalizePhone, samePhone } from '@/shared/phone.js'
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
-async function requireAdmin(c: Context, next: Next): Promise<Response | void> {
+async function requireAdmin(c: Context, next: Next): Promise<Response | undefined> {
   if (!env.ADMIN_SECRET) {
     return c.json({ error: 'not_configured', message: 'ADMIN_SECRET not set on this server' }, 501)
   }
@@ -30,6 +29,9 @@ async function requireAdmin(c: Context, next: Next): Promise<Response | void> {
     return c.json({ error: 'unauthorized' }, 401)
   }
   await next()
+  // Explicit: the return type is `Response | undefined` rather than
+  // `Response | void`, and `noImplicitReturns` wants every path to say so.
+  return undefined
 }
 
 // ── Request body schemas ──────────────────────────────────────────────────────
@@ -87,53 +89,9 @@ const patchBusinessBody = z
     path: ['ownerWhatsappNumber'],
   })
 
-// An attachment type other than 'none' is meaningless without a URL, and a URL
-// is meaningless without a type. Rejected up front rather than stored half-set.
-function hasCoherentAttachment(v: {
-  attachmentType?: KbAttachmentType
-  attachmentUrl?: string | null
-}): boolean {
-  if (v.attachmentType === undefined) return true
-  return v.attachmentType === 'none' ? !v.attachmentUrl : Boolean(v.attachmentUrl)
-}
-
-const attachmentRefinement = {
-  message:
-    'attachmentUrl is required when attachmentType is not "none", and must be omitted when it is',
-  path: ['attachmentUrl'],
-}
-
-const kbFields = {
-  title: z.string().min(1).max(120).optional(),
-  content: z.string().min(1),
-  category: kbCategorySchema,
-  attachmentType: kbAttachmentTypeSchema.optional(),
-  attachmentUrl: z.string().url().nullable().optional(),
-  sendMode: kbSendModeSchema.optional(),
-  triggerKeywords: z.array(z.string().min(1)).nullable().optional(),
-  active: z.boolean().optional(),
-}
-
-const createKbBody = z
-  .object(kbFields)
-  .refine(hasCoherentAttachment, attachmentRefinement)
-  .refine((v) => v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0, {
-    message: 'triggerKeywords is required when sendMode is "trigger_based"',
-    path: ['triggerKeywords'],
-  })
-
-const patchKbBody = z
-  .object({
-    ...kbFields,
-    content: kbFields.content.optional(),
-    category: kbFields.category.optional(),
-  })
-  .refine((v) => Object.keys(v).length > 0, { message: 'body must have at least one field' })
-  .refine(hasCoherentAttachment, attachmentRefinement)
-  .refine((v) => v.sendMode !== 'trigger_based' || (v.triggerKeywords?.length ?? 0) > 0, {
-    message: 'triggerKeywords is required when sendMode is "trigger_based"',
-    path: ['triggerKeywords'],
-  })
+// The KB request schemas live in knowledgeBase.types.ts: the panel writes the
+// same table under the same attachment and keyword rules, and two copies would
+// be two places for them to drift.
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -305,7 +263,7 @@ adminRoutes.get('/admin/businesses/:id/kb', async (c) => {
 })
 
 adminRoutes.post('/admin/businesses/:id/kb', async (c) => {
-  const body = createKbBody.safeParse(await c.req.json().catch(() => null))
+  const body = createKbBodySchema.safeParse(await c.req.json().catch(() => null))
   if (!body.success) {
     return c.json({ error: 'validation_error', issues: body.error.flatten().fieldErrors }, 400)
   }
@@ -321,7 +279,7 @@ adminRoutes.post('/admin/businesses/:id/kb', async (c) => {
 })
 
 adminRoutes.patch('/admin/businesses/:id/kb/:kbId', async (c) => {
-  const body = patchKbBody.safeParse(await c.req.json().catch(() => null))
+  const body = patchKbBodySchema.safeParse(await c.req.json().catch(() => null))
   if (!body.success) {
     return c.json({ error: 'validation_error', issues: body.error.flatten().fieldErrors }, 400)
   }

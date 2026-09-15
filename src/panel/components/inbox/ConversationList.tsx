@@ -4,7 +4,9 @@ import { useSearchParams } from 'react-router-dom'
 import type { ConversationListItem } from '../../api/types.js'
 import { useConversations } from '../../hooks/useConversations.js'
 import { useDragScroll } from '../../hooks/useDragScroll.js'
-import { QUALIFICATION_META, QUALIFICATIONS, type Qualification } from '../../lib/constants.js'
+import { useTags } from '../../hooks/useTags.js'
+import { TAG_COLOR_META } from '../../lib/constants.js'
+import { cn } from '../../lib/utils.js'
 import { Button } from '../ui/button.js'
 import { Input } from '../ui/input.js'
 import { Tabs, TabsList, TabsTrigger } from '../ui/tabs.js'
@@ -12,14 +14,8 @@ import { ConversationItem } from './ConversationItem.js'
 
 const PAGE_SIZE = 20
 
-type Tab = Qualification | 'all'
-
-/** Anything the URL does not recognise is "Todos" rather than an empty inbox. */
-function toTab(value: string | null): Tab {
-  return value && (QUALIFICATIONS as readonly string[]).includes(value)
-    ? (value as Qualification)
-    : 'all'
-}
+/** A tag id, or 'all'. Anything the URL does not recognise is "Todos". */
+type Tab = string
 
 export function ConversationList({
   selectedId,
@@ -33,7 +29,12 @@ export function ConversationList({
   // pre-searched one. Holding them locally would make those links land on an
   // unfiltered list.
   const [params, setParams] = useSearchParams()
-  const tab = toTab(params.get('q'))
+  const { data: tags } = useTags()
+  const requested = params.get('q') ?? 'all'
+  // A label the owner deleted leaves its id behind in somebody's open tab. Fall
+  // back to "Todos" rather than showing an inbox that is empty for no visible
+  // reason.
+  const tab: Tab = (tags ?? []).some((t) => t.id === requested) ? requested : 'all'
   const search = params.get('search') ?? ''
 
   const [searchInput, setSearchInput] = useState(() => params.get('search') ?? '')
@@ -75,7 +76,7 @@ export function ConversationList({
   }
 
   const { data, isLoading, isError } = useConversations({
-    ...(tab === 'all' ? {} : { qualification: tab }),
+    ...(tab === 'all' ? {} : { tagId: tab }),
     ...(search ? { search } : {}),
     page,
   })
@@ -127,9 +128,13 @@ export function ConversationList({
             <TabsTrigger value="all" className="flex-none rounded-full">
               Todos
             </TabsTrigger>
-            {QUALIFICATIONS.map((q) => (
-              <TabsTrigger key={q} value={q} className="flex-none rounded-full">
-                {QUALIFICATION_META[q].label}
+            {(tags ?? []).map((tag) => (
+              <TabsTrigger key={tag.id} value={tag.id} className="flex-none rounded-full">
+                <span
+                  className={cn('size-2 rounded-full', TAG_COLOR_META[tag.color].dotClassName)}
+                  aria-hidden
+                />
+                {tag.name}
               </TabsTrigger>
             ))}
           </TabsList>

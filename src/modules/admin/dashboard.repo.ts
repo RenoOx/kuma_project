@@ -53,15 +53,16 @@ export async function getAllBusinessesStats(): Promise<Map<string, BusinessStats
 
   const map = new Map<string, BusinessStats>()
   const get = (id: string): BusinessStats => {
-    if (!map.has(id)) {
-      map.set(id, {
-        customerCount: 0,
-        conversationCount: 0,
-        appointmentCount: 0,
-        lastMessageAt: null,
-      })
+    const existing = map.get(id)
+    if (existing) return existing
+    const fresh: BusinessStats = {
+      customerCount: 0,
+      conversationCount: 0,
+      appointmentCount: 0,
+      lastMessageAt: null,
     }
-    return map.get(id)!
+    map.set(id, fresh)
+    return fresh
   }
 
   for (const r of custRows) get(r.businessId).customerCount = Number(r.n)

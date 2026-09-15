@@ -2,7 +2,7 @@ import type { ConversationListItem } from '../../api/types.js'
 import { cn, formatPhone, initials, timeAgo, truncate } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Avatar, AvatarFallback } from '../ui/avatar.js'
-import { QualificationBadge } from './QualificationBadge.js'
+import { TagBadge } from './TagBadge.js'
 
 export function ConversationItem({
   conversation,
@@ -20,7 +20,7 @@ export function ConversationItem({
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors',
-        selected ? 'bg-emma-accent/10' : 'hover:bg-accent/40',
+        selected ? 'bg-emma-accent/10' : 'hover:bg-emma-elevated',
       )}
     >
       <Avatar className="mt-0.5 size-9">
@@ -47,9 +47,13 @@ export function ConversationItem({
             : 'Sin mensajes'}
         </span>
 
-        <span className="mt-1.5 flex">
-          <QualificationBadge qualification={conversation.qualification} />
-        </span>
+        {conversation.tags.length > 0 && (
+          <span className="mt-1.5 flex flex-wrap gap-1">
+            {conversation.tags.map((tag) => (
+              <TagBadge key={tag.id} tag={tag} />
+            ))}
+          </span>
+        )}
       </span>
     </button>
   )

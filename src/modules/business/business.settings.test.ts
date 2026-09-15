@@ -1,8 +1,10 @@
 import { assert, describe, expect, it } from 'vitest'
 import {
+  activeServices,
   type BusinessSettings,
   businessSettingsSchema,
   parseBusinessSettings,
+  remindersExplicitlyDisabled,
   resolveDayHours,
 } from '@/modules/business/business.settings.js'
 import { NotConfiguredError } from '@/shared/errors.js'
@@ -34,7 +36,14 @@ const BASE_SETTINGS: BusinessSettings = {
   },
   slotDurationMinutes: 60,
   services: [
-    { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, requiresEvaluation: false },
+    {
+      name: 'corte',
+      durationMinutes: 30,
+      priceMin: 30,
+      priceMax: 30,
+      requiresEvaluation: false,
+      active: true,
+    },
   ],
 }
 
@@ -166,5 +175,113 @@ describe('parseBusinessSettings — not configured sentinel (regression)', () =>
     const result = parseBusinessSettings('biz1', {})
     assert(!result.ok)
     expect(result.error).toBeInstanceOf(NotConfiguredError)
+  })
+})
+
+describe('business.settings — remindersExplicitlyDisabled', () => {
+  // The gate is explicit-opt-out on purpose: a business configured before
+  // postBooking existed parses as reminders:false, and treating that as a
+  // choice would silence reminders that go out today.
+  it('does not disable reminders for settings with no postBooking block', () => {
+    // BASE_SETTINGS carries a full postBooking block with reminders off, which
+    // is the opposite case — what this one is about is a row saved before the
+    // field existed, so the key has to be genuinely absent.
+    const { postBooking: _omitted, ...withoutPostBooking } = BASE_SETTINGS
+    expect(remindersExplicitlyDisabled(withoutPostBooking)).toBe(false)
+  })
+
+  it('does not disable reminders when postBooking omits the key', () => {
+    expect(remindersExplicitlyDisabled({ ...BASE_SETTINGS, postBooking: {} })).toBe(false)
+  })
+
+  it('disables reminders only on a stored false', () => {
+    const off = {
+      ...BASE_SETTINGS,
+      postBooking: { ...BASE_SETTINGS.postBooking, reminders: false },
+    }
+    expect(remindersExplicitlyDisabled(off)).toBe(true)
+  })
+
+  it('keeps reminders on when the owner switched them on', () => {
+    const on = { ...BASE_SETTINGS, postBooking: { ...BASE_SETTINGS.postBooking, reminders: true } }
+    expect(remindersExplicitlyDisabled(on)).toBe(false)
+  })
+
+  it('treats junk as "never answered" rather than as off', () => {
+    for (const raw of [null, undefined, 'nonsense', 42, [], {}]) {
+      expect(remindersExplicitlyDisabled(raw)).toBe(false)
+    }
+    expect(remindersExplicitlyDisabled({ postBooking: 'nonsense' })).toBe(false)
+    // A stringified flag is not a boolean false; only a real false counts.
+    expect(remindersExplicitlyDisabled({ postBooking: { reminders: 'false' } })).toBe(false)
+  })
+})
+
+describe('business.settings — active services', () => {
+  const withServices = (services: unknown[]) => ({ ...BASE_SETTINGS, services })
+
+  it('parses a service with no active field as active', () => {
+    // Services stored before the field existed keep working without a data
+    // migration — that is what the default is for.
+    const result = parseBusinessSettings('biz1', {
+      ...BASE_SETTINGS,
+      services: [{ name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30 }],
+    })
+    assert(result.ok)
+    expect(result.data.services[0]?.active).toBe(true)
+  })
+
+  it('honours an explicit false', () => {
+    const result = parseBusinessSettings(
+      'biz1',
+      withServices([
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, active: false },
+      ]),
+    )
+    assert(result.ok)
+    expect(result.data.services[0]?.active).toBe(false)
+  })
+
+  it('activeServices returns only the ones Emma may offer', () => {
+    const result = parseBusinessSettings(
+      'biz1',
+      withServices([
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, active: true },
+        { name: 'barba', durationMinutes: 20, priceMin: 20, priceMax: 20, active: false },
+        { name: 'cejas', durationMinutes: 15, priceMin: 15, priceMax: 15 },
+      ]),
+    )
+    assert(result.ok)
+    expect(activeServices(result.data).map((s) => s.name)).toEqual(['corte', 'cejas'])
+  })
+
+  it('returns an empty list when everything is switched off', () => {
+    // Callers render "sin servicios" rather than assuming a first element. The
+    // panel refuses to SAVE this state, but settings written by other paths can
+    // still reach it.
+    const result = parseBusinessSettings(
+      'biz1',
+      withServices([
+        { name: 'corte', durationMinutes: 30, priceMin: 30, priceMax: 30, active: false },
+      ]),
+    )
+    assert(result.ok)
+    expect(activeServices(result.data)).toEqual([])
+  })
+
+  it('deactivating keeps the price and duration', () => {
+    // The whole reason it is a flag and not a delete: a seasonal service comes
+    // back without being retyped.
+    const result = parseBusinessSettings(
+      'biz1',
+      withServices([
+        { name: 'botox', durationMinutes: 45, priceMin: 300, priceMax: 500, active: false },
+      ]),
+    )
+    assert(result.ok)
+    const [service] = result.data.services
+    expect(service?.priceMin).toBe(300)
+    expect(service?.priceMax).toBe(500)
+    expect(service?.durationMinutes).toBe(45)
   })
 })

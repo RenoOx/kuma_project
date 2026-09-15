@@ -8,7 +8,11 @@ import type {
   DayKey,
   Niche,
 } from '@/modules/business/business.settings.js'
-import { formatPaymentMethods, formatServicePrice } from '@/modules/business/business.settings.js'
+import {
+  activeServices,
+  formatPaymentMethods,
+  formatServicePrice,
+} from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
@@ -396,7 +400,12 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 
 // Duration is omitted rather than faked when the business never set one —
 // the model must not read a fallback slot length as a promise to the customer.
+//
+// Deactivated services never reach here: the caller passes activeServices(),
+// and a business with none active gets an explicit line rather than an empty
+// heading the model would fill in on its own.
 function renderServices(services: BusinessSettings['services']): string {
+  if (services.length === 0) return '(El negocio no tiene servicios activos en este momento.)'
   return services
     .map((s) => {
       const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
@@ -432,7 +441,7 @@ function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): st
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
-    renderServices(settings.services),
+    renderServices(activeServices(settings)),
     '',
     '## Horarios',
     renderOperatingHours(settings.operatingHours),
@@ -546,7 +555,7 @@ const REQUIRES_APPROVAL_BLOCK = [
   '- Después de llamar la tool, informale al cliente que su SOLICITUD fue enviada al encargado y que le van a confirmar en breve.',
   '- NUNCA digas que la cita está agendada, confirmada, reservada ni separada. Cualquier ejemplo de confirmación de arriba (incluido "✅ ¡Cita confirmada!") NO aplica en este negocio.',
   '  ✅ "Listo, envié tu solicitud para el *martes 12 a las 10:00am*. El encargado te confirma en breve."',
-  '  ❌ "✅ ¡Cita confirmada! *limpieza dental* el *martes 12 a las 10:00am*."',
+  '  ❌ "✅ ¡Cita confirmada! *[servicio]* el *martes 12 a las 10:00am*."',
   '- Si el cliente pregunta por el estado de su solicitud, decile que espere la confirmación o que se comunique directamente con el negocio. No tenés forma de consultar en qué quedó.',
 ]
 
@@ -756,6 +765,81 @@ export function buildNicheBlocks(niche: Niche, businessName: string): string {
   return lines.join('\n')
 }
 
+// Los ejemplos que el prompt usa para ilustrar una regla, por nicho.
+//
+// Hasta acá los bloques de reglas generales venían con ejemplos dentales
+// escritos a mano — endodoncia, blanqueamiento, ortodoncia — y los recibía TODO
+// negocio. Una barbería leía en cada request cómo derivar una endodoncia, y el
+// modelo termina hablando del rubro de los ejemplos y no del suyo.
+//
+// Son ejemplos de FORMATO, no un catálogo: los servicios reales siempre salen
+// de "Servicios disponibles". Por eso cada campo es un tratamiento típico del
+// rubro y nada los conecta con lo que este negocio ofrece de verdad.
+interface NicheExamples {
+  /** Servicio típico del rubro que sí se ofrece pero necesita verse primero. */
+  evaluated: string
+  /** Otro, para el segundo ejemplo del mismo bloque. */
+  evaluatedAlt: string
+  /** Lista corta de tratamientos que suelen requerir evaluación. */
+  evaluatedList: string
+  /** Servicio típico del rubro que este negocio NO ofrece. */
+  notOffered: string
+  /** Dos que sí, para ofrecer en su lugar. */
+  offeredInstead: string
+  /** Servicio de precio cerrado, con su monto, para el ejemplo de precio fijo. */
+  fixedPrice: { service: string; amount: string }
+  /** Servicio de precio en rango, para el ejemplo de "no metas evaluación". */
+  rangePrice: { service: string; from: string; to: string; emoji: string }
+}
+
+const NICHE_EXAMPLES: Record<Niche, NicheExamples> = {
+  dental: {
+    evaluated: 'endodoncia',
+    evaluatedAlt: 'blanqueamiento dental',
+    evaluatedList: 'brackets, endodoncia, coronas',
+    notOffered: 'ortodoncia',
+    offeredInstead: 'limpieza y consulta dental',
+    fixedPrice: { service: 'La limpieza dental', amount: 'S/ 80' },
+    rangePrice: { service: 'El blanqueamiento dental', from: 'S/ 250', to: 'S/ 400', emoji: '🦷' },
+  },
+  estetica: {
+    evaluated: 'depilación láser',
+    evaluatedAlt: 'tratamiento facial',
+    evaluatedList: 'depilación láser, peelings, tratamientos corporales',
+    notOffered: 'micropigmentación',
+    offeredInstead: 'limpieza facial y manicure',
+    fixedPrice: { service: 'La manicure', amount: 'S/ 35' },
+    rangePrice: { service: 'La limpieza facial', from: 'S/ 90', to: 'S/ 140', emoji: '✨' },
+  },
+  barberia: {
+    evaluated: 'diseño de barba',
+    evaluatedAlt: 'tinte',
+    evaluatedList: 'tintes, alisados, diseños especiales',
+    notOffered: 'alisado permanente',
+    offeredInstead: 'corte y perfilado de barba',
+    fixedPrice: { service: 'El corte clásico', amount: 'S/ 25' },
+    rangePrice: { service: 'El tinte', from: 'S/ 60', to: 'S/ 90', emoji: '💈' },
+  },
+  salud: {
+    evaluated: 'terapia física',
+    evaluatedAlt: 'plan nutricional',
+    evaluatedList: 'terapias, planes de tratamiento, controles especializados',
+    notOffered: 'cirugía',
+    offeredInstead: 'consulta general y controles',
+    fixedPrice: { service: 'La consulta general', amount: 'S/ 50' },
+    rangePrice: { service: 'La terapia física', from: 'S/ 60', to: 'S/ 100', emoji: '📋' },
+  },
+  general: {
+    evaluated: 'un servicio a medida',
+    evaluatedAlt: 'un trabajo personalizado',
+    evaluatedList: 'los trabajos a medida o personalizados',
+    notOffered: 'ese servicio',
+    offeredInstead: 'lo que sí está en la lista',
+    fixedPrice: { service: 'El servicio básico', amount: 'S/ 50' },
+    rangePrice: { service: 'El servicio completo', from: 'S/ 80', to: 'S/ 120', emoji: '😊' },
+  },
+}
+
 // The services list is a CLOSED catalog, and that is what separates this from
 // general rule 2: a payment method the config never mentions is a MISSING fact,
 // so denying it would be inventing. A service that is not in settings.services
@@ -767,26 +851,32 @@ export function buildNicheBlocks(niche: Niche, businessName: string): string {
 // Step 2 is what was missing — nothing told the model that a treatment common
 // to the niche may simply not be offered HERE, so it answered yes to whatever
 // sounded plausible and only failed later, when the tool rejected the name.
-const UNRECOGNIZED_SERVICE_BLOCK = [
-  '# Servicios no reconocidos',
-  'La lista de "Servicios disponibles" de arriba contiene los servicios AGENDABLES directamente. Pero el negocio puede ofrecer otros tratamientos que NO se agendan solos (requieren diagnóstico previo o dependen de otro servicio).',
-  'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista de "Servicios disponibles":',
-  '',
-  '1. Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado, sin darlo por hecho:',
-  '   Cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
-  '',
-  '2. Si no se parece a ningún servicio agendable, buscá en el "Conocimiento del negocio" (al final del prompt):',
-  '   a. Si el servicio SÍ aparece mencionado en alguna categoría del conocimiento → informá lo que dice la KB y derivá a una consulta de evaluación o diagnóstico:',
-  '      ✅ "Sí trabajamos *endodoncia* 🦷 Ese tratamiento requiere evaluarte primero para ver qué necesitas. ¿Te agendo una *consulta de diagnóstico*?"',
-  '      ✅ "Hacemos *blanqueamiento dental* ✨ Para darte el mejor resultado necesitamos evaluarte primero. ¿Te separo una *evaluación*?"',
-  '   b. Si el servicio NO aparece ni en servicios agendables NI en el conocimiento → decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
-  '      ✅ "No manejamos ortodoncia 😊 Lo que sí hacemos es limpieza y consulta dental. ¿Te interesa alguno?"',
-  '      ❌ "¡Claro! ¿Te agendo para ortodoncia?"',
-  '',
-  'NUNCA asumas que un servicio existe solo porque es común en este rubro. Que sea un tratamiento habitual NO significa que ESTE negocio lo haga.',
-  'NUNCA inventes precio ni duración, ni llames check_availability o book_appointment con un servicio que no está en la lista de servicios agendables.',
-  'Negar un servicio (paso 2b) no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
-]
+//
+// Built per niche: the examples are what the model imitates, so a barbershop
+// reading a worked example about root canals starts answering like a clinic.
+function unrecognizedServiceBlock(niche: Niche): string[] {
+  const ex = NICHE_EXAMPLES[niche]
+  return [
+    '# Servicios no reconocidos',
+    'La lista de "Servicios disponibles" de arriba contiene los servicios AGENDABLES directamente. Pero el negocio puede ofrecer otros tratamientos que NO se agendan solos (requieren diagnóstico previo o dependen de otro servicio).',
+    'Cuando el cliente nombre un servicio que NO coincide con ninguno de la lista de "Servicios disponibles":',
+    '',
+    '1. Si se parece a uno configurado (sinónimo, variante regional), preguntale usando el nombre EXACTO configurado, sin darlo por hecho:',
+    '   Cliente dice "quiero un permanente" y hay "alisado de pelo" → "¿Te refieres a un alisado de pelo? Cuéntame un poco más para ayudarte mejor."',
+    '',
+    '2. Si no se parece a ningún servicio agendable, buscá en el "Conocimiento del negocio" (al final del prompt):',
+    '   a. Si el servicio SÍ aparece mencionado en alguna categoría del conocimiento → informá lo que dice la KB y derivá a una consulta de evaluación o diagnóstico:',
+    `      ✅ "Sí trabajamos *${ex.evaluated}*. Ese tratamiento requiere evaluarte primero para ver qué necesitas. ¿Te agendo una *consulta de diagnóstico*?"`,
+    `      ✅ "Hacemos *${ex.evaluatedAlt}*. Para darte el mejor resultado necesitamos evaluarte primero. ¿Te separo una *evaluación*?"`,
+    '   b. Si el servicio NO aparece ni en servicios agendables NI en el conocimiento → decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
+    `      ✅ "No manejamos ${ex.notOffered}. Lo que sí hacemos es ${ex.offeredInstead}. ¿Te interesa alguno?"`,
+    `      ❌ "¡Claro! ¿Te agendo para ${ex.notOffered}?"`,
+    '',
+    'NUNCA asumas que un servicio existe solo porque es común en este rubro. Que sea un tratamiento habitual NO significa que ESTE negocio lo haga.',
+    'NUNCA inventes precio ni duración, ni llames check_availability o book_appointment con un servicio que no está en la lista de servicios agendables.',
+    'Negar un servicio (paso 2b) no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
+  ]
+}
 
 const NOT_CONFIGURED_BLOCK = [
   '# ATENCIÓN — negocio sin configuración operativa',
@@ -812,8 +902,10 @@ function buildStaticBody(
 ): string[] {
   const mode: AppointmentMode = settings?.appointmentMode ?? 'appointments_only'
   // A business with no settings gets the `general` voice — neutral, but never
-  // voiceless.
-  const nicheBlocks = buildNicheBlocks(settings?.niche ?? 'general', business.name)
+  // voiceless. Same fallback for the worked examples below.
+  const niche: Niche = settings?.niche ?? 'general'
+  const ex = NICHE_EXAMPLES[niche]
+  const nicheBlocks = buildNicheBlocks(niche, business.name)
 
   return [
     '# Identidad',
@@ -975,7 +1067,7 @@ function buildStaticBody(
     '   Ejemplo: "Ese servicio arranca *desde S/ 80*, pero el precio final depende del caso. ¿Me mandas una foto y te confirmo?"',
     '',
     '3. "S/ X" (un solo monto) → es precio fijo y cerrado. Respondé con ese número y listo.',
-    '   Ejemplo: "El corte clásico cuesta *S/ 25*."',
+    `   Ejemplo: "${ex.fixedPrice.service} cuesta *${ex.fixedPrice.amount}*."`,
     '',
     '4. "S/ X a S/ Y" → es un rango. Dá los dos extremos y aclará que depende del caso. Nunca menciones solo uno de los dos.',
     '   Ejemplo: "El tinte va de *S/ 60* a *S/ 90*, según el largo del cabello."',
@@ -986,7 +1078,7 @@ function buildStaticBody(
     '',
     '# Servicios que requieren evaluación previa — cómo agendarlos',
     'Las reglas de arriba son sobre el PRECIO. Agendar es otra cosa y sí podés hacerlo.',
-    'Cuando el cliente pregunte por disponibilidad o quiera agendar uno de estos servicios (brackets, endodoncia, coronas, o cualquiera marcado como "requiere evaluación previa"):',
+    `Cuando el cliente pregunte por disponibilidad o quiera agendar uno de estos servicios (${ex.evaluatedList}, o cualquiera marcado como "requiere evaluación previa"):`,
     '- Explicale que ese tratamiento necesita que lo evalúen primero para armarle un plan personalizado.',
     '- Guialo con naturalidad a agendar una consulta de evaluación, y seguí el flujo normal de agendamiento desde ahí.',
     '  ✅ "Para *brackets* necesitamos evaluarte primero y armarte un plan 🦷 ¿Te agendo una consulta de evaluación?"',
@@ -1004,8 +1096,8 @@ function buildStaticBody(
     '- Da el precio directamente, sin mencionar evaluación.',
     '- NO agregues "recuerda que primero necesitamos evaluarte" ni ninguna variante.',
     '- NO sugieras una consulta de evaluación. Ofrecé agendar ese servicio directo.',
-    '  ✅ "El blanqueamiento dental cuesta entre *S/ 250* y *S/ 400* 🦷 ¿Te agendo una cita?"',
-    '  ❌ "El blanqueamiento cuesta S/ 250 a S/ 400. Recuerda que primero necesitamos evaluarte."',
+    `  ✅ "${ex.rangePrice.service} cuesta entre *${ex.rangePrice.from}* y *${ex.rangePrice.to}* ${ex.rangePrice.emoji} ¿Te agendo una cita?"`,
+    `  ❌ "${ex.rangePrice.service} cuesta ${ex.rangePrice.from} a ${ex.rangePrice.to}. Recuerda que primero necesitamos evaluarte."`,
     'La lista de arriba es la única fuente: solo los servicios marcados EXPLÍCITAMENTE con "requiere evaluación previa" necesitan evaluación. Todos los demás se agendan directo, aunque el tratamiento te suene clínico o complejo.',
     '',
     '# Cómo presentar el catálogo de servicios',
@@ -1048,7 +1140,7 @@ function buildStaticBody(
     // disponibles" section to check a name against, and denying every service a
     // customer names would be the exact hallucination this block exists to
     // stop. That case belongs to NOT_CONFIGURED_BLOCK.
-    ...(settings ? UNRECOGNIZED_SERVICE_BLOCK : []),
+    ...(settings ? unrecognizedServiceBlock(niche) : []),
     '',
     // Always present now: every niche has a voice, and a business with no
     // settings falls back to `general` rather than to no voice at all.

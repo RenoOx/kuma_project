@@ -1,8 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
-import { returnToEmma, sendReply, setQualification } from '../api/conversations.js'
+import { returnToEmma, sendReply } from '../api/conversations.js'
 import type { PendingMessage } from '../api/types.js'
-import type { ManualQualification } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
 /**
@@ -105,35 +104,6 @@ export function useReturnToEmma(conversationId: string | null) {
       void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
       void queryClient.invalidateQueries({
         queryKey: ['messages', session.businessId, conversationId],
-      })
-    },
-  })
-}
-
-/**
- * The owner setting the label by hand.
- *
- * Both the transcript and the list are invalidated: the badge lives in the chat
- * header, but the same label is drawn on the row behind it, and leaving that
- * stale for up to five seconds would look like the change did not take.
- */
-export function useSetQualification(conversationId: string | null) {
-  const session = useSession()
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (qualification: ManualQualification) => {
-      if (!conversationId) throw new Error('no conversation selected')
-      return await setQualification(session, conversationId, qualification)
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
-      void queryClient.invalidateQueries({
-        queryKey: ['messages', session.businessId, conversationId],
-      })
-      // The dashboard counts conversations by label, so it is stale too.
-      void queryClient.invalidateQueries({
-        queryKey: ['qualification-breakdown', session.businessId],
       })
     },
   })
