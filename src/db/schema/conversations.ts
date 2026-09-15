@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core'
+import { boolean, index, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core'
 import { nanoid } from 'nanoid'
 import { businesses } from './businesses.js'
 import { customers } from './customers.js'
@@ -13,19 +13,21 @@ export type ConversationStatus = (typeof conversationStatuses)[number]
 export const conversationTypes = ['customer', 'owner_thread'] as const
 export type ConversationType = (typeof conversationTypes)[number]
 
-// How interested this lead looks, for the panel's inbox. A FOURTH axis, kept
-// deliberately apart from the three that already exist:
+// RETIRED. Nothing reads or writes this any more — the owner's own tags (see
+// db/schema/tags.ts) replaced it, because a fixed set of seven labels decided by
+// the model was never going to describe somebody else's business.
+//
+// The tuple and both columns stay declared ONLY so drizzle-kit does not emit a
+// DROP on the next generate. Dropping them is its own migration, run once
+// production has spent a while not needing them.
+//
+// The three axes that remain:
 //   - `type`    → who is on the other end (customer / owner)
 //   - `status`  → whether the thread is open, closed or escalated
 //   - `state`   → where the flow stands (stateMachine.ts owns it)
-//   - `qualification` → how warm the lead is, for the human reading the inbox
-// Collapsing any of these into another looked tempting and is wrong: a thread
-// can be 'open' + 'await_payment' + 'human_takeover' all at once, and each
-// answers a different question.
-//
-// Two writers, and the fixed rules win over the model: classify_interest can
-// set 'qualified' / 'lost', but a booked appointment, an escalation or a human
-// reply overwrite whatever the LLM said.
+// Plus two facts that used to be folded into the qualification and are now read
+// directly: `humanTakeoverAt` (a person is holding this thread) and
+// `emmaEnabled` (the owner switched Emma off here).
 export const conversationQualifications = [
   'new',
   'qualified',
@@ -52,6 +54,7 @@ export const conversations = pgTable(
     type: text('type').notNull().default('customer').$type<ConversationType>(),
     status: text('status').notNull().default('open').$type<ConversationStatus>(),
     state: varchar('state', { length: 50 }).notNull().default('idle'),
+    /** @deprecated Retired — see the note above. Kept so generate emits no DROP. */
     qualification: text('qualification')
       .notNull()
       .default('new')
@@ -61,16 +64,14 @@ export const conversations = pgTable(
     // clock the auto-return worker reads, which is why it is a timestamp and
     // not a boolean.
     humanTakeoverAt: timestamp('human_takeover_at', { withTimezone: true }),
-    // Set when the OWNER picks the label by hand from the panel. The existing
-    // pin (LLM_PINNED_QUALIFICATIONS) protects by value — 'appointment' is a
-    // fact whoever wrote it — and cannot tell a label Emma inferred from one a
-    // person chose. This protects by origin: while it is set, neither
-    // classify_interest nor the ageing worker may overwrite the row.
-    //
-    // A timestamp rather than a boolean for the same reason as the field above:
-    // "when did they decide this" is the question anyone debugging a stuck
-    // label will ask.
+    /** @deprecated Retired with `qualification`. Kept so generate emits no DROP. */
     qualificationLockedAt: timestamp('qualification_locked_at', { withTimezone: true }),
+    // The owner's per-chat switch for Emma. Distinct from humanTakeoverAt,
+    // which is temporary and clears itself after 30 minutes: this one is a
+    // deliberate "I am handling this thread myself" and stays until switched
+    // back. Nothing clears it automatically — not the takeover worker, not
+    // "Devolver a Emma".
+    emmaEnabled: boolean('emma_enabled').notNull().default(true),
     lastMessageAt: timestamp('last_message_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -81,8 +82,7 @@ export const conversations = pgTable(
     index('conversations_last_message_at_idx').on(t.lastMessageAt),
     index('conversations_business_id_status_idx').on(t.businessId, t.status),
     index('conversations_business_id_type_idx').on(t.businessId, t.type),
-    // The inbox's default query: one business, filtered by qualification tab,
-    // newest first.
+    // Retired with the column. Kept so generate emits no DROP INDEX.
     index('conversations_business_id_qualification_idx').on(t.businessId, t.qualification),
     // The auto-return worker scans only rows with a takeover clock running.
     index('conversations_human_takeover_at_idx').on(t.humanTakeoverAt),

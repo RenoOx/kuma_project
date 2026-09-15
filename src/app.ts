@@ -7,6 +7,9 @@ import { dashboardRoutes } from "./modules/admin/dashboard.routes.js";
 import * as businessRepo from "./modules/business/business.repo.js";
 import { googleAuthRoutes } from "./modules/google/auth.routes.js";
 import { panelRoutes } from "./modules/panel/panel.routes.js";
+import { panelKnowledgeRoutes } from "./modules/panel/knowledge.routes.js";
+import { panelSettingsRoutes } from "./modules/panel/settings.routes.js";
+import { panelTagRoutes } from "./modules/panel/tag.routes.js";
 import { panelStaticRoutes } from "./modules/panel/panelStatic.js";
 import {
   getClient,
@@ -491,6 +494,9 @@ app.route("/", adminRoutes);
 // The panel's JSON API. Before the static mount below, which owns the SPA
 // fallback for everything under /panel.
 app.route("/", panelRoutes);
+app.route("/", panelSettingsRoutes);
+app.route("/", panelKnowledgeRoutes);
+app.route("/", panelTagRoutes);
 
 // LAST of the route mounts on purpose: the SPA fallback answers every
 // unmatched path under /panel, so anything that needs to win over it —

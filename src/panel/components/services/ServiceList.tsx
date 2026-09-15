@@ -1,0 +1,137 @@
+import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import type { PanelService } from '../../api/types.js'
+import { useSectionSave } from '../../hooks/useSettings.js'
+import { cn, formatServicePrice } from '../../lib/utils.js'
+import { Button } from '../ui/button.js'
+import { Switch } from '../ui/switch.js'
+import { SettingsCard } from '../config/SettingsCard.js'
+import { ServiceForm } from './ServiceForm.js'
+
+/**
+ * The service catalogue.
+ *
+ * The whole list is sent on save, like specialDays: services live in a jsonb
+ * array with no stable ids, so there is nothing to address one element by. The
+ * draft lives here until the owner saves it.
+ */
+export function ServiceList({ services }: { services: PanelService[] }): React.JSX.Element {
+  const { save, saving, saved, error } = useSectionSave()
+  const [draft, setDraft] = useState<PanelService[]>(services)
+  const [editing, setEditing] = useState<{ index: number | null } | null>(null)
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(services)
+  const activeCount = draft.filter((s) => s.active).length
+
+  const submit = (service: PanelService): void => {
+    setDraft((prev) =>
+      editing?.index === null || editing === null
+        ? [...prev, service]
+        : prev.map((s, i) => (i === editing.index ? service : s)),
+    )
+    setEditing(null)
+  }
+
+  return (
+    <>
+      <SettingsCard
+        title="Servicios"
+        description="Lo que Emma ofrece y cotiza. Un servicio desactivado no se menciona ni se puede agendar."
+        onSave={() => save({ section: 'services', services: draft })}
+        saving={saving}
+        saved={saved}
+        error={error}
+        dirty={dirty}
+      >
+        {draft.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            No hay servicios cargados. Emma no puede cotizar ni agendar sin al menos uno.
+          </p>
+        ) : (
+          <div className="flex flex-col divide-y divide-border">
+            {draft.map((service, index) => (
+              <ServiceRow
+                // Names can collide while being edited, so the index rides along.
+                key={`${service.name}-${index}`}
+                service={service}
+                onToggle={(active) =>
+                  setDraft((prev) => prev.map((s, i) => (i === index ? { ...s, active } : s)))
+                }
+                onEdit={() => setEditing({ index })}
+                onRemove={() => setDraft((prev) => prev.filter((_, i) => i !== index))}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* The server refuses a catalogue with nothing active, so say it here
+            rather than letting the save come back as a 400. */}
+        {draft.length > 0 && activeCount === 0 && (
+          <p className="text-destructive text-sm">
+            Al menos un servicio tiene que estar activo. Emma se queda sin nada que ofrecer.
+          </p>
+        )}
+
+        <div>
+          <Button variant="outline" size="sm" onClick={() => setEditing({ index: null })}>
+            <Plus size={14} aria-hidden />
+            Agregar servicio
+          </Button>
+        </div>
+      </SettingsCard>
+
+      <ServiceForm
+        open={editing !== null}
+        service={editing?.index === null || editing === null ? null : (draft[editing.index] ?? null)}
+        onClose={() => setEditing(null)}
+        onSubmit={submit}
+        error={null}
+      />
+    </>
+  )
+}
+
+function ServiceRow({
+  service,
+  onToggle,
+  onEdit,
+  onRemove,
+}: {
+  service: PanelService
+  onToggle: (active: boolean) => void
+  onEdit: () => void
+  onRemove: () => void
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-3 py-3">
+      <Switch
+        checked={service.active}
+        onCheckedChange={onToggle}
+        aria-label={`${service.active ? 'Desactivar' : 'Activar'} ${service.name}`}
+      />
+
+      <div className={cn('min-w-0 flex-1', !service.active && 'opacity-50')}>
+        <p className="truncate text-sm font-medium">{service.name}</p>
+        <p className="text-muted-foreground truncate text-xs">
+          {service.durationMinutes === null ? 'Sin duración fija' : `${service.durationMinutes} min`}
+          {' · '}
+          {formatServicePrice(service)}
+        </p>
+      </div>
+
+      <div className="flex items-center">
+        <Button variant="ghost" size="icon" onClick={onEdit} aria-label={`Editar ${service.name}`}>
+          <Pencil size={16} aria-hidden />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onRemove}
+          aria-label={`Eliminar ${service.name}`}
+        >
+          <Trash2 size={16} aria-hidden />
+        </Button>
+      </div>
+    </div>
+  )
+}

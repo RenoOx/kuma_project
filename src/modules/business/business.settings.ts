@@ -85,6 +85,12 @@ const serviceSchema = z
       .transform((v) => v ?? null),
     requiresEvaluation: z.boolean().default(false),
     referenceUrl: z.string().url().optional(),
+    // Whether Emma offers this service at all. Defaults to true so services
+    // configured before this field existed keep working without a data
+    // migration. Deactivating is not deleting: the price and duration survive,
+    // which is the point — a seasonal service comes back without being retyped.
+    // Read the list through activeServices(), never settings.services directly.
+    active: z.boolean().default(true),
   })
   .refine((s) => s.requiresEvaluation || s.priceMin !== null, {
     message: 'priceMin is required unless the service requires evaluation',
@@ -260,6 +266,22 @@ export function shouldForwardImages(settings: BusinessSettings): boolean {
   return settings.forwardImages || settings.requiresDeposit
 }
 
+/**
+ * The services Emma is allowed to offer.
+ *
+ * Every read of the service list goes through here. Filtering only in the
+ * prompt would leave a hole: Emma would stop MENTIONING a deactivated service
+ * while findKnownService still matched it, so a customer who named it by hand
+ * would get it booked anyway.
+ *
+ * Can return an empty array — the schema demands at least one service, not at
+ * least one active one. Callers render "sin servicios configurados" rather than
+ * assuming a first element.
+ */
+export function activeServices(settings: BusinessSettings): Service[] {
+  return settings.services.filter((s) => s.active)
+}
+
 // Renders the payment methods as one line, for the prompt and for the refusal
 // the model reads when the deposit gate blocks a booking.
 export function formatPaymentMethods(methods: DepositPaymentMethod[]): string {
@@ -390,4 +412,28 @@ export function parseBusinessSettings(businessId: string, raw: unknown): Result<
   }
 
   return ok(parsed.data)
+}
+
+/**
+ * Has the business switched automatic reminders OFF?
+ *
+ * Reads the RAW settings jsonb rather than a parsed BusinessSettings, and that
+ * is the whole point. `postBookingSchema` defaults `reminders` to false, so a
+ * business configured before the field existed parses as "reminders: false"
+ * despite never having made that choice — gating the worker on the parsed value
+ * would silently stop reminders that are going out today.
+ *
+ * So the gate is explicit-opt-out: only a stored `false` disables sending. An
+ * absent postBooking block, or an absent `reminders` key inside it, means the
+ * business never answered the question, and the behaviour it currently has is
+ * the one it keeps.
+ *
+ * The panel's toggle writes the full postBooking object, so a business that
+ * touches the switch always ends up with an explicit value either way.
+ */
+export function remindersExplicitlyDisabled(rawSettings: unknown): boolean {
+  if (typeof rawSettings !== 'object' || rawSettings === null) return false
+  const postBooking = (rawSettings as { postBooking?: unknown }).postBooking
+  if (typeof postBooking !== 'object' || postBooking === null) return false
+  return (postBooking as { reminders?: unknown }).reminders === false
 }

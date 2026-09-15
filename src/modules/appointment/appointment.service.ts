@@ -3,6 +3,7 @@ import { db } from '@/db/client.js'
 import type { Appointment, AppointmentStatus, Business } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
 import {
+  activeServices,
   type BusinessSettings,
   type DayBreak,
   type DayHours,
@@ -159,6 +160,10 @@ function toBusyIntervals(rows: Appointment[]): BusyInterval[] {
 // Longest appointment this business is able to create. Used only to widen the
 // lookback window when loading the day's appointments, so one that started
 // before midnight and runs into this day still blocks the slots it covers.
+//
+// Deliberately spans ALL services, not just active ones: an appointment booked
+// under a service that was deactivated afterwards still occupies its slots, and
+// narrowing the window would make those hours look free.
 function maxAppointmentMinutes(settings: BusinessSettings): number {
   return settings.services.reduce(
     (max, s) => Math.max(max, resolveServiceDurationMinutes(s, settings)),
@@ -191,9 +196,13 @@ function buildSlots(p: BuildSlotsParams): string[] {
   return slots
 }
 
+// Matches against ACTIVE services only. A deactivated service is one the
+// business is not offering right now, so naming it by hand must not be a way
+// around that — the prompt already stopped mentioning it, and this is what
+// stops it from being booked anyway.
 function findKnownService(settings: BusinessSettings, serviceName: string): Service | null {
   const normalized = normalizeServiceName(serviceName)
-  return settings.services.find((s) => normalizeServiceName(s.name) === normalized) ?? null
+  return activeServices(settings).find((s) => normalizeServiceName(s.name) === normalized) ?? null
 }
 
 function validationErrorForUnknownService(
@@ -207,7 +216,7 @@ function validationErrorForUnknownService(
     logContext: {
       businessId,
       service,
-      availableServices: settings.services.map((s) => s.name),
+      availableServices: activeServices(settings).map((s) => s.name),
     },
   })
 }

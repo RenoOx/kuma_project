@@ -458,6 +458,10 @@ async function parseSettingsFromForm(
       priceMin: optionalNumberField(formData, `service_${i}_price_min`),
       priceMax: optionalNumberField(formData, `service_${i}_price_max`),
       requiresEvaluation: formData.get(`service_${i}_requires_evaluation`) === 'on',
+      // This form has no active switch — the owner's panel owns that. Every row
+      // parses as active and the POST handler restores the real flag by name;
+      // see the remap below `parsed.data`.
+      active: true,
       ...(referenceUrl ? { referenceUrl } : {}),
     })
   }
@@ -2294,6 +2298,16 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     ...(existingRaw?.flowType ? { flowType: existingRaw.flowType } : {}),
     ...(existingRaw?.collectDataFields ? { collectDataFields: existingRaw.collectDataFields } : {}),
     ...(existingRaw?.postBooking ? { postBooking: existingRaw.postBooking } : {}),
+    // Same reasoning, one level down: the form has no active switch, so every
+    // service came back from the parse as active. Matching on the name is what
+    // is available — services have no stable id — so renaming one here does
+    // reactivate it. Accepted: this form is going away in favour of the panel,
+    // and the alternative is every save silently switching the whole catalogue
+    // back on.
+    services: parsed.data.services.map((service) => {
+      const previous = existingRaw?.services?.find((p) => p.name === service.name)
+      return previous ? { ...service, active: previous.active } : service
+    }),
   }
 
   await businessRepo.update(businessId, { settings: newSettings as Record<string, unknown> })

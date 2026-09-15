@@ -939,6 +939,22 @@ async function processMessage(
     await recordUnsupportedEvent(businessId, conversation.id, format, phone, log)
   }
 
+  // EMMA SWITCHED OFF FOR THIS THREAD — the owner flipped the per-chat toggle
+  // in the panel. Unlike the takeover below, nothing expires this: it holds
+  // until the owner switches it back on.
+  //
+  // Checked first because it is the stronger statement of the two. A thread can
+  // be both switched off and under an active takeover, and the answer is the
+  // same either way, but the log line should say which decision is doing the
+  // work.
+  if (!conversation.emmaEnabled) {
+    log.info(
+      { conversationId: conversation.id, phone, kind: payload.kind },
+      'emma switched off for this conversation; message stored, LLM skipped',
+    )
+    return
+  }
+
   // HUMAN TAKEOVER — the owner is answering this thread from the panel, so Emma
   // stays out of it. The message is already persisted above, which is the whole
   // job here: the panel polls the transcript, so the owner sees what the
@@ -952,39 +968,17 @@ async function processMessage(
   // string, and no LLM call, no send and no anti-ban timing happens past this
   // point. `conversation` is already in hand, so this gate costs nothing.
   //
+  // Read off humanTakeoverAt, which is the fact itself — the timestamp the
+  // panel sets when the owner replies and the worker clears after 30 minutes.
+  //
   // No reply of any kind: a canned "un momento" would be Emma talking over the
   // human who just took the thread.
-  if (conversation.qualification === 'human_takeover') {
+  if (conversation.humanTakeoverAt !== null) {
     log.info(
       { conversationId: conversation.id, phone, kind: payload.kind },
       'human takeover active; message stored, LLM skipped',
     )
     return
-  }
-
-  // REVIVED LEAD — a thread the system had written off just heard from the
-  // customer again. Back to 'new' before Emma reads it, so a person who returns
-  // a week later is served like anyone else instead of arriving pre-labelled as
-  // a lost cause.
-  //
-  // This also releases a label the owner had pinned by hand: their decision was
-  // made about a silent conversation, and the customer writing back is a newer
-  // fact than that decision. Placed after the takeover gate so it can never
-  // steal a thread a human is holding, and before the pause gate so that an
-  // escalation still gets the last word with 'needs_info'.
-  if (conversation.qualification === 'lost' || conversation.qualification === 'waiting') {
-    const revived = await conversationService.reactivate(businessId, conversation.id)
-    if (!revived.ok) {
-      log.error(
-        { conversationId: conversation.id, code: revived.error.code },
-        'reactivating conversation failed, continuing',
-      )
-    } else {
-      log.info(
-        { conversationId: conversation.id, from: conversation.qualification },
-        'customer returned; qualification reset to new',
-      )
-    }
   }
 
   // BOT PAUSED — keep the customer record + the message, but skip LLM and

@@ -31,7 +31,7 @@ import {
   reconnectDelayMs,
 } from './modules/whatsapp/sessionPolicy.js'
 import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
-import { runQualificationTransitionsGuarded } from './workers/qualificationTransitions.js'
+import { runTakeoverTimeoutGuarded } from './workers/takeoverTimeout.js'
 import { sendDueReminders } from './workers/sendReminders.js'
 
 const server = serve(
@@ -393,21 +393,16 @@ setInterval(() => {
 }, REMINDER_INTERVAL_MS).unref()
 logger.info({ intervalMs: REMINDER_INTERVAL_MS }, 'reminders worker scheduled (setInterval)')
 
-// Panel qualification transitions. Ages quiet leads (new/qualified → waiting →
-// lost) and hands a forgotten human takeover back to Emma after 30 minutes.
-// Shares the reminders cadence because both are 15-minute sweeps with their own
-// re-entry guard; kept as a separate timer so one stalling cannot delay the
-// other.
+// Hands a forgotten human takeover back to Emma after 30 minutes. Shares the
+// reminders cadence because both are 15-minute sweeps with their own re-entry
+// guard; kept as a separate timer so one stalling cannot delay the other.
 // TODO V1.5: migrar a BullMQ scheduled jobs junto con el worker de recordatorios.
 setInterval(() => {
-  runQualificationTransitionsGuarded().catch((err) => {
-    logger.error({ err }, 'qualification transitions job failed')
+  runTakeoverTimeoutGuarded().catch((err) => {
+    logger.error({ err }, 'takeover timeout job failed')
   })
 }, REMINDER_INTERVAL_MS).unref()
-logger.info(
-  { intervalMs: REMINDER_INTERVAL_MS },
-  'qualification transitions worker scheduled (setInterval)',
-)
+logger.info({ intervalMs: REMINDER_INTERVAL_MS }, 'takeover timeout worker scheduled (setInterval)')
 
 // Offline-number alerting. Does not reconnect anything — see healthMonitor.ts
 // for why recycling on silence would make things worse.

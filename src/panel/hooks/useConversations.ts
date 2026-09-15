@@ -1,11 +1,11 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { getConversations } from '../api/conversations.js'
 import type { ConversationListItem, Paged } from '../api/types.js'
-import type { Qualification } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
 export interface UseConversationsArgs {
-  qualification?: Qualification
+  /** One of the owner's tag ids. Absent means every conversation. */
+  tagId?: string
   search?: string
   page: number
 }
@@ -17,13 +17,13 @@ export function useConversations(args: UseConversationsArgs) {
     queryKey: [
       'conversations',
       session.businessId,
-      args.qualification ?? 'all',
+      args.tagId ?? 'all',
       args.search ?? '',
       args.page,
     ],
     queryFn: () =>
       getConversations(session, {
-        ...(args.qualification ? { qualification: args.qualification } : {}),
+        ...(args.tagId ? { tagId: args.tagId } : {}),
         ...(args.search ? { search: args.search } : {}),
         page: args.page,
       }),

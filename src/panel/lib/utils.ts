@@ -128,3 +128,28 @@ export function formatPhone(raw: string | null | undefined): string {
   const grouped = local.replace(/(\d{3})(?=\d)/g, '$1 ')
   return country ? `+${country} ${grouped}` : `+${grouped}`
 }
+
+/**
+ * A service's price, in the three shapes it can take.
+ *
+ * Mirrors formatServicePrice on the server so the catalogue in the panel reads
+ * exactly like the line Emma puts in her prompt. Kept in sync by hand, like the
+ * rest of api/types.ts — the two builds cannot share a module.
+ */
+export function formatServicePrice(service: {
+  priceMin: number | null
+  priceMax: number | null
+  requiresEvaluation: boolean
+}): string {
+  const { priceMin, priceMax, requiresEvaluation } = service
+
+  if (requiresEvaluation) {
+    return priceMin === null
+      ? 'requiere evaluación previa'
+      : `desde S/ ${priceMin} (requiere evaluación previa)`
+  }
+  if (priceMin === null) return 'precio no configurado'
+  if (priceMax === null) return `desde S/ ${priceMin}`
+  if (priceMin === priceMax) return `S/ ${priceMin}`
+  return `S/ ${priceMin} a S/ ${priceMax}`
+}

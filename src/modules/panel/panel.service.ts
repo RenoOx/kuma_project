@@ -1,5 +1,5 @@
 import { logger } from '@/config/logger.js'
-import type { Business, ConversationQualification } from '@/db/schema/index.js'
+import type { Business } from '@/db/schema/index.js'
 import type { OperatingHours } from '@/modules/business/business.settings.js'
 import { parseBusinessSettings } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
@@ -100,7 +100,7 @@ export async function sendOwnerReply(
     )
   }
 
-  await conversationRepo.setHumanTakeover(businessId, conversationId, new Date(), 'human_takeover')
+  await conversationRepo.setHumanTakeover(businessId, conversationId, new Date())
 
   logger.info({ businessId, conversationId }, 'owner replied from panel, takeover started')
   return ok({ messageId: persisted.ok ? persisted.data.id : '' })
@@ -109,9 +109,10 @@ export async function sendOwnerReply(
 /**
  * Hands the thread back to Emma (US-11).
  *
- * Resets to 'new' rather than to whatever it was before the takeover: the
- * previous label was formed from a conversation a human has since changed, so
- * it is stale by definition. Emma re-labels it on her next reply.
+ * Clears the takeover clock and nothing else. In particular it does NOT switch
+ * `emmaEnabled` back on: handing back a thread you were holding and undoing a
+ * deliberate "Emma stays out of this chat" are two different decisions, and
+ * only the owner makes the second one.
  */
 export async function returnToEmma(
   businessId: string,
@@ -125,11 +126,7 @@ export async function returnToEmma(
   }
 
   try {
-    await conversationRepo.setHumanTakeover(businessId, conversationId, null, 'new')
-    // Handing the thread back means handing the label back too: keeping the
-    // lock would leave Emma answering a conversation she is not allowed to
-    // re-label.
-    await conversationRepo.clearQualificationLock(businessId, conversationId)
+    await conversationRepo.setHumanTakeover(businessId, conversationId, null)
     logger.info({ businessId, conversationId }, 'conversation returned to Emma from panel')
     return ok(undefined)
   } catch (cause) {
@@ -201,54 +198,4 @@ export function nicheOf(business: Business): string {
 export function operatingHoursOf(business: Business): OperatingHours | null {
   const settings = parseBusinessSettings(business.id, business.settings)
   return settings.ok ? settings.data.operatingHours : null
-}
-
-/**
- * The owner setting the label by hand (Feature A).
- *
- * Locked on write, so this outranks both classify_interest and the ageing
- * worker. 'appointment' and 'human_takeover' are refused: those two describe
- * events — a booking was filed, a person answered — and a panel that lets you
- * assert them by hand would report conversions that never happened.
- */
-export const MANUALLY_SETTABLE_QUALIFICATIONS = [
-  'new',
-  'qualified',
-  'needs_info',
-  'waiting',
-  'lost',
-] as const satisfies readonly ConversationQualification[]
-
-export type ManualQualification = (typeof MANUALLY_SETTABLE_QUALIFICATIONS)[number]
-
-export async function setQualificationByOwner(
-  businessId: string,
-  conversationId: string,
-  qualification: ManualQualification,
-): Promise<Result<void>> {
-  const conversation = await panelRepo.findConversation(businessId, conversationId)
-  if (!conversation) {
-    return err(
-      new NotFoundError({ resource: 'conversation', logContext: { businessId, conversationId } }),
-    )
-  }
-
-  try {
-    await conversationRepo.lockQualification(businessId, conversationId, qualification)
-    logger.info(
-      { businessId, conversationId, qualification },
-      'qualification set by owner from panel',
-    )
-    return ok(undefined)
-  } catch (cause) {
-    return err(
-      new AppError({
-        code: 'set_qualification_failed',
-        message: cause instanceof Error ? cause.message : 'unknown error',
-        userMessage: 'No pudimos cambiar la etiqueta.',
-        logContext: { businessId, conversationId, qualification },
-        cause,
-      }),
-    )
-  }
 }

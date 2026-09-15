@@ -1,6 +1,6 @@
 import { MessageSquare } from 'lucide-react'
 import { useCustomerDetail } from '../../hooks/useCustomers.js'
-import { APPOINTMENT_META, QUALIFICATION_META } from '../../lib/constants.js'
+import { APPOINTMENT_META } from '../../lib/constants.js'
 import { PanelLink } from '../../lib/session.js'
 import { cn, formatLongDateTime, formatPhone, timeAgo } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
@@ -96,27 +96,24 @@ export function CustomerDetail({
                 {data.conversations.length === 0 && (
                   <p className="text-muted-foreground text-sm">Sin conversaciones.</p>
                 )}
-                {data.conversations.map((conversation) => {
-                  const meta = QUALIFICATION_META[conversation.qualification]
-                  return (
-                    <div
-                      key={conversation.id}
-                      className="bg-card flex items-center justify-between gap-2 rounded-md border border-border p-2.5"
-                    >
-                      <p className="text-muted-foreground text-xs">
-                        {conversation.lastMessageAt
-                          ? `Último mensaje ${timeAgo(conversation.lastMessageAt)}`
-                          : 'Sin mensajes'}
-                      </p>
-                      <Badge
-                        variant="secondary"
-                        className={cn('shrink-0 rounded-full', meta.className)}
-                      >
-                        {meta.label}
-                      </Badge>
-                    </div>
-                  )
-                })}
+                {data.conversations.map((conversation) => (
+                  <div
+                    key={conversation.id}
+                    className="bg-card flex items-center justify-between gap-2 rounded-md border border-border p-2.5"
+                  >
+                    <p className="text-muted-foreground text-xs">
+                      {conversation.lastMessageAt
+                        ? `Último mensaje ${timeAgo(conversation.lastMessageAt)}`
+                        : 'Sin mensajes'}
+                    </p>
+                    {/* The label used to be the qualification. Status is what is
+                        left that describes the thread without the owner having
+                        tagged it — their own tags live in the inbox. */}
+                    <Badge variant="secondary" className="shrink-0 rounded-full">
+                      {conversation.status === 'escalated' ? 'Escalada' : 'Abierta'}
+                    </Badge>
+                  </div>
+                ))}
               </section>
             </>
           )}

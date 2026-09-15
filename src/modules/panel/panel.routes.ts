@@ -2,7 +2,6 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { logger } from '@/config/logger.js'
-import { conversationQualifications } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
 import type { AppError } from '@/shared/errors.js'
@@ -108,7 +107,10 @@ panelRoutes.get('/api/panel/:businessId/updates', async (c) => {
 })
 
 const conversationsSchema = paginationSchema.extend({
-  qualification: z.enum(conversationQualifications).optional(),
+  // Filter by one of the owner's own labels. A tag id rather than a name: names
+  // are editable, and a filter that breaks when a label is renamed is a filter
+  // the owner stops trusting.
+  tagId: z.string().min(1).optional(),
   search: z.string().trim().max(100).optional(),
   sort: z.literal('recent').default('recent'),
 })
@@ -118,7 +120,7 @@ panelRoutes.get('/api/panel/:businessId/conversations', async (c) => {
   if (!query.ok) return query.res
 
   const page = await panelRepo.listConversations(panelBusiness(c).id, {
-    ...(query.data.qualification ? { qualification: query.data.qualification } : {}),
+    ...(query.data.tagId ? { tagId: query.data.tagId } : {}),
     ...(query.data.search ? { search: query.data.search } : {}),
     page: query.data.page,
     limit: query.data.limit,
@@ -152,7 +154,13 @@ panelRoutes.get('/api/panel/:businessId/conversations/:conversationId/messages',
     query.data.limit,
     query.data.order,
   )
-  return c.json({ ...page, qualification: conversation.qualification })
+  // The chat header needs to know whether a human is holding this thread, which
+  // used to ride along as a qualification. The timestamp is the fact itself.
+  return c.json({
+    ...page,
+    humanTakeoverAt: conversation.humanTakeoverAt?.toISOString() ?? null,
+    emmaEnabled: conversation.emmaEnabled,
+  })
 })
 
 // ── Human takeover ───────────────────────────────────────────────────────────
@@ -183,36 +191,6 @@ panelRoutes.post(
     if (!unwrapped.ok) return unwrapped.res
 
     return c.json({ success: true })
-  },
-)
-
-/**
- * The owner re-labelling a thread by hand (Feature A).
- *
- * The enum comes from panel.service rather than from the full
- * conversationQualifications tuple: 'appointment' and 'human_takeover' are
- * facts the system records, not opinions a person may assert, so they are not
- * offered here and a request carrying one is a 400.
- */
-const qualificationSchema = z.object({
-  qualification: z.enum(panelService.MANUALLY_SETTABLE_QUALIFICATIONS),
-})
-
-panelRoutes.patch(
-  '/api/panel/:businessId/conversations/:conversationId/qualification',
-  async (c) => {
-    const body = await parseBody(c, qualificationSchema)
-    if (!body.ok) return body.res
-
-    const result = await panelService.setQualificationByOwner(
-      panelBusiness(c).id,
-      c.req.param('conversationId'),
-      body.data.qualification,
-    )
-    const unwrapped = unwrap(c, result)
-    if (!unwrapped.ok) return unwrapped.res
-
-    return c.json({ success: true, qualification: body.data.qualification })
   },
 )
 
@@ -337,8 +315,11 @@ panelRoutes.get('/api/panel/:businessId/stats', async (c) => {
   return c.json(stats)
 })
 
-panelRoutes.get('/api/panel/:businessId/stats/qualification-breakdown', async (c) => {
-  return c.json(await panelRepo.getQualificationBreakdown(panelBusiness(c).id))
+// Facts the system already knows, rather than a read of how warm each lead is.
+// Nothing here depends on anyone having labelled anything, so it has numbers on
+// day one and for a business that never creates a single tag.
+panelRoutes.get('/api/panel/:businessId/stats/overview', async (c) => {
+  return c.json(await panelRepo.getOverview(panelBusiness(c).id))
 })
 
 const activitySchema = z.object({

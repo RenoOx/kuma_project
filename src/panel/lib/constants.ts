@@ -2,73 +2,51 @@
 // value to something a human reads lives here, so a new qualification state or
 // a new niche is one edit rather than a grep across components.
 
-export const QUALIFICATIONS = [
-  'new',
-  'qualified',
-  'needs_info',
-  'appointment',
-  'waiting',
-  'lost',
-  'human_takeover',
+// Labels the owner invents for their own conversations. Replaced the fixed
+// `qualification` enum: a set of seven values shipped from here was never going
+// to describe somebody else's business.
+//
+// The palette is closed on purpose — the panel renders on a near-black ground,
+// and a brand colour picked freely can land on a pill nobody can read. These ten
+// are checked against that background. Mirrors TAG_COLORS on the server, which
+// is the authority: a value missing there is a 400.
+export const TAG_COLORS = [
+  'emerald',
+  'blue',
+  'violet',
+  'rose',
+  'amber',
+  'cyan',
+  'pink',
+  'indigo',
+  'orange',
+  'teal',
 ] as const
 
-export type Qualification = (typeof QUALIFICATIONS)[number]
+export type TagColor = (typeof TAG_COLORS)[number]
 
-// What the owner may pick by hand in the chat header. Mirrors
-// MANUALLY_SETTABLE_QUALIFICATIONS on the server, which is the authority: a
-// value missing there is a 400, not a silent no-op.
-//
-// 'appointment' and 'human_takeover' are absent on purpose. Both are records of
-// something that happened — a booking was filed, a person answered — and
-// asserting them by hand would put a conversion in the dashboard that no
-// appointment backs.
-export const MANUAL_QUALIFICATIONS = [
-  'new',
-  'qualified',
-  'needs_info',
-  'waiting',
-  'lost',
-] as const satisfies readonly Qualification[]
-
-export type ManualQualification = (typeof MANUAL_QUALIFICATIONS)[number]
-
-interface QualificationMeta {
-  label: string
-  /** Tailwind classes for the badge. Tinted background, solid text. */
+interface TagColorMeta {
+  /** Tinted background + solid text, the same recipe the old badges used. */
   className: string
-  /** Solid fill, for the dot in the label menu where there is no pill to tint. */
+  /** Solid fill, for the dot in a menu where there is no pill to tint. */
   dotClassName: string
 }
 
-export const QUALIFICATION_META: Record<Qualification, QualificationMeta> = {
-  new: { label: 'Nuevo', className: 'bg-q-new/15 text-q-new', dotClassName: 'bg-q-new' },
-  qualified: {
-    label: 'Calificado',
-    className: 'bg-q-qualified/15 text-q-qualified',
-    dotClassName: 'bg-q-qualified',
-  },
-  needs_info: {
-    label: 'Necesita info',
-    className: 'bg-q-needs-info/15 text-q-needs-info',
-    dotClassName: 'bg-q-needs-info',
-  },
-  appointment: {
-    label: 'Cita',
-    className: 'bg-q-appointment/20 text-q-qualified',
-    dotClassName: 'bg-q-appointment',
-  },
-  waiting: {
-    label: 'Esperando',
-    className: 'bg-q-waiting/15 text-q-waiting',
-    dotClassName: 'bg-q-waiting',
-  },
-  lost: { label: 'Perdido', className: 'bg-q-lost/15 text-q-lost', dotClassName: 'bg-q-lost' },
-  human_takeover: {
-    label: 'Humano',
-    className: 'bg-q-human/15 text-q-human',
-    dotClassName: 'bg-q-human',
-  },
+export const TAG_COLOR_META: Record<TagColor, TagColorMeta> = {
+  emerald: { className: 'bg-emerald-500/15 text-emerald-400', dotClassName: 'bg-emerald-500' },
+  blue: { className: 'bg-blue-500/15 text-blue-400', dotClassName: 'bg-blue-500' },
+  violet: { className: 'bg-violet-500/15 text-violet-400', dotClassName: 'bg-violet-500' },
+  rose: { className: 'bg-rose-500/15 text-rose-400', dotClassName: 'bg-rose-500' },
+  amber: { className: 'bg-amber-500/15 text-amber-400', dotClassName: 'bg-amber-500' },
+  cyan: { className: 'bg-cyan-500/15 text-cyan-400', dotClassName: 'bg-cyan-500' },
+  pink: { className: 'bg-pink-500/15 text-pink-400', dotClassName: 'bg-pink-500' },
+  indigo: { className: 'bg-indigo-500/15 text-indigo-400', dotClassName: 'bg-indigo-500' },
+  orange: { className: 'bg-orange-500/15 text-orange-400', dotClassName: 'bg-orange-500' },
+  teal: { className: 'bg-teal-500/15 text-teal-400', dotClassName: 'bg-teal-500' },
 }
+
+/** Mirrors MAX_TAGS_PER_BUSINESS on the server. */
+export const MAX_TAGS = 10
 
 // Mirrors appointmentStatuses in the Drizzle schema. 'pending' is what a
 // business on bookingMode 'requires_approval' produces and is the only status
@@ -186,3 +164,49 @@ export const POLL_MS = {
   dashboard: 30_000,
   health: 30_000,
 } as const
+
+// ── Services, payments and knowledge base ────────────────────────────────────
+
+// Mirrors DEPOSIT_METHOD_LABELS on the server. The set is closed: these four are
+// what Peruvian businesses actually collect with.
+export const DEPOSIT_METHODS = ['yape', 'plin', 'transferencia', 'efectivo'] as const
+
+export const DEPOSIT_METHOD_LABELS: Record<(typeof DEPOSIT_METHODS)[number], string> = {
+  yape: 'Yape',
+  plin: 'Plin',
+  transferencia: 'Transferencia',
+  efectivo: 'Efectivo',
+}
+
+// Only the three active categories. The four retired ones (ubicacion, servicios,
+// precios, contacto) duplicated business settings and nothing writes them any
+// more — see KB_CATEGORIES on the server.
+export const KB_CATEGORIES = ['politicas', 'informacion_general', 'promociones'] as const
+
+export const KB_CATEGORY_LABELS: Record<(typeof KB_CATEGORIES)[number], string> = {
+  politicas: 'Políticas',
+  informacion_general: 'Preguntas frecuentes',
+  promociones: 'Promociones',
+}
+
+export const KB_SEND_MODE_LABELS: Record<'always' | 'on_request' | 'trigger_based', string> = {
+  always: 'Siempre',
+  on_request: 'Bajo pedido',
+  trigger_based: 'Por palabras clave',
+}
+
+export const KB_ATTACHMENT_TYPE_LABELS: Record<
+  'none' | 'link' | 'image' | 'pdf' | 'video',
+  string
+> = {
+  none: 'Sin adjunto',
+  link: 'Enlace',
+  image: 'Imagen',
+  pdf: 'PDF',
+  video: 'Video',
+}
+
+// Emma loads at most this many entries from one category, oldest first. Past it,
+// the newest entries never reach her — the list warns when a category crosses
+// the line. Mirrors MAX_ENTRIES_PER_QUERY in knowledgeBaseSearch.service.ts.
+export const MAX_KB_ENTRIES_PER_CATEGORY = 5

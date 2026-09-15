@@ -1,4 +1,4 @@
-import { CalendarDays, LayoutDashboard, MessageSquare, Users } from 'lucide-react'
+import { CalendarDays, LayoutDashboard, MessageSquare, Settings, Wrench } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { usePendingAppointmentCount } from '../../hooks/useAppointments.js'
 import { type NicheCopy, nicheCopy } from '../../lib/constants.js'
@@ -19,7 +19,8 @@ const NAV: NavItem[] = [
   { to: '/', label: () => 'Inbox', icon: MessageSquare },
   { to: '/dashboard', label: () => 'Dashboard', icon: LayoutDashboard },
   { to: '/citas', label: (copy) => copy.appointmentsLabel, icon: CalendarDays, showsPending: true },
-  { to: '/contactos', label: (copy) => copy.contactsLabel, icon: Users },
+  { to: '/servicios', label: () => 'Servicios', icon: Wrench },
+  { to: '/configuracion', label: () => 'Configuración', icon: Settings },
 ]
 
 export function Sidebar({ niche }: { niche: string | undefined }): React.JSX.Element {

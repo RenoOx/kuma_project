@@ -8,7 +8,11 @@ import type {
   DayKey,
   Niche,
 } from '@/modules/business/business.settings.js'
-import { formatPaymentMethods, formatServicePrice } from '@/modules/business/business.settings.js'
+import {
+  activeServices,
+  formatPaymentMethods,
+  formatServicePrice,
+} from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 
 function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
@@ -396,7 +400,12 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 
 // Duration is omitted rather than faked when the business never set one —
 // the model must not read a fallback slot length as a promise to the customer.
+//
+// Deactivated services never reach here: the caller passes activeServices(),
+// and a business with none active gets an explicit line rather than an empty
+// heading the model would fill in on its own.
 function renderServices(services: BusinessSettings['services']): string {
+  if (services.length === 0) return '(El negocio no tiene servicios activos en este momento.)'
   return services
     .map((s) => {
       const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
@@ -432,7 +441,7 @@ function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): st
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
-    renderServices(settings.services),
+    renderServices(activeServices(settings)),
     '',
     '## Horarios',
     renderOperatingHours(settings.operatingHours),

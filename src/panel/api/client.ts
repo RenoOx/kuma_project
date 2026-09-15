@@ -26,6 +26,12 @@ export class PanelApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /**
+     * The server's `message`, which is an AppError's userMessage — the field
+     * built to be safe to show. Optional because not every error shape carries
+     * one; a caller that wants to render it has to handle its absence.
+     */
+    readonly userMessage?: string,
   ) {
     super(`panel api ${status}: ${code}`)
     this.name = 'PanelApiError'
@@ -45,8 +51,8 @@ function buildUrl(session: PanelSession, path: string, params?: Record<string, s
 
 async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new PanelApiError(res.status, body.error ?? 'unknown_error')
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
+    throw new PanelApiError(res.status, body.error ?? 'unknown_error', body.message)
   }
   return (await res.json()) as T
 }
@@ -64,14 +70,17 @@ export async function apiGet<T>(
 
 export async function apiSend<T>(
   session: PanelSession,
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body?: unknown,
 ): Promise<T> {
   const res = await fetch(buildUrl(session, path), {
     method,
     headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(body ?? {}),
+    // DELETE carries no body. Some proxies drop a request body on DELETE and
+    // others reject it outright, so the header/body pair is simply omitted
+    // rather than sent as an empty object nobody reads.
+    ...(method === 'DELETE' ? {} : { body: JSON.stringify(body ?? {}) }),
   })
   return await parse<T>(res)
 }

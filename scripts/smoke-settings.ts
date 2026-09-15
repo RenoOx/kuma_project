@@ -61,6 +61,7 @@ async function main(): Promise<void> {
           priceMin: 30,
           priceMax: 30,
           requiresEvaluation: false,
+          active: true,
         },
         {
           name: 'barba',
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
           priceMin: 20,
           priceMax: 20,
           requiresEvaluation: false,
+          active: true,
         },
       ],
     })
