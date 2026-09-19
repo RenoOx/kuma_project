@@ -1,6 +1,6 @@
 ---
 name: config-sync
-description: Verifica que cada configuración del panel del cliente se refleje en el comportamiento de Emma. Úsala al agregar o migrar cualquier campo de configuración (horarios, días especiales, servicios, métodos de pago, adelanto, modo de reserva, FAQs, políticas, promos, recordatorios, toggles de Emma) desde el admin al panel, o al tocar business.settings, prompts.ts, llm.service.ts, stateMachine.ts o handler.ts. Incluye el mapa config→comportamiento, los test cases de sincronización y dónde vive realmente cada dato.
+description: Verifica que cada configuración del panel del cliente se refleje en el comportamiento de Emma. Úsala al agregar o cambiar cualquier campo de configuración (horarios, días especiales, servicios, métodos de pago, adelanto, modo de reserva, FAQs, políticas, promos, recordatorios, toggles de Emma), o al tocar business.settings, settings.merge.ts, prompts.ts, llm.service.ts, stateMachine.ts o handler.ts. Incluye el mapa config→comportamiento, los test cases de sincronización y dónde vive realmente cada dato.
 ---
 
 # Skill: Config ↔ Emma Sync
@@ -157,7 +157,7 @@ de todos los patch schemas a propósito.
 
 ## Test cases de sincronización
 
-Después de migrar cada sección del admin al panel, verificar:
+Después de tocar cualquier campo de configuración, verificar:
 
 ```
 HORARIOS:
@@ -196,14 +196,16 @@ NOMBRE DEL CLIENTE:
 19. En todo el flujo de agendamiento → Emma usa el nombre guardado
 ```
 
-## Pendiente (no implementado todavía)
+## Etiquetas y el switch de Emma (ya implementados)
 
-Esto NO existe en el código. Es del roadmap de `MIGRATION_PLAN.md`, bloque C:
+- Tablas `tags` y `conversation_tags`: etiquetas libres que el dueño inventa,
+  con su color. Reemplazaron al enum `qualification`, hoy deprecado.
+- `conversations.emma_enabled`: apaga a Emma en UN chat. Su gate está en
+  `handler.ts`, antes del de pausa.
+- El apagado global NO es una columna: es `settings.botPaused`, que ya existía
+  con su propio gate y su mensaje canned. Dos switches para un comportamiento
+  habría sido un switch de más.
 
-- Tablas `tags` y `conversation_tags`
-- `conversations.emma_enabled` y `businesses.emma_global_enabled`
-- Toggle de Emma por chat y global, con su gate en `handler.ts`
-
-La expansión de `niche` de 5 a 10 valores es del bloque E: es un cambio de enum
-con datos vivos en producción, necesita mapeo (`barberia` → `barberia_premium`)
-y toca `prompts.ts`.
+La expansión de `niche` de 5 a 10 valores quedó **descartada**: PANEL_SPEC
+hablaba de cinco, y sacar o renombrar `barberia` deja al cliente en producción
+con settings que no validan, o sea sin información operativa.

@@ -961,8 +961,8 @@ async function processMessage(
   // job here: the panel polls the transcript, so the owner sees what the
   // customer keeps writing while they hold the conversation.
   //
-  // Placed here, not in handleIncomingMessage where PANEL_SPEC's AC5 asks for
-  // "before the debounce": neither the customer nor the conversation exists
+  // Placed here, not in handleIncomingMessage "before the debounce" as the
+  // panel spec asked: neither the customer nor the conversation exists
   // that early, and resolving them there would mean two extra queries on every
   // inbound message plus a second place that knows how to find a thread. The
   // effect is identical — the debounce only joins consecutive texts into one
