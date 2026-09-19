@@ -242,7 +242,7 @@ export const appointmentsFlow: FlowDefinition = {
 
 // Sales flow: courses, certifications, campaign selling. Ends on a paid
 // enrollment with the customer's data collected.
-//
+//asdasd
 // No check_availability and no book_appointment anywhere: there is no slot to
 // reserve. Several states carry only ESCALATE because the tools this flow needs
 // have not been built yet — see the comments below. No name in this file refers
