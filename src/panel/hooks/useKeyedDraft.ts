@@ -39,6 +39,26 @@ export function useKeyedDraft<T>(initial: T[]): KeyedDraft<T> {
     initial.map((value) => ({ key: mint(), value })),
   )
 
+  // Re-seeded when the SERVER's list changes, which the lazy initializer above
+  // cannot do on its own — it runs once and never looks again.
+  //
+  // Without this the card never comes clean after a save. Adding a service
+  // sends it with no id; the server mints one and answers with it; the draft
+  // keeps the id-less copy, so `dirty` stays true forever, the "Guardado" tick
+  // never appears and the button stays lit. The row IS in Postgres — the panel
+  // just has no way to admit it.
+  //
+  // Compared by CONTENT, not identity: every refetch hands back a fresh array,
+  // so a reference check would re-seed on any invalidation and throw away edits
+  // in progress. By content, saving a different card on the same screen leaves
+  // this list byte-identical and the draft untouched.
+  const served = JSON.stringify(initial)
+  const [syncedTo, setSyncedTo] = useState(served)
+  if (syncedTo !== served) {
+    setSyncedTo(served)
+    setRows(initial.map((value) => ({ key: mint(), value })))
+  }
+
   return {
     rows,
     values: rows.map((row) => row.value),
