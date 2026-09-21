@@ -1,12 +1,14 @@
 import { logger } from '@/config/logger.js'
 import type { Appointment, PaymentVerification } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
+import { configuredMessage } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { AppError } from '@/shared/errors.js'
 import { formatPersonName } from '@/shared/name.js'
 import { err, ok, type Result } from '@/shared/result.js'
+import { renderTemplate } from '@/shared/templates.js'
 import * as appointmentService from './appointment.service.js'
 import * as paymentVerificationRepo from './paymentVerification.repo.js'
 
@@ -32,6 +34,8 @@ export async function openVerification(params: {
   conversationId: string
   customerId: string
   booking: FrozenBooking
+  /** S3 key of the archived capture. Null when storage is off or the upload failed. */
+  proofKey?: string | null
 }): Promise<Result<PaymentVerification>> {
   const scheduledAt = new Date(params.booking.scheduledAtISO)
   if (Number.isNaN(scheduledAt.getTime())) {
@@ -58,6 +62,7 @@ export async function openVerification(params: {
       scheduledAt,
       depositAmount: params.booking.amount,
       customerName: params.booking.customerName,
+      proofKey: params.proofKey ?? null,
     })
     logger.info(
       {
@@ -335,11 +340,25 @@ export async function reject(params: {
     )
   }
 
+  // Read for the owner's own wording. Not fatal: a settings lookup that blips
+  // must not turn a recorded rejection into an error, so it falls through to the
+  // built-in text.
+  const settings = await businessService.getSettings(params.businessId)
+  const configured = configuredMessage(settings.ok ? settings.data : null, 'paymentRejected')
+  // Null for anything that is not a usable name ("💕", "-"). Left out of the vars
+  // in that case so renderTemplate drops the placeholder instead of printing null.
+  const displayName = formatPersonName(verification.customerName)
+
   const notified = await appointmentService.messagePatient({
     businessId: params.businessId,
     customerId: customer.id,
     phone: customer.phone,
-    text: buildResendRequestText(verification.customerName, params.reason),
+    text: configured
+      ? renderTemplate(configured, {
+          ...(displayName ? { nombre_cliente: displayName } : {}),
+          servicio: verification.service,
+        })
+      : buildResendRequestText(verification.customerName, params.reason),
   })
 
   logger.info(

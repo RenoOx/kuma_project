@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AppointmentMode, Niche, PanelSettings } from '../../api/types.js'
+import type { Niche, PanelSettings } from '../../api/types.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
 import { NICHES } from '../../lib/constants.js'
 import { Input } from '../ui/input.js'
@@ -18,11 +18,6 @@ const NICHE_LABELS: Record<Niche, string> = {
   general: 'Otro',
 }
 
-const APPOINTMENT_MODE_LABELS: Record<AppointmentMode, string> = {
-  appointments_only: 'Solo con cita previa',
-  hybrid: 'Por orden de llegada + citas',
-}
-
 // Peru is the only market Emma serves today, but the field is a select rather
 // than a fixed value so a business on a different offset is a config change
 // instead of a deploy. The server validates against the host's ICU data.
@@ -37,9 +32,6 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
   const [googleMapsUrl, setGoogleMapsUrl] = useState(data.googleMapsUrl ?? '')
   const [timezone, setTimezone] = useState(data.timezone)
   const [niche, setNiche] = useState<Niche>(data.settings?.niche ?? 'general')
-  const [appointmentMode, setAppointmentMode] = useState<AppointmentMode>(
-    data.settings?.appointmentMode ?? 'appointments_only',
-  )
 
   const dirty =
     name !== data.name ||
@@ -47,8 +39,7 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
     address !== (data.address ?? '') ||
     googleMapsUrl !== (data.googleMapsUrl ?? '') ||
     timezone !== data.timezone ||
-    niche !== (data.settings?.niche ?? 'general') ||
-    appointmentMode !== (data.settings?.appointmentMode ?? 'appointments_only')
+    niche !== (data.settings?.niche ?? 'general')
 
   const onSave = (): void => {
     save({
@@ -60,7 +51,6 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
         googleMapsUrl,
         timezone,
         niche,
-        appointmentMode,
       },
     })
   }
@@ -106,28 +96,6 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
             {NICHES.map((value) => (
               <SelectItem key={value} value={value}>
                 {NICHE_LABELS[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-
-      <Field
-        label="Modo de atención"
-        hint="Si atendés por orden de llegada, Emma lo ofrece como alternativa a la cita."
-        htmlFor="cfg-mode"
-      >
-        <Select
-          value={appointmentMode}
-          onValueChange={(v) => setAppointmentMode(v as AppointmentMode)}
-        >
-          <SelectTrigger id="cfg-mode">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(APPOINTMENT_MODE_LABELS) as AppointmentMode[]).map((value) => (
-              <SelectItem key={value} value={value}>
-                {APPOINTMENT_MODE_LABELS[value]}
               </SelectItem>
             ))}
           </SelectContent>

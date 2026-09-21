@@ -1,5 +1,6 @@
 import type { KbCategory } from '@/db/schema/index.js'
 import type { BusinessSettings, Service } from '@/modules/business/business.settings.js'
+import { DEFAULT_ASSISTANT_FIELDS } from '@/modules/business/business.settings.js'
 
 export interface DemoKbEntry {
   category: KbCategory
@@ -55,6 +56,7 @@ function service(
 const BARBERIA: DemoProfile = {
   name: 'Imperio Barber Studio',
   settings: {
+    ...DEFAULT_ASSISTANT_FIELDS,
     niche: 'barberia',
     bookingMode: 'direct',
     forwardImages: false,
@@ -127,6 +129,7 @@ const BARBERIA: DemoProfile = {
 const CONSULTORIO: DemoProfile = {
   name: 'Dental Smile',
   settings: {
+    ...DEFAULT_ASSISTANT_FIELDS,
     niche: 'dental',
     bookingMode: 'requires_approval',
     forwardImages: true,
@@ -224,6 +227,7 @@ const CONSULTORIO: DemoProfile = {
 const SPA: DemoProfile = {
   name: 'Bella Vida Salón & Spa',
   settings: {
+    ...DEFAULT_ASSISTANT_FIELDS,
     niche: 'estetica',
     bookingMode: 'direct',
     forwardImages: false,

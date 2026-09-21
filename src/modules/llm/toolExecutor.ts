@@ -3,11 +3,14 @@ import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import {
+  activeServices,
   type DepositPaymentMethod,
+  findKnownService,
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
 import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
+import { wasServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
 
@@ -15,6 +18,15 @@ export interface ToolContext {
   businessId: string
   conversationId: string
   customerId: string
+}
+
+export interface ToolAttachment {
+  // Resolved from the business's own settings, never from anything the model
+  // wrote: the model names a service, this layer turns that into a key.
+  s3Key: string
+  caption: string
+  // Carried so the handler can record the send once it actually succeeded.
+  serviceId: string
 }
 
 export interface ToolExecutionResult {
@@ -39,6 +51,10 @@ export interface ToolExecutionResult {
   // a trigger that cannot show the precondition does not get to walk the
   // conversation into a state that depends on it.
   evidence?: TransitionEvidence
+  // Media this turn should carry, sent by the handler after the text reply.
+  // Deliberately NOT part of `result`: the model decides that a photo helps, and
+  // never sees the key or the URL behind it.
+  attachments?: ToolAttachment[]
 }
 
 const checkAvailabilityArgs = z.object({
@@ -54,6 +70,10 @@ const bookAppointmentArgs = z.object({
 
 const confirmPendingArgs = z.object({
   customer_name: z.string().optional(),
+})
+
+const sendServiceImageArgs = z.object({
+  service: z.string(),
 })
 
 const requestImageArgs = z.object({
@@ -138,6 +158,22 @@ function depositRequiredInstruction(
 
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
+
+// ── send_service_image ───────────────────────────────────────────────────────
+//
+// All three keep Emma from narrating the transport. The photo leaves as its own
+// WhatsApp message right after her text, so "te adjunto la foto" describes
+// something the customer cannot see happening and reads as a bug when the image
+// lands a second later on its own.
+
+const NO_SERVICE_IMAGE_INSTRUCTION =
+  'Ese servicio no tiene foto cargada, así que NO se envió ninguna imagen. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste una foto ni que se la vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
+
+const SERVICE_IMAGE_SENT_INSTRUCTION =
+  'La foto se está enviando sola por WhatsApp. Escribí tu respuesta normal sobre el servicio. NO digas "te adjunto la foto", "te la mando" ni "mirá la imagen": para el cliente la foto simplemente llega.'
+
+const IMAGE_ALREADY_SENT_INSTRUCTION =
+  'Ya le enviaste la foto de ese servicio en esta conversación, así que no se mandó de nuevo. Si volvió a preguntar, referite a la que ya tiene más arriba. NO vuelvas a llamar esta herramienta para ese servicio.'
 
 // ── Presentación de la disponibilidad ────────────────────────────────────────
 //
@@ -548,6 +584,73 @@ export async function executeTool(
           instruction: CONFIRMED_INSTRUCTION,
         }),
         trigger: 'appointment_booked',
+      }
+    }
+
+    if (name === 'send_service_image') {
+      const parsed = sendServiceImageArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      const settings = await businessService.getSettings(context.businessId)
+      if (!settings.ok) {
+        return {
+          result: JSON.stringify({
+            error: 'not_configured',
+            instruction: NOT_CONFIGURED_CHECK_INSTRUCTION,
+          }),
+          error: 'not_configured',
+        }
+      }
+
+      // Resolved through the same matcher booking uses, so a deactivated service
+      // is no more showable than it is bookable.
+      const service = findKnownService(settings.data, parsed.data.service)
+      if (!service) {
+        return {
+          result: JSON.stringify({
+            error: 'unknown_service',
+            instruction: UNKNOWN_SERVICE_INSTRUCTION,
+            details: { availableServices: activeServices(settings.data).map((s) => s.name) },
+          }),
+          error: 'unknown_service',
+        }
+      }
+
+      // An id is as necessary as the key: without it the send cannot be recorded,
+      // and an unrecorded send is one that repeats on every turn. A service saved
+      // before ids existed has neither and falls here.
+      if (!service.imageKey || !service.id) {
+        return {
+          result: JSON.stringify({ error: 'no_image', instruction: NO_SERVICE_IMAGE_INSTRUCTION }),
+          error: 'no_image',
+        }
+      }
+
+      if (wasServiceImageSent(context.conversationId, service.id)) {
+        return {
+          result: JSON.stringify({
+            status: 'already_sent',
+            instruction: IMAGE_ALREADY_SENT_INSTRUCTION,
+          }),
+        }
+      }
+
+      return {
+        result: JSON.stringify({
+          status: 'image_sent',
+          service: service.name,
+          instruction: SERVICE_IMAGE_SENT_INSTRUCTION,
+        }),
+        attachments: [
+          {
+            s3Key: service.imageKey,
+            // The service name alone. Emma's own text already carries the price
+            // and the pitch, and repeating them under the photo reads like two
+            // people answering the same question.
+            caption: service.name,
+            serviceId: service.id,
+          },
+        ],
       }
     }
 

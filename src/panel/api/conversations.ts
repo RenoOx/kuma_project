@@ -1,5 +1,11 @@
 import { apiGet, apiSend, type PanelSession } from './client.js'
-import type { ConversationListItem, MessagePage, Paged, UpdatesMarker } from './types.js'
+import type {
+  ConversationListItem,
+  MessagePage,
+  Paged,
+  PaymentProof,
+  UpdatesMarker,
+} from './types.js'
 
 /**
  * The cheap poll. Called every 5 seconds.
@@ -56,6 +62,23 @@ export function sendReply(
   text: string,
 ): Promise<{ success: boolean; messageId: string }> {
   return apiSend(session, 'POST', `/conversations/${conversationId}/reply`, { text })
+}
+
+/**
+ * The deposit captures this conversation produced, newest first.
+ *
+ * Separate from the transcript because the image never was a message: it is
+ * relayed to the owner's WhatsApp and archived, and the transcript only ever held
+ * a text stand-in for it.
+ */
+export function getPaymentProofs(
+  session: PanelSession,
+  conversationId: string,
+): Promise<{ proofs: PaymentProof[] }> {
+  return apiGet<{ proofs: PaymentProof[] }>(
+    session,
+    `/conversations/${conversationId}/payment-proofs`,
+  )
 }
 
 export function returnToEmma(

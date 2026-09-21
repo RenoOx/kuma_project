@@ -90,6 +90,36 @@ export async function sendWithPresence(params: {
 }
 
 /**
+ * Sends a photo to a CUSTOMER, through the same queue as everything else.
+ *
+ * No "composing" indicator and no length-proportional delay: a photo is not
+ * typed, so typing before one is the wrong tell. A short human pause still runs,
+ * so the picture does not land in the same millisecond as the text it follows.
+ *
+ * The client comes from the registry rather than being passed in, for the same
+ * reason sendWithPresence reaches for it: `sendImage` lives on WhatsappClient,
+ * while the bound `send` closure the handler carries only knows text. Throws when
+ * there is no client or the send fails — callers log and carry on, because a
+ * missing photo must never cost the customer the reply it came with.
+ */
+export async function sendImageToCustomer(params: {
+  businessId: string
+  jid: string
+  image: Buffer
+  caption?: string
+}): Promise<void> {
+  const { businessId, jid, image, caption } = params
+
+  return enqueueSend(businessId, 'reply', async () => {
+    const client = clientRegistry.getClient(businessId)
+    if (!client) throw new Error(`no whatsapp client registered for business ${businessId}`)
+
+    await humanDelay()
+    await client.sendImage(jid, image, caption)
+  })
+}
+
+/**
  * Queued send with no human timing.
  *
  * For traffic that is not a customer-facing reply — the owner poking their own

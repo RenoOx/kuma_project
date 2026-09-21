@@ -8,11 +8,11 @@ import {
   type DayBreak,
   type DayHours,
   dayKeyForJsDow,
+  findKnownService,
   getMinBookingNoticeMinutes,
   type Niche,
   resolveDayHours,
   resolveServiceDurationMinutes,
-  type Service,
 } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
@@ -52,10 +52,6 @@ export interface CheckAvailabilityResult {
   slotsDroppedByLeadTime: number
   // The lead time actually applied, so the caller can say why.
   minNoticeMinutes: number
-}
-
-function normalizeServiceName(s: string): string {
-  return s.toLowerCase().trim()
 }
 
 // Names arrive typed into a chat, so they carry stray whitespace and the odd
@@ -194,15 +190,6 @@ function buildSlots(p: BuildSlotsParams): string[] {
     slots.push(`${p.dateISO}T${hh}:${mm}:00${p.tzOffset}`)
   }
   return slots
-}
-
-// Matches against ACTIVE services only. A deactivated service is one the
-// business is not offering right now, so naming it by hand must not be a way
-// around that — the prompt already stopped mentioning it, and this is what
-// stops it from being booked anyway.
-function findKnownService(settings: BusinessSettings, serviceName: string): Service | null {
-  const normalized = normalizeServiceName(serviceName)
-  return activeServices(settings).find((s) => normalizeServiceName(s.name) === normalized) ?? null
 }
 
 function validationErrorForUnknownService(

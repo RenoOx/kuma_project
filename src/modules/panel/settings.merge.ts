@@ -1,8 +1,18 @@
+import { nanoid } from 'nanoid'
 import { z } from 'zod'
 import type { Business } from '@/db/schema/index.js'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
-import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { ValidationError } from '@/shared/errors.js'
+import type {
+  AssistantFunction,
+  BusinessSettings,
+  Service,
+} from '@/modules/business/business.settings.js'
+import {
+  ASSISTANT_FUNCTIONS,
+  assistantFunctionFields,
+  assistantFunctionOf,
+  businessSettingsSchema,
+} from '@/modules/business/business.settings.js'
+import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 
 // Pure half of the settings module: the patch schemas, the merge, and the read
@@ -120,9 +130,14 @@ export const bookingPatchSchema = z
 /**
  * The service catalogue, replaced whole.
  *
- * Same reasoning as specialDays: these are elements of a jsonb array with no
- * stable ids, so "edit the third one" has nothing to address. The UI owns the
- * list and hands it back entire.
+ * Same reasoning as specialDays: the UI owns the list and hands it back entire,
+ * so "edit the third one" is not something a request has to express.
+ *
+ * Services do carry a stable `id` now — an uploaded photo needs something to
+ * belong to — but the wire format did not change because of it. The ids are
+ * reconciled on the way in by normalizeServices rather than addressed by the
+ * request, so a form that round-trips the array unchanged keeps every id and
+ * every photo without knowing either exists.
  *
  * The refine is not the same rule as the schema's own `min(1)`. That one keeps
  * a business from having no services at all; this one keeps it from having none
@@ -155,6 +170,80 @@ export const paymentsPatchSchema = z
     depositPaymentMethods: patchable(shape.depositPaymentMethods),
   })
   .partial()
+
+/**
+ * Who Emma is for this business, plus what she is for.
+ *
+ * Pure jsonb, unlike the general section: the business's own name, address and
+ * timezone stay columns edited in Configuración, and repeating the name here
+ * would give the owner two fields for one fact and no way to tell which won.
+ *
+ * `assistant` is replaced whole rather than merged field by field, because every
+ * field in it carries a default — a patch with only `name` would come back with
+ * gender and tone reset. The card owns the object and sends it entire.
+ *
+ * `assistantFunction` is not stored. It is turned into flowType +
+ * appointmentMode by identitySettingsPatch, which is where the single control the
+ * spec asks for meets the two fields that already encode it.
+ */
+export const identityPatchSchema = z
+  .object({
+    assistant: patchable(shape.assistant),
+    assistantFunction: z.enum(ASSISTANT_FUNCTIONS),
+  })
+  .partial()
+
+export type IdentityPatch = z.infer<typeof identityPatchSchema>
+
+/** Expands the identity form into the settings fields it actually writes. */
+export function identitySettingsPatch(patch: IdentityPatch): Partial<BusinessSettings> {
+  const out: Partial<BusinessSettings> = {}
+  if (patch.assistant !== undefined) out.assistant = patch.assistant
+  if (patch.assistantFunction !== undefined) {
+    const fields = assistantFunctionFields(patch.assistantFunction)
+    out.flowType = fields.flowType
+    out.appointmentMode = fields.appointmentMode
+  }
+  return out
+}
+
+/**
+ * The configurable message templates, replaced whole.
+ *
+ * Same reason as `assistant`: the card holds all ten textareas and saves them
+ * together, so a partial object here would read as "clear the eight I did not
+ * send". Clearing one is done by emptying its textarea, which the schema turns
+ * back into undefined — that is, into "use the wording in the code".
+ */
+export const messagesPatchSchema = z
+  .object({
+    messages: patchable(shape.messages),
+  })
+  .partial()
+
+export type MessagesPatch = z.infer<typeof messagesPatchSchema>
+
+/**
+ * Conversation parameters.
+ *
+ * Narrower than the spec's FLUJO table on purpose. Three of the rows it lists —
+ * the deposit and its payment methods, and the weekly hours — already have
+ * working forms in Servicios and Configuración, and moving them here would mean
+ * rebuilding UI that works to satisfy a table. This section takes only what had
+ * nowhere to live: the data to collect, the out-of-hours switch, and the two
+ * fields stored ahead of the flows that will read them.
+ */
+export const flowPatchSchema = z
+  .object({
+    collectDataFields: patchable(shape.collectDataFields),
+    outOfHoursEnabled: patchable(shape.outOfHoursEnabled),
+    outOfHoursBehavior: patchable(shape.outOfHoursBehavior),
+    escalationAttempts: patchable(shape.escalationAttempts),
+    cancellationKeyword: patchable(shape.cancellationKeyword),
+  })
+  .partial()
+
+export type FlowPatch = z.infer<typeof flowPatchSchema>
 
 /**
  * The global Emma switch.
@@ -202,6 +291,136 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The three fields of a stored service that identity survives on.
+ *
+ * A narrow projection rather than the real serviceSchema, and parsed per element:
+ * a business whose stored settings do not fully validate — a service missing its
+ * price, say — must still keep its ids and photos. Validating the whole array
+ * would throw all of them away over one bad row and silently re-mint everything.
+ */
+const storedServiceLens = z.object({
+  id: z.string().min(1).optional(),
+  imageKey: z.string().nullish(),
+  name: z.string().min(1),
+})
+
+type StoredService = z.infer<typeof storedServiceLens>
+
+function storedServices(currentRaw: unknown): StoredService[] {
+  if (!isPlainObject(currentRaw)) return []
+  if (!Array.isArray(currentRaw.services)) return []
+
+  const out: StoredService[] = []
+  for (const entry of currentRaw.services) {
+    const parsed = storedServiceLens.safeParse(entry)
+    if (parsed.success) out.push(parsed.data)
+  }
+  return out
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+/**
+ * Carries service identity across a whole-array replacement.
+ *
+ * The panel owns the service list and sends it back entire, which is fine for
+ * names and prices and fatal for anything the form does not know about. Without
+ * this, every save would hand back services with no `id` and no `imageKey`, mint
+ * fresh ids, and leave every uploaded photo pointing at an id nothing references.
+ *
+ * Matching runs in two passes so that ids win globally: renaming a service and
+ * adding a new one under its old name cannot transplant the first one's identity
+ * onto the second. Each stored service can be claimed once — two incoming rows
+ * must never come out sharing an id, or they would share a photo too.
+ *
+ * `idFactory` is injectable so tests can assert on ids instead of on nanoid.
+ */
+export function normalizeServices(
+  currentRaw: unknown,
+  incoming: Service[],
+  idFactory: () => string = nanoid,
+): Service[] {
+  const byId = new Map<string, StoredService>()
+  const byName = new Map<string, StoredService>()
+  for (const service of storedServices(currentRaw)) {
+    if (service.id) byId.set(service.id, service)
+    const key = normalizeName(service.name)
+    if (!byName.has(key)) byName.set(key, service)
+  }
+
+  const matches = new Map<number, StoredService>()
+
+  const claim = (index: number, match: StoredService): void => {
+    matches.set(index, match)
+    if (match.id) byId.delete(match.id)
+    byName.delete(normalizeName(match.name))
+  }
+
+  incoming.forEach((service, index) => {
+    if (!service.id) return
+    const match = byId.get(service.id)
+    if (match) claim(index, match)
+  })
+
+  incoming.forEach((service, index) => {
+    if (matches.has(index)) return
+    const match = byName.get(normalizeName(service.name))
+    if (match) claim(index, match)
+  })
+
+  return incoming.map((service, index) => {
+    const match = matches.get(index)
+    const next: Service = {
+      ...service,
+      id: match?.id ?? service.id ?? idFactory(),
+    }
+    // Only inherited when the incoming entry is silent about the photo. An
+    // explicit null is the image endpoint saying "deleted" and must stand.
+    if (service.imageKey === undefined && match?.imageKey !== undefined) {
+      next.imageKey = match.imageKey
+    }
+    return next
+  })
+}
+
+/**
+ * The stored S3 key of one service's photo, addressed by id.
+ *
+ * Read path for the panel: the route hands in a serviceId from the URL and gets
+ * back a key that came out of this business's own settings, never a key the
+ * caller supplied. That is what keeps the presigned-URL endpoint from being a
+ * way to sign somebody else's object.
+ */
+export function findServiceImageKey(business: Business, serviceId: string): Result<string | null> {
+  const parsed = businessSettingsSchema.safeParse(business.settings)
+  if (!parsed.success) {
+    return err(
+      new ValidationError({
+        code: 'invalid_settings',
+        message: 'stored settings do not validate, cannot resolve a service image',
+        userMessage: 'La configuración del negocio está incompleta.',
+        logContext: { businessId: business.id, serviceId },
+      }),
+    )
+  }
+
+  const service = parsed.data.services.find((candidate) => candidate.id === serviceId)
+  if (!service) {
+    return err(
+      new NotFoundError({
+        resource: 'service',
+        userMessage: 'No encontramos ese servicio.',
+        logContext: { businessId: business.id, serviceId },
+      }),
+    )
+  }
+
+  return ok(service.imageKey ?? null)
+}
+
+/**
  * Applies one section's patch to the stored settings and revalidates the whole
  * object.
  *
@@ -224,13 +443,21 @@ export function mergeSettingsSection(
   businessId: string,
   currentRaw: unknown,
   patch: SettingsPatch,
+  idFactory: () => string = nanoid,
 ): Result<BusinessSettings> {
   const base = isPlainObject(currentRaw) ? currentRaw : {}
 
   const defined = Object.fromEntries(
     Object.entries(patch).filter(([, value]) => value !== undefined),
   )
-  const merged = { ...base, ...defined }
+  const merged: Record<string, unknown> = { ...base, ...defined }
+
+  // Reconciled here rather than in the service layer so no write path can skip
+  // it: every section PATCH funnels through this function, and a services array
+  // that arrived without ids would otherwise be persisted exactly as it came.
+  if (patch.services !== undefined) {
+    merged.services = normalizeServices(currentRaw, patch.services, idFactory)
+  }
 
   const parsed = businessSettingsSchema.safeParse(merged)
   if (!parsed.success) {
@@ -265,6 +492,13 @@ export interface PanelSettingsView {
   settings: BusinessSettings | null
   /** Field paths that keep the stored settings from validating. Empty when `settings` is non-null. */
   invalidFields: string[]
+  /**
+   * Vende / Agenda / Ambas, derived from flowType + appointmentMode.
+   *
+   * Sent rather than computed in the browser so the mapping lives in exactly one
+   * place. Null when the business has no valid settings to derive it from.
+   */
+  assistantFunction: AssistantFunction | null
 }
 
 export function readSettings(business: Business): PanelSettingsView {
@@ -277,6 +511,7 @@ export function readSettings(business: Business): PanelSettingsView {
     googleMapsUrl: business.googleMapsUrl,
     timezone: business.timezone,
     whatsappNumber: business.whatsappNumber,
+    assistantFunction: parsed.success ? assistantFunctionOf(parsed.data) : null,
     settings: parsed.success ? parsed.data : null,
     invalidFields: parsed.success
       ? []

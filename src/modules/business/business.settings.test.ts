@@ -3,6 +3,7 @@ import {
   activeServices,
   type BusinessSettings,
   businessSettingsSchema,
+  DEFAULT_ASSISTANT_FIELDS,
   parseBusinessSettings,
   remindersExplicitlyDisabled,
   resolveDayHours,
@@ -10,6 +11,7 @@ import {
 import { NotConfiguredError } from '@/shared/errors.js'
 
 const BASE_SETTINGS: BusinessSettings = {
+  ...DEFAULT_ASSISTANT_FIELDS,
   niche: 'general',
   bookingMode: 'direct',
   forwardImages: false,

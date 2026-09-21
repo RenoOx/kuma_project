@@ -288,6 +288,22 @@ export interface PostBookingSettings {
 }
 
 export interface PanelService {
+  /**
+   * Stable id, minted server-side on the first save. Absent on a service being
+   * created right now, which is why the photo upload waits for the first save:
+   * the S3 key is built from this.
+   */
+  id?: string
+  /**
+   * S3 key of the photo, or null when there is none. Read-only from this form's
+   * point of view — the image endpoints own it.
+   *
+   * Round-trips untouched through the services PATCH because the form spreads the
+   * service it was handed. Leaving it out of the payload would NOT clear it (the
+   * server keeps what it stored when the field is absent), but sending it back
+   * unchanged is the honest shape of what the UI is doing.
+   */
+  imageKey?: string | null
   name: string
   /** Null when the service has no fixed length; the slot grid decides. */
   durationMinutes: number | null
@@ -298,6 +314,32 @@ export interface PanelService {
   active: boolean
 }
 
+/** What the image endpoints answer. The URL is presigned and expires in an hour. */
+export interface ServiceImage {
+  imageKey: string | null
+  url: string | null
+}
+
+export type PaymentProofStatus = 'pending' | 'approved' | 'rejected' | 'superseded'
+
+/** One deposit capture and what the owner decided about it. */
+export interface PaymentProof {
+  id: string
+  service: string
+  scheduledAt: string
+  depositAmount: string | null
+  customerName: string
+  status: PaymentProofStatus
+  createdAt: string
+  resolvedAt: string | null
+  rejectionReason: string | null
+  /**
+   * Presigned, expires in an hour. Null for a capture that predates the archive,
+   * or one whose upload failed — the decision is still worth showing.
+   */
+  proofUrl: string | null
+}
+
 export type DepositMethod = 'yape' | 'plin' | 'transferencia' | 'efectivo'
 
 export interface DepositPaymentMethod {
@@ -306,9 +348,51 @@ export interface DepositPaymentMethod {
   label?: string
 }
 
+export type AssistantGender = 'femenino' | 'masculino' | 'neutro'
+export type AssistantTone = 'formal' | 'amigable' | 'profesional_cercano'
+/** Vende / Agenda / Ambas. Derived server-side from flowType + appointmentMode. */
+export type AssistantFunction = 'agenda' | 'vende' | 'ambas'
+export type OutOfHoursBehavior = 'keep_talking' | 'greet_and_capture'
+
+export interface AssistantSettings {
+  name: string
+  gender: AssistantGender
+  tone: AssistantTone
+  businessDescription?: string
+  contactInfo?: string
+  customInstructions?: string
+}
+
+/**
+ * The owner's message templates. Every one optional, and absent means "use the
+ * wording built into Emma" — which is why clearing a textarea is a real action
+ * and not the same as writing an empty message.
+ */
+export interface ConfigurableMessages {
+  greeting?: string
+  farewell?: string
+  handoff?: string
+  outOfHours?: string
+  fallback?: string
+  paymentReceived?: string
+  /** Stored but not consumed yet — the confirmation carries the real slot. */
+  paymentApproved?: string
+  paymentRejected?: string
+  /** Stored but not consumed yet: reminderTexts.ts is still the source. */
+  reminder24h?: string
+  reminder2h?: string
+}
+
 export interface BusinessSettingsView {
   niche: Niche
   appointmentMode: AppointmentMode
+  assistant: AssistantSettings
+  messages: ConfigurableMessages
+  collectDataFields: string[]
+  outOfHoursEnabled: boolean
+  outOfHoursBehavior: OutOfHoursBehavior
+  escalationAttempts: number
+  cancellationKeyword: string
   bookingMode: BookingMode
   forwardImages: boolean
   requiresDeposit: boolean
@@ -334,6 +418,17 @@ export interface PanelSettings {
   settings: BusinessSettingsView | null
   /** Field paths keeping the stored settings from validating. Empty when `settings` is non-null. */
   invalidFields: string[]
+  /**
+   * Whether the deploy has S3 credentials. False disables the photo upload with
+   * an explanation instead of letting the owner pick a file and hit a 500.
+   */
+  mediaConfigured: boolean
+  /**
+   * Sent by the server rather than derived here, so the mapping between one
+   * control and the two fields behind it lives in one place. Null when the
+   * business has no valid settings yet.
+   */
+  assistantFunction: AssistantFunction | null
 }
 
 export interface GeneralPatch {
@@ -352,6 +447,24 @@ export interface BookingPatch {
   minBookingNoticeMinutes?: number
   forwardImages?: boolean
   postBooking?: PostBookingSettings
+}
+
+/** Both fields are replaced whole — see the schemas in settings.merge.ts. */
+export interface IdentityPatch {
+  assistant?: AssistantSettings
+  assistantFunction?: AssistantFunction
+}
+
+export interface MessagesPatch {
+  messages?: ConfigurableMessages
+}
+
+export interface FlowPatch {
+  collectDataFields?: string[]
+  outOfHoursEnabled?: boolean
+  outOfHoursBehavior?: OutOfHoursBehavior
+  escalationAttempts?: number
+  cancellationKeyword?: string
 }
 
 export interface PanelIntegrations {

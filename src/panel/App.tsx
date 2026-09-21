@@ -24,6 +24,9 @@ const ConfigPage = lazy(async () => ({
 const ServicesPage = lazy(async () => ({
   default: (await import('./pages/ServicesPage.js')).ServicesPage,
 }))
+const AssistantPage = lazy(async () => ({
+  default: (await import('./pages/AssistantPage.js')).AssistantPage,
+}))
 
 /**
  * The panel's routes, all nested under /:businessId.
@@ -67,6 +70,7 @@ function PanelShell(): React.JSX.Element {
           <Route path="/citas" element={<AppointmentsPage />} />
           <Route path="/contactos" element={<CustomersPage />} />
           <Route path="/servicios" element={<ServicesPage />} />
+          <Route path="/asistente" element={<AssistantPage />} />
           <Route path="/configuracion" element={<ConfigPage />} />
           <Route path="*" element={<Navigate to="." replace />} />
         </Routes>

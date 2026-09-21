@@ -59,6 +59,11 @@ export const paymentVerifications = pgTable(
     }),
     // Free-text note from the owner when they turn a capture down.
     rejectionReason: text('rejection_reason'),
+    // S3 key of the capture the customer sent. Nullable, and stays null when
+    // storage is unconfigured or the upload failed: archiving the image is
+    // best-effort, the same way a Google Calendar event is. Losing the picture
+    // must never cost the owner the verification they have to rule on.
+    proofKey: text('proof_key'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   },

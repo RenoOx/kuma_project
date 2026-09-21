@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Business } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import { DEFAULT_ASSISTANT_FIELDS } from '@/modules/business/business.settings.js'
 import {
   bookingPatchSchema,
   generalPatchSchema,
@@ -13,6 +14,7 @@ import {
 } from '@/modules/panel/settings.merge.js'
 
 const BASE_SETTINGS: BusinessSettings = {
+  ...DEFAULT_ASSISTANT_FIELDS,
   niche: 'barberia',
   bookingMode: 'direct',
   forwardImages: false,

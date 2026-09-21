@@ -12,9 +12,12 @@ import { ServiceForm } from './ServiceForm.js'
 /**
  * The service catalogue.
  *
- * The whole list is sent on save, like specialDays: services live in a jsonb
- * array with no stable ids, so there is nothing to address one element by. The
- * draft lives here until the owner saves it.
+ * The whole list is sent on save, like specialDays: the UI owns it and hands it
+ * back entire, and the server reconciles ids and photo keys against what it
+ * stored. The draft lives here until the owner saves it.
+ *
+ * The photo is the exception to that draft: it is owned by its own endpoints and
+ * written as soon as it is picked — see ServicePhotoField.
  */
 export function ServiceList({ services }: { services: PanelService[] }): React.JSX.Element {
   const { save, saving, saved, error } = useSectionSave()
@@ -115,6 +118,10 @@ function ServiceRow({
             : `${service.durationMinutes} min`}
           {' · '}
           {formatServicePrice(service)}
+          {/* A flag, not a thumbnail. Showing the photo here would mean signing a
+              URL per service on every page load; the preview lives in the edit
+              dialog, where the owner actually asked to see it. */}
+          {service.imageKey ? ' · con foto' : ''}
         </p>
       </div>
 
