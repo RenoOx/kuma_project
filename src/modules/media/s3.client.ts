@@ -50,7 +50,34 @@ export function requireMediaConfig(businessId: string): Result<MediaConfig> {
     )
   }
 
+  // Checked here rather than left to AWS, because AWS answers a malformed name
+  // with a generic failure at upload time — by which point the owner has picked
+  // a file and is watching a spinner. `emma_media_prod` is a real example: S3
+  // bucket names take no underscores, so that name can never exist, and the
+  // deploy would have failed every single upload with no hint as to why.
+  if (!isValidBucketName(bucket)) {
+    return err(
+      new NotConfiguredError({
+        businessId,
+        missing: ['AWS_S3_BUCKET_NAME'],
+        userMessage: 'El almacenamiento de archivos está mal configurado.',
+      }),
+    )
+  }
+
   return ok({ bucket, region, accessKeyId, secretAccessKey })
+}
+
+/**
+ * The subset of S3's naming rules that catches real typos.
+ *
+ * Lowercase letters, digits, dots and hyphens; 3 to 63 characters; starts and
+ * ends with a letter or a digit. Not exhaustive — S3 also rejects IP-shaped
+ * names and a few reserved prefixes — but those are not what anyone types by
+ * accident. Underscores and capitals are.
+ */
+export function isValidBucketName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(name)
 }
 
 let cached: S3Client | null = null

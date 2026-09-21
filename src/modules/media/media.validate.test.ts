@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_BYTES_BY_TYPE, MAX_MEDIA_BYTES, validateMedia } from './media.validate.js'
+import { isValidBucketName } from './s3.client.js'
+
+describe('bucket names', () => {
+  it('accepts the buckets this project actually uses', () => {
+    expect(isValidBucketName('emma-media-dev')).toBe(true)
+    expect(isValidBucketName('emma-media-prod')).toBe(true)
+  })
+
+  it('rejects underscores, which S3 does not allow and people type anyway', () => {
+    // A real one: `emma_media_prod` was named in conversation on 2026-09-21. It
+    // can never exist, and without this check every upload on that deploy would
+    // have failed with nothing pointing at the name.
+    expect(isValidBucketName('emma_media_prod')).toBe(false)
+  })
+
+  it('rejects capitals and names that are too short or badly bounded', () => {
+    expect(isValidBucketName('Emma-Media-Prod')).toBe(false)
+    expect(isValidBucketName('ab')).toBe(false)
+    expect(isValidBucketName('-emma-media')).toBe(false)
+    expect(isValidBucketName('emma-media-')).toBe(false)
+  })
+})
 
 // The format whitelist is the only thing standing between an upload and the
 // bucket. Content-type and filename both come from whoever is uploading, so the

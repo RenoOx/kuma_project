@@ -24,12 +24,50 @@ import { getS3Client, requireMediaConfig } from './s3.client.js'
 /** Presigned URLs expire in an hour. Never make the bucket public. */
 export const DEFAULT_URL_EXPIRY_SECONDS = 3600
 
+/**
+ * What an AWS failure actually means, for the log.
+ *
+ * Three of these are configuration, not bad luck, and telling them apart is the
+ * difference between a one-line fix and an afternoon. `PermanentRedirect` cost
+ * exactly that on 2026-09-21: AWS_S3_REGION said us-east-1, the bucket lived in
+ * us-east-2, and every upload came back as "No pudimos procesar el archivo" —
+ * a message that describes a transient hiccup and sends you looking in the
+ * wrong place entirely.
+ *
+ * Returns null when the error is not one we can name, so the generic path stays.
+ */
+function diagnose(cause: unknown): string | null {
+  const name = cause instanceof Error ? cause.name : ''
+  switch (name) {
+    case 'PermanentRedirect':
+      return 'AWS_S3_REGION no coincide con la región real del bucket. Consultala con: curl -sI https://<bucket>.s3.amazonaws.com | grep x-amz-bucket-region'
+    case 'NoSuchBucket':
+      return 'El bucket de AWS_S3_BUCKET_NAME no existe en esa cuenta.'
+    case 'AccessDenied':
+    case 'InvalidAccessKeyId':
+    case 'SignatureDoesNotMatch':
+      return 'Las credenciales de AWS no tienen permiso sobre este bucket, o son de otra cuenta.'
+    default:
+      return null
+  }
+}
+
 function wrap(cause: unknown, code: string, logContext: Record<string, unknown>): AppError {
+  const diagnosis = diagnose(cause)
   return new AppError({
     code,
     message: cause instanceof Error ? cause.message : `${code} failed`,
-    userMessage: 'No pudimos procesar el archivo. Intentá de nuevo.',
-    logContext,
+    // A misconfiguration is not something the owner can retry their way out of,
+    // so it must not say "intentá de nuevo" — that is how a broken deploy looks
+    // like a flaky one for a week.
+    userMessage: diagnosis
+      ? 'El almacenamiento de archivos está mal configurado. Escribinos a Vamvu Labs.'
+      : 'No pudimos procesar el archivo. Intentá de nuevo.',
+    logContext: {
+      ...logContext,
+      awsError: cause instanceof Error ? cause.name : 'unknown',
+      ...(diagnosis ? { diagnosis } : {}),
+    },
     cause,
   })
 }

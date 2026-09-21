@@ -10,7 +10,7 @@
 ## El diagnóstico en una línea
 
 La finalidad es que el corazón sea la máquina de estados, pero **hoy el corazón es
-el prompt**: `StateConfig.promptAddition` es un string plano que aporta una oración
+el prompt**: `StateConfig.promptAddition` es un wstring plano que aporta una oración
 por estado, mientras `prompts.ts` (1513 líneas) lleva el flujo completo y lo manda
 idéntico en todos los estados.
 

@@ -17,6 +17,7 @@ import {
   formatServicePrice,
   isAlwaysOpen,
   resolveDayHours,
+  schedulesAppointments,
 } from '@/modules/business/business.settings.js'
 import type { ConversationNode } from '@/modules/conversation/nodeCatalog.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
@@ -414,11 +415,16 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 function renderServices(
   services: BusinessSettings['services'],
   withMedia: ReadonlySet<string>,
+  showDuration: boolean,
 ): string {
   if (services.length === 0) return '(El negocio no tiene servicios activos en este momento.)'
   return services
     .map((s) => {
-      const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
+      // Omitted entirely for a business that books nothing: a duration next to a
+      // course is a number the model will quote at a customer as if it meant
+      // something.
+      const duration =
+        !showDuration || s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
       const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
       // The marker is the model's only way to know which services it may call
       // send_service_media for. No key ever appears here: the tool resolves a
@@ -482,7 +488,7 @@ function renderConfiguredBlock(
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
-    renderServices(activeServices(settings), withMedia),
+    renderServices(activeServices(settings), withMedia, schedulesAppointments(settings)),
     ...renderServiceMediaBlock(settings, withMedia),
     '',
     // An always-open business gets a sentence instead of a week. Printing the
