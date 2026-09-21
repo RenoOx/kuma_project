@@ -13,8 +13,8 @@ import { err, ok, type Result } from '@/shared/result.js'
 import * as panelRepo from './panel.repo.js'
 
 // How long a thread stays with the human before Emma takes it back on her own.
-// PANEL_SPEC US-05. Read by the transitions worker, defined here because this
-// is where takeover starts.
+// Read by the takeover worker, defined here because this is where takeover
+// starts.
 export const HUMAN_TAKEOVER_TIMEOUT_MS = 30 * 60 * 1000
 
 export interface OwnerReplyResult {

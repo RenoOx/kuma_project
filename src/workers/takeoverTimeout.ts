@@ -4,7 +4,7 @@ import { db } from '@/db/client.js'
 import { conversations } from '@/db/schema/index.js'
 import { HUMAN_TAKEOVER_TIMEOUT_MS } from '@/modules/panel/panel.service.js'
 
-// Hands a forgotten takeover back to Emma. PANEL_SPEC US-05.
+// Hands a forgotten takeover back to Emma after HUMAN_TAKEOVER_TIMEOUT_MS.
 //
 // This file used to also age quiet leads into 'waiting' and 'lost'. That went
 // away with the qualification enum: labelling a conversation is the owner's job

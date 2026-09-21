@@ -14,8 +14,10 @@ description: Convenciones de UI para la SPA React del panel del dueño en src/pa
 > USA lo que ya existe. NO inventes nuevas variables ni tokens sin verificar
 > que no existen ya. Esta skill es una guía, no un override.
 >
-> `PANEL_SPEC.md` prevalece sobre esta skill y sobre CLAUDE.md en todo lo que
-> toque al panel.
+> `CLAUDE.md` prevalece sobre esta skill. Su sección "Panel del dueño" tiene el
+> tema visual, el layout y las reglas de la superficie; esto de acá es el cómo
+> escribir los componentes. (`PANEL_SPEC.md` fue fusionado dentro de CLAUDE.md
+> y ya no existe.)
 
 ## Build
 
@@ -75,23 +77,34 @@ Definidos en `globals.css` como `--color-*` de Tailwind 4, usables como clases
 emma-bg, emma-bg-secondary, emma-elevated, emma-border,
 emma-text, emma-text-muted, emma-cream,
 emma-accent, emma-accent-hover,
-emma-sidebar, emma-sidebar-text,
+emma-sidebar, emma-sidebar-text, emma-sidebar-border,
 emma-bubble-bot, emma-bubble-human
 ```
+
+El tema es **crema pastel con el rail oscuro**. Los tres `emma-sidebar-*`
+existen porque esa superficie no sigue a la página: sobre near-black,
+`border-emma-border` (#e8e2d9) dibuja una línea brillante. Dentro del rail —
+Sidebar y Header en desktop — se usan esos tres y no los de contenido.
 
 Más los semánticos de shadcn: `background`, `foreground`, `card`,
 `card-foreground`, `muted`, `muted-foreground`, `border`, `input`, `accent`,
 `destructive`, `primary`, `secondary`, `ring`.
 
-Colores de calificación, uno por estado: `q-new`, `q-qualified`, `q-needs-info`,
+Colores de estado, uno por valor: `q-new`, `q-qualified`, `q-needs-info`,
 `q-appointment`, `q-waiting`, `q-lost`, `q-human`. Se usan tinteados:
-`bg-q-qualified/15 text-q-qualified`. El mapa completo de label + clases está en
-`QUALIFICATION_META` (`lib/constants.ts`) — no lo dupliques.
+`bg-q-qualified/15 text-q-qualified`. Los mapas de label + clases viven en
+`lib/constants.ts` — `APPOINTMENT_META` para estados de cita, `TAG_COLOR_META`
+para etiquetas. No los dupliques. (`QUALIFICATION_META` ya no existe: la
+qualification murió y la reemplazaron las etiquetas.)
 
 ## Layout existente
 
-- `components/layout/PageLayout.tsx` — shell: Header + Sidebar + `<main>`
-- `components/layout/Header.tsx`, `Sidebar.tsx`, `Logo.tsx`
+- `components/layout/PageLayout.tsx` — shell: una columna de 208px (Header
+  arriba, Sidebar debajo) y `<main>` al lado. El header ocupa el ancho del rail,
+  no el de la ventana. En móvil el wrapper sale del flujo con
+  `display: contents` y `order` reparte: header arriba, contenido, nav abajo.
+- `components/layout/Header.tsx`, `Sidebar.tsx`, `Logo.tsx`. El `<Logo />` vive
+  en el Header.
 
 **`PageLayout` ya lo aplica `App.tsx` alrededor de todas las rutas.** Una página
 nueva NO se envuelve en `PageLayout` — devuelve su contenido directo. El gutter
@@ -233,28 +246,19 @@ cambia de eje (`flex-row` abajo en móvil, `md:flex-col` como rail en desktop),
 no dos componentes. Las filas de formulario stackean en móvil y pasan a dos
 columnas desde `md`.
 
-## Paleta de tags (para el sistema de etiquetas, bloque C)
+## Paleta de tags
 
-Todavía no existe en el código. Cuando se implemente, 10 colores predefinidos,
-tonos que funcionen sobre fondo oscuro:
+Ya implementada: `TAG_COLORS` y `TAG_COLOR_META` en `lib/constants.ts`, diez
+colores. La BD guarda la **clave** de la paleta, nunca un hex — así cambiar un
+tono es una edición y no una migración de datos.
 
-```typescript
-export const TAG_COLORS = [
-  { name: 'emerald', hex: '#10B981' },
-  { name: 'blue', hex: '#3B82F6' },
-  { name: 'violet', hex: '#8B5CF6' },
-  { name: 'rose', hex: '#F43F5E' },
-  { name: 'amber', hex: '#F59E0B' },
-  { name: 'cyan', hex: '#06B6D4' },
-  { name: 'pink', hex: '#EC4899' },
-  { name: 'indigo', hex: '#6366F1' },
-  { name: 'orange', hex: '#F97316' },
-  { name: 'teal', hex: '#14B8A6' },
-] as const
-```
+## Listas editables
 
-Van en `lib/constants.ts`, que es donde vive todo lo que mapea un valor de la BD
-a algo que lee una persona.
+Servicios, formas de pago y días especiales son arrays dentro de un jsonb sin
+ids. Para renderizarlos usá `useKeyedDraft` (`hooks/useKeyedDraft.ts`): acuña
+una key estable por fila cuando se crea. Keyear por `${campo}-${índice}` es lo
+que hacía que al borrar una fila React reconciliara su estado sobre la
+siguiente, y un input enfocado saltara de fila.
 
 ## Regla general
 
