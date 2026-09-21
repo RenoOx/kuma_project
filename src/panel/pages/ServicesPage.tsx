@@ -39,7 +39,13 @@ export function ServicesPage(): React.JSX.Element {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 pb-6">
         {config ? (
           <>
-            <ServiceList services={config.services} />
+            <ServiceList
+              services={config.services}
+              // 'vende' is the panel's name for a business with no agenda. The
+              // server derives it from flowType + appointmentMode and sends it
+              // already resolved, so the mapping lives in exactly one place.
+              schedulesAppointments={settings.data.assistantFunction !== 'vende'}
+            />
             <PaymentMethods settings={config} />
           </>
         ) : (

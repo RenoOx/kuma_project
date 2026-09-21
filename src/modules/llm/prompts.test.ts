@@ -232,4 +232,27 @@ describe('a selling business is always open', () => {
     const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
     expect(prompt).toContain('## Horarios')
   })
+
+  it('does not put a duration next to a service it will never book', () => {
+    // A course has no length anything reserves. Left in, the model quotes it at
+    // the customer as if it meant something.
+    const withDuration = fakeSettings({
+      flowType: 'sales',
+      services: [{ name: 'Certificación', priceMin: 300, durationMinutes: 45, active: true }],
+    })
+    const prompt = buildSystemPrompt(fakeBusiness(), [], withDuration)
+    expect(prompt).toContain('Certificación')
+    expect(prompt).not.toContain('45 min')
+  })
+
+  it('keeps the duration for a business that does book', () => {
+    const prompt = buildSystemPrompt(
+      fakeBusiness(),
+      [],
+      fakeSettings({
+        services: [{ name: 'Corte', priceMin: 25, durationMinutes: 45, active: true }],
+      }),
+    )
+    expect(prompt).toContain('45 min')
+  })
 })

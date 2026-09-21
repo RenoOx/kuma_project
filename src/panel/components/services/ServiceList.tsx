@@ -13,13 +13,25 @@ import { ServiceForm } from './ServiceForm.js'
  * The service catalogue.
  *
  * The whole list is sent on save, like specialDays: the UI owns it and hands it
- * back entire, and the server reconciles ids and photo keys against what it
- * stored. The draft lives here until the owner saves it.
+ * back entire, and the server reconciles ids against what it stored. The draft
+ * lives here until the owner saves it.
  *
- * The photo is the exception to that draft: it is owned by its own endpoints and
- * written as soon as it is picked — see ServiceMediaField.
+ * Files are the exception to that draft: they are owned by their own endpoints
+ * and written as soon as one is picked — see ServiceMediaField.
  */
-export function ServiceList({ services }: { services: PanelService[] }): React.JSX.Element {
+export function ServiceList({
+  services,
+  schedulesAppointments,
+}: {
+  services: PanelService[]
+  /**
+   * False for a business that sells instead of booking. Duration only means
+   * something when a service occupies a slot — on a course or a certification
+   * it is a field with no answer, and "Sin duración fija" reads like something
+   * is missing rather than like something that does not apply.
+   */
+  schedulesAppointments: boolean
+}): React.JSX.Element {
   const { save, saving, saved, error } = useSectionSave()
   const { rows, values: draft, add, update, remove } = useKeyedDraft<PanelService>(services)
   const [editing, setEditing] = useState<{ index: number | null } | null>(null)
@@ -54,6 +66,7 @@ export function ServiceList({ services }: { services: PanelService[] }): React.J
               <ServiceRow
                 key={key}
                 service={service}
+                schedulesAppointments={schedulesAppointments}
                 onToggle={(active) => update(index, { ...service, active })}
                 onEdit={() => setEditing({ index })}
                 onRemove={() => remove(index)}
@@ -85,6 +98,7 @@ export function ServiceList({ services }: { services: PanelService[] }): React.J
         }
         onClose={() => setEditing(null)}
         onSubmit={submit}
+        schedulesAppointments={schedulesAppointments}
         error={null}
       />
     </>
@@ -93,11 +107,13 @@ export function ServiceList({ services }: { services: PanelService[] }): React.J
 
 function ServiceRow({
   service,
+  schedulesAppointments,
   onToggle,
   onEdit,
   onRemove,
 }: {
   service: PanelService
+  schedulesAppointments: boolean
   onToggle: (active: boolean) => void
   onEdit: () => void
   onRemove: () => void
@@ -113,10 +129,8 @@ function ServiceRow({
       <div className={cn('min-w-0 flex-1', !service.active && 'opacity-50')}>
         <p className="truncate text-sm font-medium">{service.name}</p>
         <p className="text-muted-foreground truncate text-xs">
-          {service.durationMinutes === null
-            ? 'Sin duración fija'
-            : `${service.durationMinutes} min`}
-          {' · '}
+          {schedulesAppointments &&
+            `${service.durationMinutes === null ? 'Sin duración fija' : `${service.durationMinutes} min`} · `}
           {formatServicePrice(service)}
           {/* A flag, not a thumbnail. Showing the photo here would mean signing a
               URL per service on every page load; the preview lives in the edit

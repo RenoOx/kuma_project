@@ -596,6 +596,23 @@ export function formatServicePrice(service: Service): string {
 }
 
 /**
+ * Whether this business puts customers into time slots.
+ *
+ * The question behind "does duration mean anything here": a course or a
+ * certification has no length that anything books against, so asking the owner
+ * for one is asking for a number nothing will read — and showing "sin duración
+ * fija" back to them reads like a gap in their setup rather than like a field
+ * that does not apply.
+ *
+ * Coincides with the inverse of `isAlwaysOpen` today, and they are still two
+ * questions: a selling business could plausibly want office hours without ever
+ * booking a slot. Keep them apart so that day is an edit here and not a hunt.
+ */
+export function schedulesAppointments(settings: BusinessSettings): boolean {
+  return settings.flowType === 'appointments'
+}
+
+/**
  * Whether this business answers at any hour.
  *
  * Today it is derived from the flow: a selling business has nothing to open or

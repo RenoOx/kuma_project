@@ -44,6 +44,33 @@ El tipo de flujo se define en `business.settings.flowType`.
 - Panel: React 19 + Vite + Tailwind v4 + Radix (paquete único `radix-ui`) +
   TanStack Query + FullCalendar
 
+## Qué NO viaja en un PR
+
+Mergear despliega **código**. Nada más. Dos cosas que el repo no lleva y que hay
+que mover a mano, en este orden:
+
+1. **Las variables de entorno.** `.env` está en `.gitignore` y git no lo trackea;
+   Railway tiene las suyas por entorno. Un merge no las toca.
+2. **Las migraciones.** `railway.json` no declara comando de release ni de
+   pre-deploy, y `npm start` no migra al arrancar. **Una migración nunca corre
+   sola.**
+
+### El orden importa
+
+Primero la migración, después el deploy. Al revés, el código llega buscando
+tablas que no existen.
+
+```
+1. npm run db:migrate:prod        # el guard verifica que sea prod antes de tocar
+2. variables nuevas en Railway
+3. merge → Railway rebuildea y arranca con SUS variables
+```
+
+Hay una red por si se invierte: la lectura de `service_media` en `llm.service`
+está envuelta en try/catch, así que código desplegado antes de su migración
+responde sin los marcadores `[con material]` en vez de tirar abajo la respuesta
+al cliente. Es una red, no un permiso — el orden sigue siendo ese.
+
 ## Las dos bases, y el guard
 
 Hay **dos**, y cada una se identifica a sí misma con una tabla `_env_marker`:
@@ -420,6 +447,33 @@ depende de él — 7MB está bien como PDF y no como foto.
 
 Lo que se guarda es la **key**, nunca una URL: el bucket es privado y los links
 se firman por una hora a pedido.
+
+### Los dos buckets
+
+```
+dev   emma-media-dev    us-east-2
+prod  emma-media-prod   us-east-2
+```
+
+**Uno por entorno, y no es cosmético.** Las keys arrancan con el `businessId` y
+no llevan el entorno, así que si los dos compartieran bucket bastaría con
+restaurar un dump de prod en dev para que los ids coincidieran — y ahí el
+barrido de huérfanos, corriendo en dev, borraría archivos de clientes reales.
+Buckets separados hacen eso imposible sin tocar una línea de código.
+
+El nombre sale de `AWS_S3_BUCKET_NAME`. Se valida su forma en `requireMediaConfig`
+antes de cualquier upload: S3 **no admite guiones bajos** ni mayúsculas, y un
+nombre inválido fallaría cada subida sin decir por qué.
+
+**Si la región no coincide con la del bucket**, AWS responde `301
+PermanentRedirect` y hasta el 2026-09-21 eso llegaba como "No pudimos procesar
+el archivo" — un mensaje de error transitorio para un problema de configuración.
+Ahora `diagnose()` en `media.service.ts` nombra la causa en el log. Para
+averiguar la región real de un bucket:
+
+```bash
+curl -sI https://<bucket>.s3.amazonaws.com | grep x-amz-bucket-region
+```
 
 ### La regla que evita residuos
 

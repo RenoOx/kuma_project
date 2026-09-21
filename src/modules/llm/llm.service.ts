@@ -256,8 +256,24 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // Which services have files, by id. One query per reply rather than a field
   // on the service, because media lives in its own table now — and the prompt
   // module is pure, so it cannot go and look.
-  const mediaRows = await serviceMediaService.listForBusiness(params.businessId)
-  const servicesWithMedia = new Set(mediaRows.map((row) => row.serviceId))
+  //
+  // Non-fatal, and deliberately so. This is the only query in the reply path
+  // that can fail without the reply being wrong: losing it costs the
+  // "[con material]" markers, so Emma describes the service in words instead of
+  // offering a file. Letting it throw would cost the whole answer — the same
+  // rule outbound.ts states for a photo that will not send, applied one layer
+  // earlier.
+  //
+  // It also covers a deploy that reaches production before its migration does:
+  // without this, code shipped ahead of `service_media` would take down every
+  // customer reply instead of quietly sending no files.
+  let servicesWithMedia: ReadonlySet<string> = new Set()
+  try {
+    const mediaRows = await serviceMediaService.listForBusiness(params.businessId)
+    servicesWithMedia = new Set(mediaRows.map((row) => row.serviceId))
+  } catch (cause) {
+    log.error({ err: cause }, 'could not read service media; replying without file markers')
+  }
 
   const basePrompt = buildSystemPrompt(
     business,

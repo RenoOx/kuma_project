@@ -48,6 +48,7 @@ export function ServiceForm({
   service,
   onClose,
   onSubmit,
+  schedulesAppointments,
   error,
 }: {
   open: boolean
@@ -55,6 +56,13 @@ export function ServiceForm({
   service: PanelService | null
   onClose: () => void
   onSubmit: (service: PanelService) => void
+  /**
+   * False for a business that sells instead of booking. The duration field is
+   * hidden entirely rather than left blank: asking how many minutes a course
+   * lasts invites an answer nothing will ever read, and a field the owner has
+   * to guess at is worse than one that is not there.
+   */
+  schedulesAppointments: boolean
   error: string | null
 }): React.JSX.Element {
   const base = service ?? EMPTY
@@ -104,19 +112,21 @@ export function ServiceForm({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="svc-duration">Duración (minutos)</Label>
-            <Input
-              id="svc-duration"
-              type="number"
-              inputMode="numeric"
-              min={5}
-              max={480}
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              placeholder="Vacío = usa la duración por defecto"
-            />
-          </div>
+          {schedulesAppointments && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="svc-duration">Duración (minutos)</Label>
+              <Input
+                id="svc-duration"
+                type="number"
+                inputMode="numeric"
+                min={5}
+                max={480}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                placeholder="Vacío = usa la duración por defecto"
+              />
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
             <div className="flex flex-col gap-0.5">
