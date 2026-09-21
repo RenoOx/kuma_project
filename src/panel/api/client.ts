@@ -68,6 +68,20 @@ export async function apiGet<T>(
   return await parse<T>(res)
 }
 
+/**
+ * Multipart upload of a single file, under the field name `file`.
+ *
+ * No content-type header on purpose: the browser writes it with the boundary it
+ * generated for this body, and setting it by hand produces a request the server
+ * cannot parse even though it looks correct.
+ */
+export async function apiUpload<T>(session: PanelSession, path: string, file: File): Promise<T> {
+  const body = new FormData()
+  body.set('file', file)
+  const res = await fetch(buildUrl(session, path), { method: 'POST', body })
+  return await parse<T>(res)
+}
+
 export async function apiSend<T>(
   session: PanelSession,
   method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',

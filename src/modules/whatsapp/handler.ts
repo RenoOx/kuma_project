@@ -6,13 +6,16 @@ import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
 import * as businessService from '@/modules/business/business.service.js'
-import { shouldForwardImages } from '@/modules/business/business.settings.js'
+import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import { configuredMessage, shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as llmService from '@/modules/llm/llm.service.js'
+import type { ToolAttachment } from '@/modules/llm/toolExecutor.js'
+import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
@@ -36,13 +39,15 @@ import {
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
-import { sendDirect, sendWithPresence } from '@/modules/whatsapp/outbound.js'
+import { sendDirect, sendImageToCustomer, sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
 import * as presence from '@/modules/whatsapp/presence.js'
+import { markServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { preview } from '@/shared/logRedact.js'
 import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
+import { renderTemplate } from '@/shared/templates.js'
 
 const LLM_FALLBACK_REPLY =
   'Mmm, algo no salió bien de mi lado. Intenta de nuevo en un momento, ¿va?'
@@ -56,6 +61,35 @@ const PAUSED_REPLY =
 const OWNER_FALLBACK_REPLY = 'Uy, no pude completar eso 😅 ¿Lo intentamos de nuevo?'
 
 const ESCALATED_REPLY = 'Ya avisé al encargado, te escribirá en breve 😊'
+
+// ── Configured canned replies ────────────────────────────────────────────────
+//
+// The three messages below leave WITHOUT passing through the model, which is why
+// they read the owner's template verbatim instead of handing it over as guidance.
+// Each falls back to the constant it replaces, so a business that never opened the
+// Mensajes form keeps exactly the wording it has today.
+
+function configuredHandoffText(settings: BusinessSettings | null, businessName: string): string {
+  const configured = configuredMessage(settings, 'handoff')
+  if (!configured) return ESCALATED_REPLY
+  return renderTemplate(configured, { nombre_negocio: businessName })
+}
+
+// The frozen intent is the only place a service name and a customer name are both
+// available on this path, so a template that uses either only fills in when one
+// exists. renderTemplate drops the rest rather than showing braces.
+function paymentVerificationText(
+  settings: BusinessSettings | null,
+  businessName: string,
+  intent: { service: string; customerName: string } | null,
+): string {
+  const configured = configuredMessage(settings, 'paymentReceived')
+  if (!configured) return PAYMENT_VERIFICATION_REPLY
+  return renderTemplate(configured, {
+    nombre_negocio: businessName,
+    ...(intent ? { servicio: intent.service, nombre_cliente: intent.customerName } : {}),
+  })
+}
 
 export type SendFn = (jid: string, text: string) => Promise<void>
 
@@ -380,17 +414,44 @@ async function handleCustomerImage(params: {
   // unblocks it would be the one photo nobody forwards.
   const wanted = purpose !== null || pendingAppointment !== null || requiresDeposit
 
+  // Downloaded at most once, and only when something will actually use the bytes:
+  // the owner's relay, the S3 archive, or both. With forwarding off and no
+  // deposit to archive there is nothing worth spending the bandwidth on.
+  const needsRelay = forwardImages && wanted && Boolean(business.ownerWhatsappNumber)
+  const needsArchive = intent !== null && requiresDeposit
+  const image = needsRelay || needsArchive ? await downloadImage(raw, log) : null
+
+  // Archived before the verification row is opened, so the row can point at it.
+  // Best-effort, exactly like the Google Calendar event in bookAppointment: a
+  // bucket that is unconfigured or down must not cost the owner the request they
+  // have to rule on. A failure here leaves proofKey null and changes nothing else.
+  let proofKey: string | null = null
+  if (needsArchive && image) {
+    const stored = await mediaService.uploadMedia(
+      { kind: 'payment_proof', businessId, conversationId },
+      image,
+    )
+    if (stored.ok) {
+      proofKey = stored.data.key
+    } else {
+      log.warn(
+        { code: stored.error.code, context: stored.error.logContext },
+        'could not archive the payment capture, opening the verification without it',
+      )
+    }
+  }
+
   let forwarded = false
-  if (forwardImages && wanted && business.ownerWhatsappNumber) {
+  if (needsRelay && image) {
     forwarded = await relayImage({
-      raw,
+      image,
       business,
       customer,
       caption,
       pendingAppointment,
       purpose,
       payment: intent,
-      awaitsVerification: intent !== null && requiresDeposit,
+      awaitsVerification: needsArchive,
       log,
     })
   } else {
@@ -417,6 +478,7 @@ async function handleCustomerImage(params: {
           conversationId,
           customerId: customer.id,
           booking: intent,
+          proofKey,
         })
       : null
   if (verification && !verification.ok) {
@@ -506,7 +568,7 @@ async function handleCustomerImage(params: {
   // it promises nothing, which is the only honest thing to say when we do not
   // know whether this capture is going anywhere.
   const reply = awaitingVerification
-    ? PAYMENT_VERIFICATION_REPLY
+    ? paymentVerificationText(settingsResult.ok ? settingsResult.data : null, business.name, intent)
     : booked
       ? booked.status === 'pending'
         ? PAYMENT_BOOKED_PENDING_REPLY
@@ -619,12 +681,32 @@ async function bookFromPaymentCapture(params: {
 }
 
 /**
- * Downloads the photo and hands it to the forwarder. Never throws: a failed
- * download or a failed send falls back to the text-only path, which is strictly
- * better than dropping the customer's message on the floor.
+ * Pulls the bytes of an incoming photo, or null if that fails.
+ *
+ * No reupload context: the media was sent seconds ago and has not expired, so the
+ * retry path Baileys offers there would never fire. A download that fails anyway
+ * falls through to the text-only notice.
+ *
+ * Called once per photo by handleCustomerImage, because two things now want the
+ * same bytes — the owner's relay and the S3 archive — and asking WhatsApp for
+ * them twice would double the bandwidth for one message.
+ */
+async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
+  try {
+    return await downloadMediaMessage(raw, 'buffer', {})
+  } catch (err) {
+    log.error({ err }, 'failed to download customer image')
+    return null
+  }
+}
+
+/**
+ * Hands an already-downloaded photo to the forwarder. Never throws: a failed
+ * send falls back to the text-only path, which is strictly better than dropping
+ * the customer's message on the floor.
  */
 async function relayImage(params: {
-  raw: WAMessage
+  image: Buffer
   business: Business
   customer: Customer
   caption: string | null
@@ -634,22 +716,11 @@ async function relayImage(params: {
   awaitsVerification: boolean
   log: HandlerLogger
 }): Promise<boolean> {
-  const { raw, business, customer, caption, pendingAppointment, purpose, payment, log } = params
+  const { image, business, customer, caption, pendingAppointment, purpose, payment, log } = params
 
   const client = clientRegistry.getClient(business.id)
   if (!client) {
     log.warn({ businessId: business.id }, 'cannot forward image: no whatsapp client registered')
-    return false
-  }
-
-  // No reupload context: the media was sent seconds ago and has not expired, so
-  // the retry path Baileys offers there would never fire. A download that fails
-  // anyway falls through to the text-only notice.
-  let image: Buffer
-  try {
-    image = await downloadMediaMessage(raw, 'buffer', {})
-  } catch (err) {
-    log.error({ err, businessId: business.id }, 'failed to download customer image')
     return false
   }
 
@@ -1078,17 +1149,25 @@ async function processMessage(
   // sent mid-escalation must still reach the owner.
   if (conversation.status === 'escalated') {
     if (shouldSendEscalatedNotice(conversation.id)) {
+      // The owner's wording when they configured one, the built-in line otherwise.
+      // Sent verbatim rather than through the model, because this whole branch
+      // exists to keep the model from answering over a waiting human.
+      const escalatedSettings = await businessService.getSettings(businessId)
+      const handoffText = configuredHandoffText(
+        escalatedSettings.ok ? escalatedSettings.data : null,
+        business.name,
+      )
       const persisted = await messageService.append({
         businessId,
         conversationId: conversation.id,
         role: 'assistant',
-        content: ESCALATED_REPLY,
+        content: handoffText,
       })
       if (!persisted.ok) {
         log.error({ code: persisted.error.code }, 'append escalated canned reply failed')
       }
       try {
-        await sendWithPresence({ businessId, jid, text: ESCALATED_REPLY, send, readKey: raw.key })
+        await sendWithPresence({ businessId, jid, text: handoffText, send, readKey: raw.key })
         log.info({ conversationId: conversation.id }, 'escalated: canned reply sent, LLM skipped')
       } catch (err) {
         log.error({ err, jid }, 'failed to send escalated canned reply')
@@ -1156,6 +1235,61 @@ async function processMessage(
     log.info({ jid }, 'reply sent successfully')
   } catch (err) {
     log.error({ err, jid }, 'failed to send reply over whatsapp')
+  }
+
+  // After the text and never before: the photo illustrates what Emma just said,
+  // and one that arrives first reads as a non sequitur.
+  if (llmResult.ok && llmResult.data.attachments.length > 0) {
+    await sendServiceImages({
+      businessId,
+      conversationId: conversation.id,
+      jid,
+      attachments: llmResult.data.attachments,
+      log,
+    })
+  }
+}
+
+/**
+ * Sends the service photos this turn asked for, one after the other.
+ *
+ * Never throws. The reply has already landed by the time this runs, and a photo
+ * that cannot be read out of the bucket must not turn a good answer into an
+ * error — the model was told to describe the service in words either way.
+ */
+async function sendServiceImages(params: {
+  businessId: string
+  conversationId: string
+  jid: string
+  attachments: ToolAttachment[]
+  log: HandlerLogger
+}): Promise<void> {
+  const { businessId, conversationId, jid, attachments, log } = params
+
+  for (const attachment of attachments) {
+    const downloaded = await mediaService.downloadMedia(businessId, attachment.s3Key)
+    if (!downloaded.ok) {
+      log.warn(
+        { code: downloaded.error.code, key: attachment.s3Key },
+        'could not read a service photo from storage, reply went out without it',
+      )
+      continue
+    }
+
+    try {
+      await sendImageToCustomer({
+        businessId,
+        jid,
+        image: downloaded.data,
+        caption: attachment.caption,
+      })
+      // Recorded only once the send succeeded: marking it earlier would let a
+      // single failure suppress that photo for the rest of the conversation.
+      markServiceImageSent(conversationId, attachment.serviceId)
+      log.info({ serviceId: attachment.serviceId }, 'service photo sent')
+    } catch (err) {
+      log.error({ err, serviceId: attachment.serviceId }, 'failed to send service photo')
+    }
   }
 }
 

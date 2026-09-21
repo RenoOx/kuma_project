@@ -121,6 +121,28 @@ export async function findLatestByConversation(
   return row ?? null
 }
 
+// Every verification this conversation has produced, newest first.
+//
+// A history rather than just the open one: a rejected capture and the one that
+// replaced it are both part of what the owner needs to see in the panel, and the
+// rejection reason only makes sense next to the image it was about.
+export async function listByConversation(
+  businessId: string,
+  conversationId: string,
+  exec: Executor = db,
+): Promise<PaymentVerification[]> {
+  return await exec
+    .select()
+    .from(paymentVerifications)
+    .where(
+      and(
+        eq(paymentVerifications.businessId, businessId),
+        eq(paymentVerifications.conversationId, conversationId),
+      ),
+    )
+    .orderBy(desc(paymentVerifications.createdAt))
+}
+
 export async function resolve(
   businessId: string,
   id: string,

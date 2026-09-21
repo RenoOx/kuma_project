@@ -8,6 +8,7 @@ import { NameTags } from '../NameTags.js'
 import { Button } from '../ui/button.js'
 import { EmmaToggle } from './EmmaToggle.js'
 import { MessageBubble } from './MessageBubble.js'
+import { PaymentProofs } from './PaymentProofs.js'
 import { ReplyInput } from './ReplyInput.js'
 import { TagBadge } from './TagBadge.js'
 import { TagManager } from './TagManager.js'
@@ -138,6 +139,8 @@ export function ChatView({
           </Button>
         )}
       </header>
+
+      <PaymentProofs conversationId={conversation.id} />
 
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto p-3">
         {hasEarlier && (

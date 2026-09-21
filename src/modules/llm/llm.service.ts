@@ -20,7 +20,7 @@ import { err, ok, type Result } from '@/shared/result.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt } from './prompts.js'
-import { executeTool, type ToolContext } from './toolExecutor.js'
+import { executeTool, type ToolAttachment, type ToolContext } from './toolExecutor.js'
 import { kumaTools } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
@@ -265,6 +265,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   let totalTokensInput = 0
   let totalTokensOutput = 0
   const executedTools: ExecutedToolCall[] = []
+  const attachments: ToolAttachment[] = []
   let escalated = false
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
@@ -370,6 +371,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         toolCallsExecuted: executedTools,
         escalated,
         maxIterationsHit: false,
+        attachments,
       })
     }
 
@@ -420,6 +422,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         result: toolResult.result,
         error: toolResult.error,
       })
+
+      // Deduplicated by key: the in-memory send registry is only written once the
+      // handler has actually sent, so a model that asks for the same photo twice
+      // across two iterations of this loop would otherwise queue it twice.
+      for (const attachment of toolResult.attachments ?? []) {
+        if (!attachments.some((queued) => queued.s3Key === attachment.s3Key)) {
+          attachments.push(attachment)
+        }
+      }
 
       // Folded over the turn's own variable rather than re-read from the row:
       // when the model calls two tools in one iteration, the second has to be
@@ -494,5 +505,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     toolCallsExecuted: executedTools,
     escalated,
     maxIterationsHit: true,
+    // Dropped on purpose: this path replaces the model's reply with the fallback
+    // text and escalates, and a service photo arriving next to "te conecto con
+    // alguien" would be noise at the worst moment.
+    attachments: [],
   })
 }

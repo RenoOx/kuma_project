@@ -197,6 +197,27 @@ panelRoutes.post(
   },
 )
 
+// The deposit captures this conversation produced, with short-lived signed URLs.
+//
+// Same 404-before-read as /messages: an id from another business must not be
+// distinguishable from one that does not exist.
+panelRoutes.get(
+  '/api/panel/:businessId/conversations/:conversationId/payment-proofs',
+  async (c) => {
+    const businessId = panelBusiness(c).id
+    const conversationId = c.req.param('conversationId')
+
+    const conversation = await panelRepo.findConversation(businessId, conversationId)
+    if (!conversation) return c.json({ error: 'not_found' }, 404)
+
+    const result = await panelService.listPaymentProofs(businessId, conversationId)
+    const unwrapped = unwrap(c, result)
+    if (!unwrapped.ok) return unwrapped.res
+
+    return c.json({ proofs: unwrapped.data })
+  },
+)
+
 // ── Appointments ─────────────────────────────────────────────────────────────
 
 const rangeSchema = z.object({

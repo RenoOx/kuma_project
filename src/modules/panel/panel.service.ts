@@ -1,9 +1,11 @@
 import { logger } from '@/config/logger.js'
-import type { Business } from '@/db/schema/index.js'
+import type { Business, PaymentVerificationStatus } from '@/db/schema/index.js'
+import * as paymentVerificationRepo from '@/modules/appointment/paymentVerification.repo.js'
 import type { OperatingHours } from '@/modules/business/business.settings.js'
 import { parseBusinessSettings } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
+import { getPresignedUrl } from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { notifyCustomer } from '@/modules/whatsapp/customerNotifier.js'
 import { AppError, NotFoundError, ValidationError } from '@/shared/errors.js'
@@ -135,6 +137,83 @@ export async function returnToEmma(
         code: 'return_to_emma_failed',
         message: cause instanceof Error ? cause.message : 'unknown error',
         userMessage: 'No pudimos devolver la conversación a Emma.',
+        logContext: { businessId, conversationId },
+        cause,
+      }),
+    )
+  }
+}
+
+// ── Payment proofs ───────────────────────────────────────────────────────────
+
+export interface PaymentProofView {
+  id: string
+  service: string
+  scheduledAt: string
+  depositAmount: string | null
+  customerName: string
+  status: PaymentVerificationStatus
+  createdAt: string
+  resolvedAt: string | null
+  rejectionReason: string | null
+  /** Presigned and short-lived. Null when nothing was archived, or when signing failed. */
+  proofUrl: string | null
+}
+
+/**
+ * The deposit captures a conversation produced, for the chat to show inline.
+ *
+ * Until now the capture only ever existed as bytes passing through to the owner's
+ * WhatsApp, so the panel could not show what the owner had ruled on. Rows without
+ * a `proofKey` are still listed: a verification from before this existed, or one
+ * whose upload failed, is still a decision the owner made and needs to see.
+ *
+ * A failure to sign degrades to `proofUrl: null` rather than failing the request —
+ * the history is worth more than the thumbnail.
+ */
+export async function listPaymentProofs(
+  businessId: string,
+  conversationId: string,
+): Promise<Result<PaymentProofView[]>> {
+  try {
+    const rows = await paymentVerificationRepo.listByConversation(businessId, conversationId)
+
+    return ok(
+      await Promise.all(
+        rows.map(async (row) => {
+          let proofUrl: string | null = null
+          if (row.proofKey) {
+            const signed = await getPresignedUrl(businessId, row.proofKey)
+            if (signed.ok) proofUrl = signed.data
+            else {
+              logger.warn(
+                { businessId, conversationId, verificationId: row.id, code: signed.error.code },
+                'could not sign a payment proof for the panel',
+              )
+            }
+          }
+
+          return {
+            id: row.id,
+            service: row.service,
+            scheduledAt: row.scheduledAt.toISOString(),
+            depositAmount: row.depositAmount,
+            customerName: row.customerName,
+            status: row.status,
+            createdAt: row.createdAt.toISOString(),
+            resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+            rejectionReason: row.rejectionReason,
+            proofUrl,
+          }
+        }),
+      ),
+    )
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'list_payment_proofs_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos leer los comprobantes de esta conversación.',
         logContext: { businessId, conversationId },
         cause,
       }),

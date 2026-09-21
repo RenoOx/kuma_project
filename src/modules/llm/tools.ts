@@ -76,6 +76,26 @@ export const kumaTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'send_service_image',
+      description:
+        'Envía por WhatsApp la foto de un servicio del catálogo. Usar cuando el cliente pide ver fotos, ejemplos, resultados o "cómo queda", o cuando estás recomendando un servicio y ayuda mostrarlo. Solo funciona con servicios marcados [con foto] en el catálogo. Llamala UNA sola vez por servicio: la foto se manda sola, vos seguí escribiendo tu respuesta normal sin decir "te la adjunto".',
+      parameters: {
+        type: 'object',
+        properties: {
+          service: {
+            type: 'string',
+            description:
+              'Nombre del servicio tal como aparece en el catálogo, ej: diseño de sonrisa, limpieza dental.',
+          },
+        },
+        required: ['service'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'request_image',
       description:
         'Avisa al sistema que vas a pedirle una foto al cliente, para que esa foto llegue al encargado. Llamala ANTES de pedirle la imagen. Usar cuando: el cliente dice que ya pagó o que va a mandar el comprobante/voucher/captura (purpose "payment"), o cuando necesitás una foto de referencia para cotizar (purpose "reference"). NO la llames para fotos que no pediste ni para cualquier otra imagen.',
@@ -120,6 +140,7 @@ export const KUMA_TOOL_NAMES = [
   'check_availability', //revisar horarios
   'book_appointment', // reserrvar
   'confirm_pending_appointment', //confirmar cita pendeinte
+  'send_service_image', // mandar la foto de un servicio
   'request_image', // pedir imagen
   'escalate_to_human', //escalar a humano
 ] as const
