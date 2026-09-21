@@ -120,6 +120,49 @@ export async function sendImageToCustomer(params: {
 }
 
 /**
+ * The same, for a file that is not a photo.
+ *
+ * One entry point per type would mean four near-identical queue wrappers, and
+ * the thing worth keeping identical between them is exactly the part that is
+ * easy to forget: the queue, the human pause, and the registry lookup.
+ *
+ * A caption only rides along where WhatsApp renders one. Audio has no caption
+ * at all, so text meant to accompany it has to be its own message.
+ */
+export async function sendMediaToCustomer(params: {
+  businessId: string
+  jid: string
+  type: 'image' | 'pdf' | 'audio' | 'video'
+  buffer: Buffer
+  mimetype: string
+  filename: string
+  caption?: string
+}): Promise<void> {
+  const { businessId, jid, type, buffer, mimetype, filename, caption } = params
+
+  return enqueueSend(businessId, 'reply', async () => {
+    const client = clientRegistry.getClient(businessId)
+    if (!client) throw new Error(`no whatsapp client registered for business ${businessId}`)
+
+    await humanDelay()
+    switch (type) {
+      case 'image':
+        await client.sendImage(jid, buffer, caption)
+        return
+      case 'pdf':
+        await client.sendDocument(jid, buffer, mimetype, filename, caption)
+        return
+      case 'audio':
+        await client.sendAudio(jid, buffer, mimetype)
+        return
+      case 'video':
+        await client.sendVideo(jid, buffer, caption)
+        return
+    }
+  })
+}
+
+/**
  * Queued send with no human timing.
  *
  * For traffic that is not a customer-facing reply — the owner poking their own

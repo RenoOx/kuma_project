@@ -1,5 +1,7 @@
+import type { MediaType } from './media.validate.js'
+
 /** What a stored object is, which decides the key layout under the tenant prefix. */
-export type MediaKind = 'service_image' | 'payment_proof'
+export type MediaKind = 'service_media' | 'payment_proof'
 
 /**
  * Where an upload should land.
@@ -10,11 +12,20 @@ export type MediaKind = 'service_image' | 'payment_proof'
  */
 export type MediaTarget =
   | {
-      kind: 'service_image'
+      kind: 'service_media'
       businessId: string
       serviceId: string
-      /** 1-based slot. One image per service today; the slot keeps a gallery open. */
-      index?: number
+      /**
+       * The id of the `service_media` row this file belongs to, minted BEFORE
+       * the upload so the object and the row share it.
+       *
+       * That sharing is what makes cleanup provable rather than best-effort: a
+       * row always knows its object, and an object under a service's folder
+       * always names the row that should own it. Deriving one from the other
+       * after the fact — by index, by timestamp — is how you end up with files
+       * nobody can prove are unreferenced and nobody dares delete.
+       */
+      mediaId: string
     }
   | {
       kind: 'payment_proof'
@@ -26,5 +37,6 @@ export type MediaTarget =
 export interface UploadedMedia {
   key: string
   mime: string
+  type: MediaType
   bytes: number
 }

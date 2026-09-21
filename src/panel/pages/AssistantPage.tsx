@@ -1,12 +1,13 @@
 import { TriangleAlert } from 'lucide-react'
+import { ConversationSettings } from '../components/assistant/ConversationSettings.js'
 import { FlowSettings } from '../components/assistant/FlowSettings.js'
 import { IdentitySettings } from '../components/assistant/IdentitySettings.js'
 import { MessagesSettings } from '../components/assistant/MessagesSettings.js'
 import { Skeleton } from '../components/ui/skeleton.js'
-import { useSettings } from '../hooks/useSettings.js'
+import { useConversationCatalog, useSettings } from '../hooks/useSettings.js'
 
 /**
- * The Asistente tab: Identidad, Mensajes, Flujo.
+ * The Asistente tab: Identidad, Mensajes, Flujo, Conversación.
  *
  * Three cards with three save buttons, and three section PATCHes behind them. One
  * combined save would arrive from whichever card the owner touched with the other
@@ -20,6 +21,7 @@ import { useSettings } from '../hooks/useSettings.js'
  */
 export function AssistantPage(): React.JSX.Element {
   const { data, isLoading, isError } = useSettings()
+  const catalog = useConversationCatalog()
 
   if (isLoading) return <AssistantSkeleton />
 
@@ -41,6 +43,10 @@ export function AssistantPage(): React.JSX.Element {
           <>
             <MessagesSettings data={data} />
             <FlowSettings data={data} />
+            {/* Rendered only once the catalogue is in: the card opens on the
+                flow that is actually running, and a fallback shape would let
+                the owner edit a composition the server never served. */}
+            {catalog.data && <ConversationSettings catalog={catalog.data} />}
           </>
         ) : (
           <Notice

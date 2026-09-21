@@ -8,6 +8,7 @@ import type {
 } from '../../api/types.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
 import { Field, SettingsCard } from '../config/SettingsCard.js'
+import { Badge } from '../ui/badge.js'
 import { Input } from '../ui/input.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
 import { Textarea } from '../ui/textarea.js'
@@ -24,11 +25,22 @@ const TONE_LABELS: Record<AssistantTone, string> = {
   profesional_cercano: 'Profesional cercano',
 }
 
+// 'ambas' used to read just "Ambas", which the owner reasonably took as "sells
+// AND books". It does not: it maps to appointmentMode 'hybrid', so it is
+// booking plus walk-ins, and the sales flow never runs. The label now says what
+// the setting actually does.
 const FUNCTION_LABELS: Record<AssistantFunction, string> = {
   agenda: 'Agenda citas',
   vende: 'Vende',
-  ambas: 'Ambas',
+  ambas: 'Agenda y atiende sin cita',
 }
+
+// 'vende' writes flowType 'sales', whose state machine cannot advance yet: the
+// only way out of its greeting is the asks_info trigger and nothing in the code
+// emits it, so the business would answer once and then go quiet. Offered but
+// disabled rather than hidden, so a business already stored on it can still see
+// what it is on and switch away.
+const FUNCTION_SOON: ReadonlySet<AssistantFunction> = new Set<AssistantFunction>(['vende'])
 
 const FUNCTION_HINTS: Record<AssistantFunction, string> = {
   agenda: 'Solo con cita previa: Emma informa y reserva horarios.',
@@ -161,18 +173,27 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
       </Field>
 
       <Field label="Función" hint={FUNCTION_HINTS[fn]} htmlFor="asst-function">
-        <Select value={fn} onValueChange={(v) => setFn(v as AssistantFunction)}>
-          <SelectTrigger id="asst-function">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(Object.keys(FUNCTION_LABELS) as AssistantFunction[]).map((value) => (
-              <SelectItem key={value} value={value}>
-                {FUNCTION_LABELS[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col gap-1.5">
+          {FUNCTION_SOON.has(fn) && (
+            <Badge variant="secondary" className="w-fit text-[10px]">
+              Próximamente
+            </Badge>
+          )}
+          <Select value={fn} onValueChange={(v) => setFn(v as AssistantFunction)}>
+            <SelectTrigger id="asst-function">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(FUNCTION_LABELS) as AssistantFunction[]).map((value) => (
+                <SelectItem key={value} value={value} disabled={FUNCTION_SOON.has(value)}>
+                  {FUNCTION_SOON.has(value)
+                    ? `${FUNCTION_LABELS[value]} · Próximamente`
+                    : FUNCTION_LABELS[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </Field>
 
       <Field

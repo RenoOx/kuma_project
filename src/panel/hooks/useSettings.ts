@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PanelApiError } from '../api/client.js'
 import {
+  getConversationCatalog,
   getIntegrations,
   getSettings,
   updateBooking,
+  updateConversation,
   updateFlow,
   updateGeneral,
   updateIdentity,
@@ -15,6 +17,8 @@ import {
 } from '../api/settings.js'
 import type {
   BookingPatch,
+  ConversationCatalog,
+  ConversationFlow,
   FlowPatch,
   GeneralPatch,
   IdentityPatch,
@@ -59,6 +63,7 @@ export type SettingsSave =
   | { section: 'identity'; patch: IdentityPatch }
   | { section: 'messages'; patch: MessagesPatch }
   | { section: 'flow'; patch: FlowPatch }
+  | { section: 'conversation'; conversationFlow: ConversationFlow }
 
 export function useSaveSettings() {
   const session = useSession()
@@ -74,6 +79,7 @@ export function useSaveSettings() {
       if (save.section === 'identity') return updateIdentity(session, save.patch)
       if (save.section === 'messages') return updateMessages(session, save.patch)
       if (save.section === 'flow') return updateFlow(session, save.patch)
+      if (save.section === 'conversation') return updateConversation(session, save.conversationFlow)
       return updateBooking(session, save.patch)
     },
     onSuccess: (_data, save) => {
@@ -86,6 +92,11 @@ export function useSaveSettings() {
       if (save.section === 'schedule' || save.section === 'specialDays') {
         void queryClient.invalidateQueries({ queryKey: ['me', session.businessId] })
       }
+      // The catalogue carries `current` and each node's `available`, both of
+      // which the server derives from the settings that just moved.
+      void queryClient.invalidateQueries({
+        queryKey: ['conversation-catalog', session.businessId],
+      })
     },
   })
 }
@@ -133,4 +144,22 @@ function errorText(error: Error): string {
   // the difference between "no pudimos guardar" and knowing which row is wrong.
   if (error instanceof PanelApiError && error.userMessage) return error.userMessage
   return 'No pudimos guardar. Intentá de nuevo.'
+}
+
+/**
+ * The brick box plus the flow this business is running.
+ *
+ * Served rather than held in the SPA so the two cannot drift: the catalogue is
+ * the contract between what the owner composes and what Emma executes. Never
+ * polled — it only changes when someone saves on this very screen, and every
+ * settings mutation invalidates it (a node's availability depends on the
+ * deposit switch, which lives on a different card).
+ */
+export function useConversationCatalog() {
+  const session = useSession()
+  return useQuery<ConversationCatalog>({
+    queryKey: ['conversation-catalog', session.businessId],
+    queryFn: () => getConversationCatalog(session),
+    staleTime: Number.POSITIVE_INFINITY,
+  })
 }

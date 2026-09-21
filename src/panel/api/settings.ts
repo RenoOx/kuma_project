@@ -2,6 +2,8 @@ import { apiGet, apiSend, apiUpload, type PanelSession } from './client.js'
 import type {
   BookingPatch,
   BusinessSettingsView,
+  ConversationCatalog,
+  ConversationFlow,
   FlowPatch,
   GeneralPatch,
   IdentityPatch,
@@ -11,7 +13,7 @@ import type {
   PanelService,
   PanelSettings,
   PaymentsPatch,
-  ServiceImage,
+  ServiceMediaView,
   SpecialDay,
 } from './types.js'
 
@@ -88,45 +90,57 @@ export function updateServices(
   session: PanelSession,
   services: PanelService[],
 ): Promise<BusinessSettingsView> {
-  // imageKey is stripped rather than forwarded. The image endpoints own it, and
-  // this list is a draft the form snapshotted on mount — if a photo was uploaded
-  // since, the draft still holds the key it replaced, and sending that back would
-  // point the service at an object that no longer exists.
-  //
-  // Omitted, never nulled: the server keeps what it stored for an absent field,
-  // while null is how the delete endpoint says "remove the photo".
-  const payload = services.map((service) => {
-    const { imageKey, ...rest } = service
-    return rest
-  })
-  return apiSend<BusinessSettingsView>(session, 'PATCH', '/settings/services', {
-    services: payload,
-  })
+  // No stripping any more: files are rows keyed by the service id, so this form
+  // has nothing of theirs to send back stale. Saving the list does trigger the
+  // server's orphan sweep — a service removed here takes its files with it.
+  return apiSend<BusinessSettingsView>(session, 'PATCH', '/settings/services', { services })
 }
 
-// ── Service photos ───────────────────────────────────────────────────────────
+// ── Service media ────────────────────────────────────────────────────────────
 //
 // Addressed by service id, and separate from the catalogue PATCH above: the file
 // is multipart, and an upload that failed must not take the owner's text edits
 // down with it.
 
-export function getServiceImage(session: PanelSession, serviceId: string): Promise<ServiceImage> {
-  return apiGet<ServiceImage>(session, `/settings/services/${serviceId}/image`)
+export function getServiceMedia(
+  session: PanelSession,
+  serviceId: string,
+): Promise<ServiceMediaView[]> {
+  return apiGet<ServiceMediaView[]>(session, `/settings/services/${serviceId}/media`)
 }
 
-export function uploadServiceImage(
+export function uploadServiceMedia(
   session: PanelSession,
   serviceId: string,
   file: File,
-): Promise<ServiceImage> {
-  return apiUpload<ServiceImage>(session, `/settings/services/${serviceId}/image`, file)
+): Promise<ServiceMediaView> {
+  return apiUpload<ServiceMediaView>(session, `/settings/services/${serviceId}/media`, file)
 }
 
-export function deleteServiceImage(
+export function deleteServiceMedia(
   session: PanelSession,
   serviceId: string,
-): Promise<ServiceImage> {
-  return apiSend<ServiceImage>(session, 'DELETE', `/settings/services/${serviceId}/image`)
+  mediaId: string,
+): Promise<{ id: string }> {
+  return apiSend<{ id: string }>(
+    session,
+    'DELETE',
+    `/settings/services/${serviceId}/media/${mediaId}`,
+  )
+}
+
+/** The arrangement, sent whole — see the server's reorder guard. */
+export function reorderServiceMedia(
+  session: PanelSession,
+  serviceId: string,
+  ids: string[],
+): Promise<ServiceMediaView[]> {
+  return apiSend<ServiceMediaView[]>(
+    session,
+    'PATCH',
+    `/settings/services/${serviceId}/media/order`,
+    { ids },
+  )
 }
 
 export function updatePayments(
@@ -134,4 +148,26 @@ export function updatePayments(
   patch: PaymentsPatch,
 ): Promise<BusinessSettingsView> {
   return apiSend<BusinessSettingsView>(session, 'PATCH', '/settings/payments', patch)
+}
+
+// ── Conversación ─────────────────────────────────────────────────────────────
+
+export function getConversationCatalog(session: PanelSession): Promise<ConversationCatalog> {
+  return apiGet<ConversationCatalog>(session, '/settings/conversation/catalog')
+}
+
+/**
+ * Saves the composed conversation.
+ *
+ * Can be refused for a reason no form validation catches — a step with no way
+ * out, a payment step in a business that charges nothing. The rejection carries
+ * a sentence naming the step, which is what the card shows.
+ */
+export function updateConversation(
+  session: PanelSession,
+  conversationFlow: ConversationFlow,
+): Promise<BusinessSettingsView> {
+  return apiSend<BusinessSettingsView>(session, 'PATCH', '/settings/conversation', {
+    conversationFlow,
+  })
 }

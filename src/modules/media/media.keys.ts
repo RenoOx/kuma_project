@@ -31,16 +31,34 @@ function rejectId(field: string, value: string): ValidationError {
   })
 }
 
-/** `{businessId}/services/{serviceId}_{index}.{ext}` */
-export function buildServiceImageKey(
+/**
+ * `{businessId}/services/{serviceId}/{mediaId}.{ext}`
+ *
+ * A folder per service, not `{serviceId}_{index}` flat. The flat layout could
+ * only ever hold one numbered slot per service; a folder holds a photo, a price
+ * list and a voice note side by side. It also makes "delete everything this
+ * service owns" a prefix, which is what the orphan sweep needs.
+ *
+ * The filename is the id of the `service_media` row, so object and row point at
+ * each other by construction — see MediaTarget.
+ */
+export function buildServiceMediaKey(
   businessId: string,
   serviceId: string,
-  index: number,
+  mediaId: string,
   ext: string,
 ): Result<string> {
   if (!isSafeId(businessId)) return err(rejectId('businessId', businessId))
   if (!isSafeId(serviceId)) return err(rejectId('serviceId', serviceId))
-  return ok(`${businessId}/services/${serviceId}_${index}.${ext}`)
+  if (!isSafeId(mediaId)) return err(rejectId('mediaId', mediaId))
+  return ok(`${businessId}/services/${serviceId}/${mediaId}.${ext}`)
+}
+
+/** Everything one service owns, for a bulk delete. Trailing slash is required. */
+export function serviceMediaPrefix(businessId: string, serviceId: string): Result<string> {
+  if (!isSafeId(businessId)) return err(rejectId('businessId', businessId))
+  if (!isSafeId(serviceId)) return err(rejectId('serviceId', serviceId))
+  return ok(`${businessId}/services/${serviceId}/`)
 }
 
 /** `{businessId}/payments/{conversationId}_{timestamp}.{ext}` */
@@ -56,8 +74,8 @@ export function buildPaymentProofKey(
 }
 
 export function buildKey(target: MediaTarget, ext: string): Result<string> {
-  if (target.kind === 'service_image') {
-    return buildServiceImageKey(target.businessId, target.serviceId, target.index ?? 1, ext)
+  if (target.kind === 'service_media') {
+    return buildServiceMediaKey(target.businessId, target.serviceId, target.mediaId, ext)
   }
   return buildPaymentProofKey(
     target.businessId,

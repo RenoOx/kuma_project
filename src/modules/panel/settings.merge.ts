@@ -246,6 +246,25 @@ export const flowPatchSchema = z
 export type FlowPatch = z.infer<typeof flowPatchSchema>
 
 /**
+ * The conversation the owner composed: which nodes, in what order, and the two
+ * fields of each one they are allowed to rewrite.
+ *
+ * Shape only. Whether the composition can actually RUN — every node reachable,
+ * every exit backed by a trigger something emits, every requirement met by this
+ * business's config — is stateMachine.validateFlow's call, and the route runs it
+ * against the MERGED settings before anything is written. Zod cannot answer that
+ * question: it depends on the rest of the business's configuration, not on the
+ * payload.
+ */
+export const conversationPatchSchema = z
+  .object({
+    conversationFlow: patchable(shape.conversationFlow),
+  })
+  .partial()
+
+export type ConversationPatch = z.infer<typeof conversationPatchSchema>
+
+/**
  * The global Emma switch.
  *
  * Writes `settings.botPaused`, which already exists and already has its gate in
@@ -291,16 +310,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The three fields of a stored service that identity survives on.
+ * The two fields of a stored service that identity survives on.
  *
  * A narrow projection rather than the real serviceSchema, and parsed per element:
  * a business whose stored settings do not fully validate — a service missing its
- * price, say — must still keep its ids and photos. Validating the whole array
- * would throw all of them away over one bad row and silently re-mint everything.
+ * price, say — must still keep its ids. Validating the whole array would throw
+ * all of them away over one bad row and silently re-mint everything, and a
+ * re-minted id is a service whose files nothing points at any more.
  */
 const storedServiceLens = z.object({
   id: z.string().min(1).optional(),
-  imageKey: z.string().nullish(),
   name: z.string().min(1),
 })
 
@@ -326,14 +345,15 @@ function normalizeName(name: string): string {
  * Carries service identity across a whole-array replacement.
  *
  * The panel owns the service list and sends it back entire, which is fine for
- * names and prices and fatal for anything the form does not know about. Without
- * this, every save would hand back services with no `id` and no `imageKey`, mint
- * fresh ids, and leave every uploaded photo pointing at an id nothing references.
+ * names and prices and fatal for the id. Without this, every save would hand
+ * back services with no `id`, mint fresh ones, and leave every uploaded file
+ * hanging off an id nothing references — which the orphan sweep would then
+ * delete, correctly and catastrophically.
  *
  * Matching runs in two passes so that ids win globally: renaming a service and
  * adding a new one under its old name cannot transplant the first one's identity
  * onto the second. Each stored service can be claimed once — two incoming rows
- * must never come out sharing an id, or they would share a photo too.
+ * must never come out sharing an id, or they would share their files too.
  *
  * `idFactory` is injectable so tests can assert on ids instead of on nanoid.
  */
@@ -372,42 +392,42 @@ export function normalizeServices(
 
   return incoming.map((service, index) => {
     const match = matches.get(index)
-    const next: Service = {
+    // The id is the only thing carried over from the stored entry. Files used
+    // to be carried too, through an `imageKey` with three meaningful states,
+    // because a save from the services form arrived silent about the photo and
+    // silence had to mean "leave it". Media lives in its own table now, keyed by
+    // this id, so the services form cannot touch it at all — and the three-state
+    // dance disappears with it.
+    return {
       ...service,
       id: match?.id ?? service.id ?? idFactory(),
-    }
-    // Only inherited when the incoming entry is silent about the photo. An
-    // explicit null is the image endpoint saying "deleted" and must stand.
-    if (service.imageKey === undefined && match?.imageKey !== undefined) {
-      next.imageKey = match.imageKey
-    }
-    return next
+    } satisfies Service
   })
 }
 
 /**
- * The stored S3 key of one service's photo, addressed by id.
+ * Confirms a service id belongs to this business, before a file is hung off it.
  *
- * Read path for the panel: the route hands in a serviceId from the URL and gets
- * back a key that came out of this business's own settings, never a key the
- * caller supplied. That is what keeps the presigned-URL endpoint from being a
- * way to sign somebody else's object.
+ * The upload path's tenant check. The route has a serviceId from the URL and a
+ * business from the token; without this, a request could name any id and the
+ * file would land under a folder nothing references — an orphan created on
+ * purpose rather than by accident.
  */
-export function findServiceImageKey(business: Business, serviceId: string): Result<string | null> {
+export function serviceExists(business: Business, serviceId: string): Result<void> {
   const parsed = businessSettingsSchema.safeParse(business.settings)
   if (!parsed.success) {
     return err(
       new ValidationError({
         code: 'invalid_settings',
-        message: 'stored settings do not validate, cannot resolve a service image',
+        message: 'stored settings do not validate, cannot resolve a service',
         userMessage: 'La configuración del negocio está incompleta.',
         logContext: { businessId: business.id, serviceId },
       }),
     )
   }
 
-  const service = parsed.data.services.find((candidate) => candidate.id === serviceId)
-  if (!service) {
+  const found = parsed.data.services.some((candidate) => candidate.id === serviceId)
+  if (!found) {
     return err(
       new NotFoundError({
         resource: 'service',
@@ -416,8 +436,7 @@ export function findServiceImageKey(business: Business, serviceId: string): Resu
       }),
     )
   }
-
-  return ok(service.imageKey ?? null)
+  return ok(undefined)
 }
 
 /**

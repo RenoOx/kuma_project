@@ -44,6 +44,35 @@ El tipo de flujo se define en `business.settings.flowType`.
 - Panel: React 19 + Vite + Tailwind v4 + Radix (paquete único `radix-ui`) +
   TanStack Query + FullCalendar
 
+## Las dos bases, y el guard
+
+Hay **dos**, y cada una se identifica a sí misma con una tabla `_env_marker`:
+
+```
+DATABASE_URL       acela.proxy.rlwy.net    🟢 DEV — kuma-postgres-dev — safe to break
+PROD_DATABASE_URL  thomas.proxy.rlwy.net   🔴 PRODUCTION — kuma-postgres-prod
+```
+
+**`db:migrate:dev` no verificaba nada.** El sufijo `:dev` era solo un nombre: el
+script leía `DATABASE_URL` y migraba donde esa variable apuntara. El 2026-09-21
+apuntaba a producción, y lo único que evitó que una migración aterrizara ahí fue
+que alguien miró primero.
+
+Desde entonces los cuatro scripts que abren una base —`db:migrate:dev`,
+`db:migrate:prod`, `db:studio:dev`, `db:studio:prod`— pasan por
+`scripts/guard-db-env.mjs`, que lee `_env_marker` y aborta si no coincide con lo
+esperado. Studio también, porque es una GUI con permiso de escritura: es el
+camino más corto que existe para editar una fila de prod creyendo que es dev. **Falla cerrado**: una
+base sin marcador, inalcanzable o con una etiqueta ambigua también aborta —
+asumir "seguro es dev" es exactamente lo que causó el problema.
+
+Si agregás una base nueva, creale el marcador o ningún script va a querer tocarla:
+
+```sql
+create table _env_marker (label text);
+insert into _env_marker values ('🟢 DEV — mi-base — safe to break');
+```
+
 ## Comandos
 
 ```bash
@@ -126,9 +155,21 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
 
 ### Patrones clave de arquitectura
 
-- **Prompt caching**: system prompt dividido en cuerpo estático (cacheable,
-  ~3700 tokens) + cola variable (fecha, cita pendiente, CTA). El cuerpo
-  estático SIEMPRE va primero para aprovechar el caché de OpenAI
+- **Prompt en tres capas, por estabilidad**:
+  1. **Del negocio** (cacheable, cambia cuando el dueño guarda): identidad, voz,
+     formato, servicios, horarios, precios, reglas de evaluación previa, adelanto
+     (UNA vez), reglas generales, KB. SIEMPRE primero, para el caché de OpenAI
+  2. **Del turno**: fecha/hora, cita pendiente, fuera de horario, CTA
+  3. **Del nodo** (`renderNodeBlock`): OBJETIVO · PASOS · CASOS ESPECIALES ·
+     EJEMPLO. Va último, que es donde una instrucción pesa más
+
+  La prosa de flujo bajó a los nodos: un negocio en `await_payment` dejó de
+  recibir las 35 líneas del árbol de disponibilidad. Medido: −22% por mensaje.
+
+  **Lo que NO baja a un nodo**: las reglas de precio y de evaluación previa.
+  Cuelgan de `requiresEvaluation`, un flag por servicio, y tienen que estar
+  presentes en TODOS los estados — si se atan a `listado_servicios`, un cliente
+  que abre con "¿cuánto cuesta X?" se queda sin la consulta de diagnóstico
 - **Gate de depósito**: `toolExecutor` rechaza `book_appointment` si
   `requiresDeposit=true` y no hay evidencia de pago reciente. El rechazo
   congela el contexto de pago en la expectativa de imagen
@@ -146,9 +187,10 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
 | `src/modules/llm/llm.service.ts` | Cerebro, loop de tools, carga de contexto |
 | `src/modules/llm/toolExecutor.ts` | Ejecución de herramientas + gates |
 | `src/modules/llm/tools.ts` | Definición de herramientas del LLM |
-| `src/modules/llm/prompts.ts` | System prompt (estático + variable) |
+| `src/modules/llm/prompts.ts` | System prompt (negocio + turno); `renderNodeBlock` |
 | `src/modules/business/business.settings.ts` | Config por negocio (Zod) |
-| `src/modules/conversation/stateMachine.ts` | Estados y transiciones por flujo |
+| `src/modules/conversation/nodeCatalog.ts` | El catálogo de nodos + `EMITTED_TRIGGERS` |
+| `src/modules/conversation/stateMachine.ts` | Compilador, validador y presets |
 | `src/modules/panel/settings.merge.ts` | Patch schemas + merge del panel |
 
 ## Máquina de estados
@@ -156,24 +198,55 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
 Cada conversación tiene un campo `state` que controla en qué paso está.
 El flujo NO lo decide el LLM — lo controla el código.
 
-- **Estado**: dónde está la conversación (`conversations.state`, default `idle`)
-- **Trigger**: qué pasó. Del LLM (intención), del código (imagen recibida) o
-  del tiempo (24h sin respuesta)
+- **Estado**: dónde está la conversación (`conversations.state`, `varchar(50)`,
+  default `idle`). No hay enum en la BD: los ids de nodo son libres
+- **Trigger**: qué pasó. De una tool (`ToolResult.trigger`), del código (imagen
+  recibida) o del tiempo (24h sin respuesta)
 - **Transición**: estado actual + trigger → estado nuevo
 - **Tools por estado**: en cada estado el LLM solo ve las tools permitidas.
   `llm.service.ts` filtra el array antes de llamar a OpenAI, así que una tool
   no permitida no se rechaza: no se ofrece
 
-### Flujos
+### El flujo se COMPONE, no se escribe
 
-- `flowType: "appointments"`: idle → greeting → informing → show_availability
-  → choose_time → await_payment (si depósito) → await_payment_verification
-  → confirmed
-- `flowType: "sales"`: idle → greeting → informing → send_offer →
-  await_payment → collect_data → confirmed
+Los dos flujos hardcodeados murieron. Hoy hay tres piezas:
 
-Definiciones en `src/modules/conversation/stateMachine.ts`, que es data pura.
-El único que aplica transiciones es `conversationService.applyTrigger`.
+1. **Catálogo** (`src/modules/conversation/nodeCatalog.ts`) — 11 nodos cerrados.
+   Cada uno declara `objective`, `steps`, `edgeCases`, `example`, sus `tools`,
+   sus `exits` y qué config necesita (`requires`). También vive ahí
+   `EMITTED_TRIGGERS`: el registro a mano de qué trigger emite qué archivo.
+2. **Composición** — `settings.conversationFlow` (jsonb): qué nodos, en qué
+   orden, y los overrides del dueño. Ausente en casi todos los negocios; ahí
+   `presetFor(settings)` la deriva de `flowType` + `requiresDeposit`.
+3. **Compilador y validador** (`stateMachine.ts`) — `compileFlow` deriva las
+   transiciones del orden (`'next'`) más los saltos fijos del blueprint;
+   `validateFlow` rechaza una composición que no pueda correr.
+
+**El dueño compone, no inventa.** Nunca dibuja una arista: la deriva el
+compilador. Un nodo solo puede ofrecer tools que existen y solo avanza si algo
+en el código emite su trigger — esa es la razón por la que `sales` estuvo muerto
+meses, con 6 triggers declarados que no emitía nadie.
+
+`validateFlow` es la promesa entera: **un flujo guardado es un flujo que corre.**
+Rechaza triggers sin emisor, nodos inalcanzables, nodos sin salida, `requires`
+insatisfechos, ids desconocidos o repetidos, e `idle` fuera del primer lugar.
+
+### Presets
+
+```
+Agenda sin adelanto  idle→greeting→informing→listado_servicios→show_availability→confirmed
+Agenda con adelanto  ...→show_availability→await_payment→await_payment_verification→confirmed
+Solo informativo     idle→greeting→informing→listado_servicios
+```
+
+**`flowType: 'sales'` recibe hoy el preset informativo.** Le falta un ladrillo:
+la tool que registra "el cliente aceptó y quiere pagar". No se puede escribir sin
+una intención congelada sin horario, y `FrozenBooking` exige `scheduledAtISO` —
+inventarlo le mostraría al dueño una hora de cita que nadie acordó. Por eso
+"Vende" está deshabilitado en el panel.
+
+El único que aplica transiciones sigue siendo `conversationService.applyTrigger`,
+que ahora recibe el flujo compilado (`FlowDefinition`) en vez de `flowType`.
 
 ### Verificación de pago (solo si `requiresDeposit`)
 
@@ -189,6 +262,14 @@ Cuando el negocio pide adelanto, la captura del cliente NO crea la cita:
 Con `requiresDeposit` activo, el gate del `toolExecutor` rechaza SIEMPRE
 `book_appointment` del lado del cliente: la única vía a una cita con adelanto es
 la aprobación del dueño. Sin adelanto, la captura agenda directo.
+
+**El rechazo tiene que viajar con `evidence`.** `await_payment` lleva
+`entryGuard: 'booking_intent'`, así que `applyConversationTrigger` pasa
+`{ bookingIntent: true }` al emitir `payment_rejected` — la fila rechazada
+conserva el servicio, horario y nombre congelados, que es justo lo que el guard
+pide. Sin eso la transición se bloquea y el cliente queda clavado en
+`await_payment_verification`, cuya única tool es escalar y cuyo prompt le
+prohíbe a Emma pedir otra captura. Fue un bug real en producción.
 
 ## Business settings
 
@@ -321,7 +402,54 @@ Tablas core (cada una con `business_id` excepto `businesses`):
   reservar; `customers.name` cambia y haría que una cita vieja mute de nombre
 - `payment_verifications` — adelantos esperando aprobación del dueño
 - `tags` + `conversation_tags` — etiquetas que el dueño inventa
+- `service_media` — los archivos de un servicio (imagen, PDF, audio, video).
+  `service_id` es TEXT y **sin FK**: los servicios no son filas, viven en el
+  jsonb `businesses.settings` con un nanoid. La integridad la sostiene
+  `purgeOrphans` en `media/serviceMedia.service`
 - `google_credentials`, `events`, `whatsapp_session_guard`
+
+## Multimedia de servicios
+
+Un servicio puede llevar **N archivos**: imagen (5MB), PDF (10MB), audio (5MB)
+o video (16MB). Reemplazó a `settings.services[].imageKey`, que era un solo
+archivo sin tipo, sin nombre y sin orden.
+
+**El formato se detecta por magic bytes**, nunca por extensión ni content-type:
+los dos los pone quien sube. El techo se juzga DESPUÉS del formato, porque
+depende de él — 7MB está bien como PDF y no como foto.
+
+Lo que se guarda es la **key**, nunca una URL: el bucket es privado y los links
+se firman por una hora a pedido.
+
+### La regla que evita residuos
+
+Dos almacenes tienen que coincidir y solo uno tiene transacciones. **El lado
+frágil va adentro de la transacción:**
+
+- **Crear**: primero el objeto, después la fila. Si la fila falla, se borra el
+  objeto.
+- **Borrar**: la fila se borra dentro de una transacción y el objeto se tira
+  ADENTRO de ella. Si S3 se niega, la transacción hace rollback y la fila
+  sobrevive. El dueño ve un error y reintenta.
+- **Servicio eliminado**: `purgeOrphans` corre en cada guardado de la lista de
+  servicios. La lista se reemplaza entera, así que nadie anuncia "este se
+  borró" — comparar lo guardado contra lo que la lista todavía nombra es la
+  única forma de enterarse.
+
+El id de la fila ES el nombre del objeto en S3, así que fila y objeto se
+apuntan por construcción.
+
+### Envío
+
+`send_service_media` → `ToolAttachment[]` → `sendMediaToCustomer` despacha por
+tipo a `sendImage` / `sendDocument` / `sendAudio` / `sendVideo`. Todos pasan por
+`enqueueSend` y `humanDelay`, y todos sobre **Buffer**, no URL firmada.
+
+**Tope de 2 adjuntos por turno** (`MAX_ATTACHMENTS_PER_TURN` en `toolExecutor`).
+No es cosmético: cada adjunto es un mensaje saliente, y un cliente preguntando
+por tres servicios podría disparar doce envíos. Ya hubo un incidente de
+rate-limit de WhatsApp el 2026-07-01. El `display_order` del dueño decide
+cuáles entran.
 
 ## Panel del dueño
 
@@ -338,7 +466,7 @@ El link ES la credencial. Se genera al registrar un negocio.
 ### Rutas
 
 `/` Inbox · `/dashboard` · `/citas` · `/contactos` · `/servicios` ·
-`/configuracion`. Todas bajo `/:businessId/*`. Para navegar se usa `PanelLink`
+`/asistente` · `/configuracion`. Todas bajo `/:businessId/*`. Para navegar se usa `PanelLink`
 de `lib/session.js`, que reinyecta businessId y token.
 
 ### Los ejes de una conversación
@@ -442,12 +570,23 @@ niche, NO componentes separados por nicho.
 
 ## Superficies de configuración
 
-Hay dos, y no se pisan:
+Hay tres del lado del dueño y una de Vamvu, y no se pisan:
 
-- **Panel del cliente** — lo usa el dueño. Es el dueño de la configuración
-  operativa: horarios, días especiales, servicios, pagos y adelanto, modo de
-  reserva, recordatorios, nicho, datos del negocio y base de conocimiento.
-  Escribe por sección, mergeando sobre lo guardado (`settings.merge.ts`).
+- **Panel del cliente** — lo usa el dueño, repartido en tres pantallas por lo
+  que va a buscar:
+  * `/asistente` — quién es Emma y cómo conversa: Identidad, Mensajes, Flujo y
+    **Conversación** (los nodos). Cuatro cards, cuatro PATCH: `identity`,
+    `messages`, `flow`, `conversation`
+  * `/servicios` — el catálogo y su dinero: servicios, precios, evaluación
+    previa, fotos, formas de pago y adelanto, base de conocimiento
+  * `/configuracion` — el negocio: datos, horarios, días especiales, reservas y
+    avisos, integraciones
+
+  Escribe por sección, mergeando sobre lo guardado (`settings.merge.ts`). Son 10
+  PATCH en total (`settings.routes.ts`), más `GET /settings/conversation/catalog`,
+  que le sirve al panel el catálogo de nodos. El catálogo se sirve y NO se
+  duplica en el SPA: es el contrato entre lo que el dueño compone y lo que Emma
+  corre.
 - **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
   solo con lo que el panel no puede tocar: crear negocios, el número de
   WhatsApp del bot y el del dueño (con el rebind del socket), vinculación por
@@ -533,7 +672,8 @@ pero **verificá el código primero**: esta lista envejece y algo puede estar ya
 implementado.
 
 - Links de pago automáticos, pasarelas, carritos
-- Audio, videos, llamadas en WhatsApp
+- Llamadas en WhatsApp
+- Responder con audio grabado por Emma (sí envía audio cargado por el dueño)
 - Múltiples sucursales por negocio
 - Integraciones con CRM, POS, ERP
 - Multi-idioma (solo español de Perú)
@@ -553,15 +693,26 @@ implementado.
 
 Heredados de los planes ya cerrados:
 
-- **El nombre del cliente solo se persiste al agendar.** Si alguien le dice a
-  Emma cómo se llama y no reserva, `customers.name` se queda con el push name
-  de WhatsApp. Arreglarlo implica tool o prompt nuevos.
 - **Editar una cita desde el panel** (reprogramar, drag & drop).
   `rescheduleAppointment` existe en el service pero no está expuesto.
 - **`checkAvailability` no está expuesto al panel**: el modal de cita manual
   avisa de los choques al enviar, pero no sugiere horarios libres.
 - **Contraste del texto muted** (ver Tema visual).
 - `clientRegistry` es un Map en memoria: multi-instancia lo rompe.
+- **El flujo de venta necesita un ladrillo más** (ver "Presets"). Hasta entonces
+  "Vende" está deshabilitado en el panel y un negocio `sales` corre el preset
+  informativo.
+- **Composición y reorden del panel**: el dueño edita CASOS ESPECIALES y EJEMPLO
+  de cada nodo, y el orden. OBJETIVO, PASOS, tools y transiciones son del código.
+- **Prod está dos migraciones atrás**: `0019` (`service_media`) y `0017`
+  (`tags`) siguen sin aplicarse ahí. Dev está al día (20/20 al 2026-09-21).
+- `npm run backfill:service-ids` no corrió en ninguna de las dos.
+- **Multimedia sin probar contra WhatsApp real.** El envío de PDF, audio y video
+  compila y tiene tests de validación, pero ningún archivo salió todavía por
+  Baileys.
+- **Deuda de formato ajena**: `biome check` marca ~20 archivos sin formatear que
+  nadie tocó (`media/*`, `panel/*`, `config/*`). `npm run lint` los arregla, pero
+  deja un diff grande y ajeno a lo que estés haciendo.
 
 ## Cuando te equivoques
 

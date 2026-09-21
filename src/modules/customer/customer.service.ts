@@ -146,3 +146,52 @@ export async function updateLastSeen(businessId: string, id: string): Promise<Re
     )
   }
 }
+
+// Field names the owner may have configured for the customer's own name. The
+// owner writes collectDataFields freely ("nombre", "Nombre completo"), so this
+// matches on the stem rather than on an exact string.
+const NAME_FIELD = /nombre|name/i
+
+/**
+ * Persists what the collect-data step gathered.
+ *
+ * Only the name reaches a column today, because that is the only one the
+ * customer row has. It is also the one that mattered: until this existed, a
+ * customer who told Emma their name and did not go on to book kept whatever
+ * push name WhatsApp happened to carry, which is the gap CLAUDE.md lists under
+ * "pendientes conocidos".
+ *
+ * The other fields are accepted and acknowledged rather than dropped silently —
+ * they live in the conversation transcript, which is where the owner reads them
+ * today. Giving them a home of their own is a schema change, not this function.
+ */
+export async function saveCollectedData(
+  businessId: string,
+  id: string,
+  fields: Record<string, string>,
+): Promise<Result<void>> {
+  try {
+    const found = await customerRepo.findById(businessId, id)
+    if (!found) {
+      return err(
+        new NotFoundError({ resource: 'customer', logContext: { businessId, customerId: id } }),
+      )
+    }
+
+    const nameEntry = Object.entries(fields).find(([key]) => NAME_FIELD.test(key))
+    const name = nameEntry?.[1]?.trim()
+    if (name) await customerRepo.updateName(businessId, id, name)
+
+    return ok(undefined)
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'customer_update_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos guardar tus datos.',
+        logContext: { businessId, customerId: id, fields: Object.keys(fields) },
+        cause,
+      }),
+    )
+  }
+}

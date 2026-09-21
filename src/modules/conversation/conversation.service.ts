@@ -1,10 +1,9 @@
 import { logger } from '@/config/logger.js'
 import type { Conversation, ConversationStatus } from '@/db/schema/index.js'
-import type { FlowType } from '@/modules/business/business.settings.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as conversationRepo from './conversation.repo.js'
-import { getNextState, type TransitionEvidence } from './stateMachine.js'
+import { type FlowDefinition, getNextState, type TransitionEvidence } from './stateMachine.js'
 
 // How long an escalated thread still counts as "the conversation this customer
 // is in". Past this, a new message is a new conversation.
@@ -91,9 +90,10 @@ export async function findOrCreateOwnerThread(businessId: string): Promise<Resul
  * name a trigger and hand it here; deciding where that leads belongs to
  * stateMachine, and persisting it belongs to this function.
  *
- * flowType and currentState come from the caller rather than being loaded here:
- * both callers already hold them, and a service that hides queries inside a
- * hot path is how a per-message read turns into three.
+ * The compiled flow and currentState come from the caller rather than being
+ * loaded here: every caller already holds the settings the flow is resolved
+ * from, and a service that hides queries inside a hot path is how a per-message
+ * read turns into three.
  *
  * `evidence` travels with the trigger for the same reason: only the emitter can
  * prove a target state's entry guard, and the proof is worth nothing if this
@@ -103,13 +103,13 @@ export async function findOrCreateOwnerThread(businessId: string): Promise<Resul
 export async function applyTrigger(params: {
   businessId: string
   conversationId: string
-  flowType: FlowType
+  flow: FlowDefinition
   currentState: string
   trigger: string
   evidence?: TransitionEvidence
 }): Promise<Result<string>> {
-  const { businessId, conversationId, flowType, currentState, trigger, evidence } = params
-  const nextState = getNextState(flowType, currentState, trigger, evidence)
+  const { businessId, conversationId, flow, currentState, trigger, evidence } = params
+  const nextState = getNextState(flow, currentState, trigger, evidence)
 
   // The common case: the flow defines no transition for this trigger, so the
   // conversation stays where it is. No UPDATE for a write that changes nothing.
@@ -124,7 +124,6 @@ export async function applyTrigger(params: {
         component: 'conversation.service',
         businessId,
         conversationId,
-        flowType,
         trigger,
         from: currentState,
         to: nextState,
@@ -140,7 +139,7 @@ export async function applyTrigger(params: {
         // Never reaches a customer: callers log this and carry on with the old
         // state rather than losing the reply over a bookkeeping write.
         userMessage: 'No pudimos actualizar tu conversación.',
-        logContext: { businessId, conversationId, flowType, trigger, currentState, nextState },
+        logContext: { businessId, conversationId, trigger, currentState, nextState },
         cause,
       }),
     )

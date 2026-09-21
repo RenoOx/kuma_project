@@ -4,6 +4,7 @@ import * as businessService from '@/modules/business/business.service.js'
 import { configuredMessage } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
+import { resolveFlow, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { AppError } from '@/shared/errors.js'
 import { formatPersonName } from '@/shared/name.js'
@@ -210,6 +211,7 @@ async function applyConversationTrigger(
   businessId: string,
   conversationId: string,
   trigger: string,
+  evidence?: TransitionEvidence,
 ): Promise<void> {
   const conversation = await conversationRepo.findById(businessId, conversationId)
   if (!conversation) {
@@ -220,9 +222,10 @@ async function applyConversationTrigger(
   const applied = await conversationService.applyTrigger({
     businessId,
     conversationId,
-    flowType: settings.ok ? settings.data.flowType : 'appointments',
+    flow: resolveFlow(settings.ok ? settings.data : null),
     currentState: conversation.state,
     trigger,
+    evidence,
   })
   if (!applied.ok) {
     logger.warn(
@@ -326,7 +329,18 @@ export async function reject(params: {
     'rejected',
     params.reason ? { rejectionReason: params.reason } : {},
   )
-  await applyConversationTrigger(params.businessId, verification.conversationId, 'payment_rejected')
+  // await_payment carries an entryGuard only booking_intent satisfies, and the
+  // rejected row still holds the frozen service, slot and name — which is
+  // exactly what the guard asks for. Without this evidence the transition is
+  // refused and the customer is stranded in await_payment_verification, whose
+  // only tool is escalation and whose prompt forbids asking for another
+  // capture: the very thing a rejection is supposed to ask for.
+  await applyConversationTrigger(
+    params.businessId,
+    verification.conversationId,
+    'payment_rejected',
+    { bookingIntent: true },
+  )
 
   const customer = await customerRepo.findById(params.businessId, verification.customerId)
   if (!customer) {

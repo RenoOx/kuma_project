@@ -3,14 +3,16 @@ import { db } from '@/db/client.js'
 import type { Business } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
-import { businessSettingsSchema } from '@/modules/business/business.settings.js'
+import { validateFlow } from '@/modules/conversation/stateMachine.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
+import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
-import { AppError, NotFoundError, ValidationError } from '@/shared/errors.js'
+import { AppError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type {
   BookingPatch,
   BotPatch,
+  ConversationPatch,
   FlowPatch,
   GeneralPatch,
   IdentityPatch,
@@ -108,11 +110,31 @@ export function updateBooking(
   return persistSettings(businessId, patch)
 }
 
-export function updateServices(
+/**
+ * Saves the services list, then deletes the files of any service it no longer
+ * names.
+ *
+ * Services arrive as a replaced array: nothing ever says "this one was deleted",
+ * it simply stops being in the list. Without the sweep, removing a service from
+ * the panel would leave its files in the bucket and its rows in the table
+ * forever, referenced by nothing and visible to no one.
+ *
+ * The sweep runs AFTER the save and cannot fail it. A save that already
+ * committed must not be reported as an error because a cleanup could not
+ * finish, and the sweep works from the current list rather than from an event —
+ * so the next save retries whatever this one missed.
+ */
+export async function updateServices(
   businessId: string,
   patch: ServicesPatch,
 ): Promise<Result<BusinessSettings>> {
-  return persistSettings(businessId, patch)
+  const saved = await persistSettings(businessId, patch)
+  if (!saved.ok) return saved
+
+  const keep = saved.data.services.map((service) => service.id).filter((id): id is string => !!id)
+  await serviceMediaService.purgeOrphans(businessId, keep)
+
+  return saved
 }
 
 /**
@@ -158,31 +180,23 @@ export function updateFlow(
   return persistSettings(businessId, patch)
 }
 
-export interface ServiceImageUpdate {
-  settings: BusinessSettings
-  /**
-   * The key this service pointed at before, if any. The caller deletes it from
-   * the bucket AFTER the transaction commits — dropping the object first would
-   * leave a service pointing at nothing if the write then failed.
-   */
-  previousKey: string | null
-}
-
 /**
- * Points one service at a stored photo, or clears it with `imageKey: null`.
+ * Stores a composed conversation, and refuses one that cannot run.
  *
- * Addressed by service id rather than by array position, which is the whole
- * reason services carry an id: the owner may have reordered or renamed the
- * catalogue between picking a file and the upload finishing.
+ * The validation happens against the MERGED settings, inside the transaction,
+ * because whether a node is allowed depends on the rest of this business's
+ * configuration: "Métodos de pago" is valid only while requiresDeposit is on.
+ * Validating the payload alone would accept a flow that breaks the moment it is
+ * read back.
  *
- * Reads and writes in one transaction, like every other section, so a concurrent
- * save of the services list cannot land in between and lose the key.
+ * This is the whole promise of a configurable flow: a saved flow is a flow that
+ * works. Without it, composing is just a faster way to reproduce the bug this
+ * was built to kill — a conversation that reaches a step it cannot leave.
  */
-export async function updateServiceImage(
+export async function updateConversationFlow(
   businessId: string,
-  serviceId: string,
-  imageKey: string | null,
-): Promise<Result<ServiceImageUpdate>> {
+  patch: ConversationPatch,
+): Promise<Result<BusinessSettings>> {
   try {
     return await db.transaction(async (tx) => {
       const business = await businessRepo.findById(businessId, tx)
@@ -190,43 +204,21 @@ export async function updateServiceImage(
         return err(
           new ValidationError({
             code: 'business_not_found',
-            message: `business ${businessId} not found while saving a service image`,
+            message: `business ${businessId} not found while saving the conversation flow`,
             userMessage: 'No encontramos el negocio.',
             logContext: { businessId },
           }),
         )
       }
 
-      const parsed = businessSettingsSchema.safeParse(business.settings)
-      if (!parsed.success) {
-        return err(
-          new ValidationError({
-            code: 'invalid_settings',
-            message: 'stored settings do not validate, refusing to attach an image',
-            userMessage: 'Completá la configuración del negocio antes de subir fotos.',
-            logContext: { businessId, serviceId },
-          }),
-        )
-      }
-
-      const target = parsed.data.services.find((service) => service.id === serviceId)
-      if (!target) {
-        return err(
-          new NotFoundError({
-            resource: 'service',
-            userMessage: 'No encontramos ese servicio.',
-            logContext: { businessId, serviceId },
-          }),
-        )
-      }
-
-      const previousKey = target.imageKey ?? null
-      const services = parsed.data.services.map((service) =>
-        service.id === serviceId ? { ...service, imageKey } : service,
-      )
-
-      const merged = mergeSettingsSection(businessId, business.settings, { services })
+      const merged = mergeSettingsSection(businessId, business.settings, patch)
       if (!merged.ok) return merged
+
+      const composition = merged.data.conversationFlow
+      if (composition) {
+        const checked = validateFlow(composition, merged.data)
+        if (!checked.ok) return checked
+      }
 
       await businessRepo.update(
         businessId,
@@ -234,21 +226,29 @@ export async function updateServiceImage(
         tx,
       )
 
-      logger.info({ businessId, serviceId, cleared: imageKey === null }, 'service image updated')
-      return ok({ settings: merged.data, previousKey })
+      logger.info(
+        { businessId, nodes: composition?.nodes ?? null },
+        'panel conversation flow updated',
+      )
+      return ok(merged.data)
     })
   } catch (cause) {
     return err(
       new AppError({
         code: 'settings_update_failed',
         message: cause instanceof Error ? cause.message : 'unknown error',
-        userMessage: 'No pudimos guardar la foto del servicio.',
-        logContext: { businessId, serviceId },
+        userMessage: 'No pudimos guardar el flujo de conversación.',
+        logContext: { businessId },
         cause,
       }),
     )
   }
 }
+
+// updateServiceImage lived here. A service's files are no longer a field on the
+// service — they are rows in `service_media`, with their own CRUD in
+// media/serviceMedia.service, which is the only place that can order the bucket
+// and the table correctly.
 
 /**
  * The general section, which writes columns and settings in the same

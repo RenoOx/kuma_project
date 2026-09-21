@@ -76,9 +76,9 @@ export const kumaTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'send_service_image',
+      name: 'send_service_media',
       description:
-        'Envía por WhatsApp la foto de un servicio del catálogo. Usar cuando el cliente pide ver fotos, ejemplos, resultados o "cómo queda", o cuando estás recomendando un servicio y ayuda mostrarlo. Solo funciona con servicios marcados [con foto] en el catálogo. Llamala UNA sola vez por servicio: la foto se manda sola, vos seguí escribiendo tu respuesta normal sin decir "te la adjunto".',
+        'Envía por WhatsApp el material de un servicio del catálogo: fotos, catálogo o lista de precios en PDF, audio o video. Usar cuando el cliente pide ver fotos, ejemplos, resultados, "cómo queda", la lista de precios, o cuando estás recomendando un servicio y ayuda mostrarlo. Solo funciona con servicios marcados [con material] en el catálogo. Llamala UNA sola vez por servicio: el material se manda solo, vos seguí escribiendo tu respuesta normal sin decir "te lo adjunto".',
       parameters: {
         type: 'object',
         properties: {
@@ -134,14 +134,101 @@ export const kumaTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'show_services',
+      description:
+        'Avisa al sistema que le estás presentando servicios del catálogo al cliente. Llamala cuando el cliente pregunta qué hacen, qué ofrecen, por los precios, o por un servicio en particular — en el mismo turno en que se los contás. No imprime nada: vos escribís la respuesta como siempre.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: {
+            type: 'string',
+            description:
+              'Qué le estás mostrando: una categoría ("cabello"), un servicio puntual ("limpieza dental") o "todos" si pidió el catálogo entero.',
+          },
+        },
+        required: ['topic'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_customer_data',
+      description:
+        'Guarda los datos que el negocio pidió recolectar. Llamala recién cuando tengas TODOS los campos configurados, no de a uno. Si falta alguno, seguí preguntando sin llamarla.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fields: {
+            type: 'object',
+            description:
+              'Objeto con un par campo/valor por cada dato configurado, ej: {"nombre": "Juan Pérez", "correo": "juan@mail.com"}.',
+            additionalProperties: { type: 'string' },
+          },
+        },
+        required: ['fields'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'confirm_summary',
+      description:
+        'Registra la respuesta del cliente al resumen que le mostraste. Llamala con confirmed=true si dijo que está todo bien ("sí", "ok", "dale", "perfecto"), o con confirmed=false si quiere corregir algo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          confirmed: {
+            type: 'boolean',
+            description: 'true si el cliente dio el visto bueno, false si quiere cambiar algo.',
+          },
+        },
+        required: ['confirmed'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'correct_field',
+      description:
+        'Corrige un dato que el cliente pidió cambiar. Llamala con el campo y el valor nuevo. Un campo por llamada.',
+      parameters: {
+        type: 'object',
+        properties: {
+          field: {
+            type: 'string',
+            description: 'Nombre del campo a corregir, tal como se lo pediste, ej: nombre, correo.',
+          },
+          value: {
+            type: 'string',
+            description: 'El valor nuevo que dio el cliente.',
+          },
+        },
+        required: ['field', 'value'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const KUMA_TOOL_NAMES = [
   'check_availability', //revisar horarios
   'book_appointment', // reserrvar
   'confirm_pending_appointment', //confirmar cita pendeinte
-  'send_service_image', // mandar la foto de un servicio
+  'send_service_media', // mandar el material de un servicio
   'request_image', // pedir imagen
   'escalate_to_human', //escalar a humano
+  'show_services', // presentar el catálogo → services_listed
+  'save_customer_data', // guardar los campos configurados → data_complete
+  'confirm_summary', // respuesta al resumen → summary_confirmed / correction_requested
+  'correct_field', // corregir un dato → field_corrected
 ] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]

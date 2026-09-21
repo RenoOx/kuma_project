@@ -1,10 +1,14 @@
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import type { z } from 'zod'
-import { logger } from '@/config/logger.js'
+import { z } from 'zod'
+import type { ServiceMedia } from '@/db/schema/index.js'
+import { businessSettingsSchema } from '@/modules/business/business.settings.js'
+import { NODE_CATALOG, requirementMet } from '@/modules/conversation/nodeCatalog.js'
+import { presetFor } from '@/modules/conversation/stateMachine.js'
 import * as mediaService from '@/modules/media/media.service.js'
 import { MAX_MEDIA_BYTES } from '@/modules/media/media.validate.js'
 import { isMediaConfigured } from '@/modules/media/s3.client.js'
+import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import type { AppError } from '@/shared/errors.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import type { Result } from '@/shared/result.js'
@@ -71,7 +75,7 @@ const MAX_UPLOAD_BYTES = MAX_MEDIA_BYTES + 64 * 1024
  */
 async function parseMultipartFile(
   c: Context,
-): Promise<{ ok: true; buffer: Buffer } | { ok: false; res: Response }> {
+): Promise<{ ok: true; buffer: Buffer; filename: string | null } | { ok: false; res: Response }> {
   const tooLarge = (): { ok: false; res: Response } => ({
     ok: false,
     res: c.json(
@@ -96,8 +100,17 @@ async function parseMultipartFile(
   }
   if (file.size > MAX_MEDIA_BYTES) return tooLarge()
 
-  return { ok: true, buffer: Buffer.from(await file.arrayBuffer()) }
+  // The uploader's own name, kept because it is what the customer will see the
+  // document called in WhatsApp. It never reaches a path: the S3 key is built
+  // from validated ids, so a name like "../../etc/passwd" is just a label.
+  const filename = typeof file.name === 'string' && file.name.trim() !== '' ? file.name : null
+  return { ok: true, buffer: Buffer.from(await file.arrayBuffer()), filename }
 }
+
+/** The arrangement the owner dragged into place, sent whole. */
+const reorderSchema = z.object({
+  ids: z.array(z.string().min(1).max(64)).max(32),
+})
 
 // ── Read ─────────────────────────────────────────────────────────────────────
 
@@ -182,104 +195,140 @@ panelSettingsRoutes.patch('/api/panel/:businessId/settings/flow', async (c) => {
   return respond(c, await settingsService.updateFlow(panelBusiness(c).id, body.data))
 })
 
+// The Conversación card. Its own PATCH for the same reason the three above have
+// theirs, plus one of its own: this is the only section whose payload can be
+// refused for a reason Zod cannot see, so its handler is the only one that can
+// answer "no" with a sentence naming the step that broke.
+panelSettingsRoutes.patch('/api/panel/:businessId/settings/conversation', async (c) => {
+  const body = await parseBody(c, settingsService.conversationPatchSchema)
+  if (!body.ok) return body.res
+  return respond(c, await settingsService.updateConversationFlow(panelBusiness(c).id, body.data))
+})
+
+/**
+ * The brick box, for the panel to render.
+ *
+ * Served rather than duplicated in the SPA: the catalogue is the contract
+ * between what the owner composes and what Emma runs, and a second copy in the
+ * browser would drift the first time a node's steps change. Only the fields the
+ * card shows — the wording and what the owner may override — never the tools or
+ * the transitions, which are not theirs to see or to touch.
+ */
+panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', (c) => {
+  const business = panelBusiness(c)
+  const parsed = businessSettingsSchema.safeParse(business.settings)
+  const settings = parsed.success ? parsed.data : null
+
+  return c.json({
+    nodes: NODE_CATALOG.map((bp) => ({
+      id: bp.id,
+      label: bp.label,
+      hint: bp.hint,
+      objective: bp.node.objective,
+      steps: bp.node.steps,
+      defaultEdgeCases: bp.node.edgeCases,
+      defaultExample: bp.node.example,
+      mandatory: bp.mandatory ?? false,
+      // What the owner sees greyed out, with the reason: a node whose config is
+      // missing is more useful shown-and-explained than silently absent.
+      available: (bp.requires ?? []).every((r) => requirementMet(r, settings)),
+      requires: bp.requires ?? [],
+    })),
+    // What runs right now, composed or derived. The card opens on this rather
+    // than on an empty list, so the owner edits their actual flow instead of
+    // building one from scratch.
+    current: settings?.conversationFlow ?? presetFor(settings),
+  })
+})
+
 panelSettingsRoutes.patch('/api/panel/:businessId/settings/bot', async (c) => {
   const body = await parseBody(c, settingsService.botPatchSchema)
   if (!body.ok) return body.res
   return respond(c, await settingsService.updateBotPaused(panelBusiness(c).id, body.data))
 })
 
-// ── Service images ───────────────────────────────────────────────────────────
+// ── Service media ────────────────────────────────────────────────────────────
 //
 // Addressed by service id, which is why services carry one. The businessId comes
 // from panelAuth and never from the request, and the S3 key is built from both by
 // media.keys — so no request can name a path, and a presigned URL can only ever
-// be issued for a key that came back out of this business's own settings.
+// be issued for a key that came back out of this business's own rows.
+//
+// Every write goes through serviceMedia.service, which is the only place that
+// orders the bucket and the table so neither is left holding a file the other
+// does not know about.
 
-panelSettingsRoutes.post('/api/panel/:businessId/settings/services/:serviceId/image', async (c) => {
+/** One row, as the panel renders it: never the key, always a signed URL. */
+async function toView(businessId: string, row: ServiceMedia) {
+  const url = await mediaService.getPresignedUrl(businessId, row.s3Key)
+  return {
+    id: row.id,
+    serviceId: row.serviceId,
+    type: row.type,
+    filename: row.filename,
+    mimetype: row.mimetype,
+    sizeBytes: row.sizeBytes,
+    displayOrder: row.displayOrder,
+    // Null rather than an error: one unsignable object must not blank the list.
+    url: url.ok ? url.data : null,
+  }
+}
+
+panelSettingsRoutes.get('/api/panel/:businessId/settings/services/:serviceId/media', async (c) => {
+  const business = panelBusiness(c)
+  const rows = await serviceMediaService.listForService(business.id, c.req.param('serviceId'))
+  return c.json(await Promise.all(rows.map((row) => toView(business.id, row))))
+})
+
+panelSettingsRoutes.post('/api/panel/:businessId/settings/services/:serviceId/media', async (c) => {
   const business = panelBusiness(c)
   const serviceId = c.req.param('serviceId')
+
+  // The service has to exist before a file can hang off it, or the upload would
+  // land in the bucket under an id nothing references — exactly the orphan this
+  // whole path is built to avoid.
+  const known = settingsService.serviceExists(business, serviceId)
+  if (!known.ok) return failure(c, known.error)
 
   const file = await parseMultipartFile(c)
   if (!file.ok) return file.res
 
-  const uploaded = await mediaService.uploadMedia(
-    { kind: 'service_image', businessId: business.id, serviceId },
-    file.buffer,
-  )
-  if (!uploaded.ok) return failure(c, uploaded.error)
-
-  const saved = await settingsService.updateServiceImage(business.id, serviceId, uploaded.data.key)
-  if (!saved.ok) {
-    // The object landed but nothing references it now. Drop it rather than
-    // leave an orphan paid for by the founder's bill.
-    const cleaned = await mediaService.removeMedia(business.id, uploaded.data.key)
-    if (!cleaned.ok) {
-      logger.warn(
-        { businessId: business.id, serviceId, key: uploaded.data.key },
-        'service image upload rolled back but the object could not be removed',
-      )
-    }
-    return failure(c, saved.error)
-  }
-
-  // Keys are deterministic per service and extension, so replacing a jpg with
-  // a jpg overwrites in place and there is nothing to clean up. Replacing a png
-  // with a jpg leaves the old object behind, which is what this removes.
-  const stale = saved.data.previousKey
-  if (stale && stale !== uploaded.data.key) {
-    const removed = await mediaService.removeMedia(business.id, stale)
-    if (!removed.ok) {
-      logger.warn(
-        { businessId: business.id, serviceId, key: stale },
-        'replaced service image but the previous object could not be removed',
-      )
-    }
-  }
-
-  const url = await mediaService.getPresignedUrl(business.id, uploaded.data.key)
-  return c.json({ imageKey: uploaded.data.key, url: url.ok ? url.data : null })
+  const added = await serviceMediaService.addMedia({
+    businessId: business.id,
+    serviceId,
+    filename: file.filename,
+    buffer: file.buffer,
+  })
+  if (!added.ok) return failure(c, added.error)
+  return c.json(await toView(business.id, added.data))
 })
 
 panelSettingsRoutes.delete(
-  '/api/panel/:businessId/settings/services/:serviceId/image',
+  '/api/panel/:businessId/settings/services/:serviceId/media/:mediaId',
   async (c) => {
     const business = panelBusiness(c)
-    const serviceId = c.req.param('serviceId')
-
-    const saved = await settingsService.updateServiceImage(business.id, serviceId, null)
-    if (!saved.ok) return failure(c, saved.error)
-
-    // Row first, object second: a service pointing at a deleted object shows the
-    // owner a broken image, while an unreferenced object is only wasted bytes.
-    if (saved.data.previousKey) {
-      const removed = await mediaService.removeMedia(business.id, saved.data.previousKey)
-      if (!removed.ok) {
-        logger.warn(
-          { businessId: business.id, serviceId, key: saved.data.previousKey },
-          'service image cleared but the object could not be removed',
-        )
-      }
-    }
-
-    return c.json({ imageKey: null, url: null })
+    const removed = await serviceMediaService.removeOne(business.id, c.req.param('mediaId'))
+    if (!removed.ok) return failure(c, removed.error)
+    return c.json({ id: removed.data.id })
   },
 )
 
-// Signed on demand rather than alongside GET /settings: signing every service's
-// photo on each load costs a signature per service and hands out URLs that expire
-// before the owner opens the card that shows them.
-panelSettingsRoutes.get('/api/panel/:businessId/settings/services/:serviceId/image', async (c) => {
-  const business = panelBusiness(c)
-  const serviceId = c.req.param('serviceId')
+panelSettingsRoutes.patch(
+  '/api/panel/:businessId/settings/services/:serviceId/media/order',
+  async (c) => {
+    const business = panelBusiness(c)
+    const body = await parseBody(c, reorderSchema)
+    if (!body.ok) return body.res
 
-  const key = settingsService.findServiceImageKey(business, serviceId)
-  if (!key.ok) return failure(c, key.error)
-  if (!key.data) return c.json({ imageKey: null, url: null })
-
-  const url = await mediaService.getPresignedUrl(business.id, key.data)
-  if (!url.ok) return failure(c, url.error)
-  return c.json({ imageKey: key.data, url: url.data })
-})
+    const reordered = await serviceMediaService.reorder(
+      business.id,
+      c.req.param('serviceId'),
+      body.data.ids,
+    )
+    if (!reordered.ok) return failure(c, reordered.error)
+    return c.json(await Promise.all(reordered.data.map((row) => toView(business.id, row))))
+  },
+)
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 //

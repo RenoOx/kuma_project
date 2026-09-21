@@ -78,17 +78,6 @@ const serviceSchema = z
     // saved their opening hours, and every image would come loose. Minting
     // happens once, at the write boundary, in normalizeServices.
     id: z.string().min(1).max(64).optional(),
-    // S3 key of the service's photo. A key and never a URL: the bucket is
-    // private and URLs are presigned on demand, so a stored URL would already be
-    // expired by the time anyone opened it.
-    //
-    // All three states are distinct and load-bearing, which is why this is not
-    // coerced to null the way durationMinutes is. undefined means "the form that
-    // sent this doesn't know about images" and normalizeServices keeps whatever
-    // was stored; null means "delete the photo" and only the image endpoint says
-    // it. Collapsing the two would let a save from the services form wipe a
-    // photo it never showed the owner.
-    imageKey: z.string().max(500).nullable().optional(),
     name: z.string().min(1),
     durationMinutes: z
       .number()
@@ -158,6 +147,33 @@ const flowTypeSchema = z.enum(['appointments', 'sales']).default('appointments')
 // Free-form on purpose: each business names its own ("nombre", "DNI", "correo").
 // Empty by default — the appointments flow collects nothing extra.
 const collectDataFieldsSchema = z.array(z.string().min(1)).default([])
+
+// The conversation the owner composed: which nodes from the catalogue, in what
+// order, and the wording they overrode.
+//
+// Optional on purpose, and absent for every business today: without it,
+// stateMachine derives the composition from flowType + requiresDeposit, so a
+// business that never opens the Conversación card behaves exactly as before.
+// Only what the owner actually changed is stored — the objective, the steps and
+// every transition stay in the code, so a fix of ours reaches everyone without
+// overwriting a word they wrote.
+//
+// Node ids are NOT validated here: the catalogue lives in the conversation
+// module, and importing it would point the dependency the wrong way. The real
+// check is stateMachine.validateFlow, which the panel route runs before saving
+// and resolveFlow runs again before trusting what it read.
+const conversationFlowSchema = z.object({
+  nodes: z.array(z.string().min(1).max(64)).max(32),
+  overrides: z
+    .record(
+      z.string().min(1).max(64),
+      z.object({
+        edgeCases: z.array(z.string().min(1).max(500)).max(12).optional(),
+        example: z.string().max(1000).optional(),
+      }),
+    )
+    .default({}),
+})
 
 // Optional post-booking modules, switched per business. All off by default:
 // every one of these sends a proactive message to the customer, which is the
@@ -355,6 +371,7 @@ export const businessSettingsSchema = z.object({
   appointmentMode: appointmentModeSchema,
   flowType: flowTypeSchema,
   collectDataFields: collectDataFieldsSchema,
+  conversationFlow: conversationFlowSchema.optional(),
   postBooking: postBookingSchema,
   // Optional + nullable so the owner can both leave it unset and explicitly
   // clear it back to null via `resume_bot`.
@@ -516,7 +533,7 @@ function normalizeServiceName(s: string): string {
  * booked, or from having its photo sent, anyway.
  *
  * Lives here rather than in appointment.service because booking is no longer the
- * only caller: send_service_image resolves a name the same way, and two copies of
+ * only caller: send_service_media resolves a name the same way, and two copies of
  * this matcher would drift.
  */
 export function findKnownService(settings: BusinessSettings, serviceName: string): Service | null {
@@ -576,6 +593,29 @@ export function formatServicePrice(service: Service): string {
   if (priceMax === null) return `desde S/ ${priceMin}`
   if (priceMin === priceMax) return `S/ ${priceMin}`
   return `S/ ${priceMin} a S/ ${priceMax}`
+}
+
+/**
+ * Whether this business answers at any hour.
+ *
+ * Today it is derived from the flow: a selling business has nothing to open or
+ * close. There is no slot to be inside of, no appointment that could only happen
+ * while the door is unlocked — somebody buying a course at 3am is a sale, not a
+ * customer who has to come back tomorrow. Telling them "estamos cerrados" loses
+ * the one thing that flow exists to catch.
+ *
+ * `operatingHours` stays REQUIRED in the schema and keeps being stored: this
+ * only decides whether anything reads it as a limit. The day "horario de
+ * atención" becomes its own setting — a selling business that does want office
+ * hours — this function reads that field instead, and every caller is already
+ * going through here rather than through `settings.operatingHours` raw. That is
+ * the whole point of it existing before it has anything to decide.
+ *
+ * Read the schedule as a constraint through here — never `operatingHours`
+ * directly.
+ */
+export function isAlwaysOpen(settings: BusinessSettings): boolean {
+  return settings.flowType === 'sales'
 }
 
 // Pure check: given a settings object (or null when business is unconfigured),
