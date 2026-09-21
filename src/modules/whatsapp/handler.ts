@@ -10,6 +10,7 @@ import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { configuredMessage, shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
+import { resolveFlow } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
@@ -39,7 +40,7 @@ import {
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
-import { sendDirect, sendImageToCustomer, sendWithPresence } from '@/modules/whatsapp/outbound.js'
+import { sendDirect, sendMediaToCustomer, sendWithPresence } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
 import * as presence from '@/modules/whatsapp/presence.js'
@@ -396,7 +397,7 @@ async function handleCustomerImage(params: {
   // anywhere else would make an unrelated photo, sent weeks after the booking
   // was confirmed, look like payment for it all over again.
   const conversation = await conversationRepo.findById(businessId, conversationId)
-  const flowType = settingsResult.ok ? settingsResult.data.flowType : 'appointments'
+  const flow = resolveFlow(settingsResult.ok ? settingsResult.data : null)
   const intent =
     payment ??
     (conversation?.state === 'await_payment'
@@ -514,7 +515,7 @@ async function handleCustomerImage(params: {
     const applied = await conversationService.applyTrigger({
       businessId,
       conversationId,
-      flowType,
+      flow,
       currentState: conversation.state,
       trigger,
     })
@@ -1271,24 +1272,27 @@ async function sendServiceImages(params: {
     if (!downloaded.ok) {
       log.warn(
         { code: downloaded.error.code, key: attachment.s3Key },
-        'could not read a service photo from storage, reply went out without it',
+        'could not read service media from storage, reply went out without it',
       )
       continue
     }
 
     try {
-      await sendImageToCustomer({
+      await sendMediaToCustomer({
         businessId,
         jid,
-        image: downloaded.data,
+        type: attachment.type,
+        buffer: downloaded.data,
+        mimetype: attachment.mimetype,
+        filename: attachment.filename,
         caption: attachment.caption,
       })
       // Recorded only once the send succeeded: marking it earlier would let a
       // single failure suppress that photo for the rest of the conversation.
       markServiceImageSent(conversationId, attachment.serviceId)
-      log.info({ serviceId: attachment.serviceId }, 'service photo sent')
+      log.info({ serviceId: attachment.serviceId, type: attachment.type }, 'service media sent')
     } catch (err) {
-      log.error({ err, serviceId: attachment.serviceId }, 'failed to send service photo')
+      log.error({ err, serviceId: attachment.serviceId }, 'failed to send service media')
     }
   }
 }

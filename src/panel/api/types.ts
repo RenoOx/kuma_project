@@ -290,20 +290,10 @@ export interface PostBookingSettings {
 export interface PanelService {
   /**
    * Stable id, minted server-side on the first save. Absent on a service being
-   * created right now, which is why the photo upload waits for the first save:
-   * the S3 key is built from this.
+   * created right now, which is why uploading a file waits for the first save:
+   * every file hangs off this id.
    */
   id?: string
-  /**
-   * S3 key of the photo, or null when there is none. Read-only from this form's
-   * point of view — the image endpoints own it.
-   *
-   * Round-trips untouched through the services PATCH because the form spreads the
-   * service it was handed. Leaving it out of the payload would NOT clear it (the
-   * server keeps what it stored when the field is absent), but sending it back
-   * unchanged is the honest shape of what the UI is doing.
-   */
-  imageKey?: string | null
   name: string
   /** Null when the service has no fixed length; the slot grid decides. */
   durationMinutes: number | null
@@ -314,9 +304,18 @@ export interface PanelService {
   active: boolean
 }
 
-/** What the image endpoints answer. The URL is presigned and expires in an hour. */
-export interface ServiceImage {
-  imageKey: string | null
+export type ServiceMediaType = 'image' | 'pdf' | 'audio' | 'video'
+
+/** One stored file of a service, as the panel renders it. Never the S3 key. */
+export interface ServiceMediaView {
+  id: string
+  serviceId: string
+  type: ServiceMediaType
+  filename: string | null
+  mimetype: string
+  sizeBytes: number
+  displayOrder: number
+  /** Presigned and short-lived. Null when this one object could not be signed. */
   url: string | null
 }
 
@@ -516,4 +515,45 @@ export interface KnowledgeInput {
   sendMode?: KbSendMode
   triggerKeywords?: string[] | null
   active?: boolean
+}
+
+// ── Conversación ─────────────────────────────────────────────────────────────
+//
+// Mirrors what GET /settings/conversation/catalog serves. Hand-written like the
+// rest of this file: the two builds use different tsconfigs, so importing the
+// server's types would drag the server into the browser bundle.
+
+/** One brick, as the panel is allowed to see it. */
+export interface ConversationNodeOption {
+  id: string
+  label: string
+  hint: string
+  /** Fixed. Shown so the owner knows what the step is for, never editable. */
+  objective: string
+  /** Fixed. This is the motor — the owner reads it, the code owns it. */
+  steps: string[]
+  defaultEdgeCases: string[]
+  defaultExample: string
+  /** Cannot be removed or reordered. */
+  mandatory: boolean
+  /** False when this business lacks the configuration the node needs. */
+  available: boolean
+  requires: string[]
+}
+
+/** What the owner overrode for one node. Absent keys mean "use the default". */
+export interface ConversationNodeOverride {
+  edgeCases?: string[]
+  example?: string
+}
+
+export interface ConversationFlow {
+  nodes: string[]
+  overrides: Record<string, ConversationNodeOverride>
+}
+
+export interface ConversationCatalog {
+  nodes: ConversationNodeOption[]
+  /** The flow running right now: the owner's composition, or the derived preset. */
+  current: ConversationFlow
 }

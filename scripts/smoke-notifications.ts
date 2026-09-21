@@ -28,6 +28,18 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     async sendImage(jid, image, caption) {
       sent.push({ jid, text: `[image ${image.length}b] ${caption || ''}` })
     },
+    async sendDocument(jid, document, mimetype, fileName, caption) {
+      sent.push({
+        jid,
+        text: `[document ${fileName} ${mimetype} ${document.length}b] ${caption || ''}`,
+      })
+    },
+    async sendAudio(jid, audio, mimetype) {
+      sent.push({ jid, text: `[audio ${mimetype} ${audio.length}b]` })
+    },
+    async sendVideo(jid, video, caption) {
+      sent.push({ jid, text: `[video ${video.length}b] ${caption || ''}` })
+    },
     onMessage() {
       // noop
     },

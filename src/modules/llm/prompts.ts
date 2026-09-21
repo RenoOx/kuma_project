@@ -15,8 +15,10 @@ import {
   dayKeyForJsDow,
   formatPaymentMethods,
   formatServicePrice,
+  isAlwaysOpen,
   resolveDayHours,
 } from '@/modules/business/business.settings.js'
+import type { ConversationNode } from '@/modules/conversation/nodeCatalog.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import { renderTemplate } from '@/shared/templates.js'
 
@@ -409,18 +411,21 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 // Deactivated services never reach here: the caller passes activeServices(),
 // and a business with none active gets an explicit line rather than an empty
 // heading the model would fill in on its own.
-function renderServices(services: BusinessSettings['services']): string {
+function renderServices(
+  services: BusinessSettings['services'],
+  withMedia: ReadonlySet<string>,
+): string {
   if (services.length === 0) return '(El negocio no tiene servicios activos en este momento.)'
   return services
     .map((s) => {
       const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
       const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
       // The marker is the model's only way to know which services it may call
-      // send_service_image for. The key itself never appears here: the tool
-      // resolves a name back to storage, and a key in the prompt would be both
-      // useless to the model and one more thing that could leak.
-      const photo = s.imageKey ? ' [con foto]' : ''
-      return `- ${s.name}${duration} — ${formatServicePrice(s)}${photo}${reference}`
+      // send_service_media for. No key ever appears here: the tool resolves a
+      // name back to storage, and a key in the prompt would be both useless to
+      // the model and one more thing that could leak.
+      const media = s.id && withMedia.has(s.id) ? ' [con material]' : ''
+      return `- ${s.name}${duration} — ${formatServicePrice(s)}${media}${reference}`
     })
     .join('\n')
 }
@@ -454,30 +459,45 @@ function renderSpecialDays(specialDays: BusinessSettings['specialDays'], todayIS
 // Lives in the static body like the deposit block: which services have a photo is
 // a per-business fact that does not change between messages, so it stays inside
 // the cacheable prefix and only invalidates when the owner uploads or deletes one.
-function renderServicePhotoBlock(settings: BusinessSettings): string[] {
-  if (!activeServices(settings).some((s) => s.imageKey)) return []
+function renderServiceMediaBlock(
+  settings: BusinessSettings,
+  withMedia: ReadonlySet<string>,
+): string[] {
+  if (!activeServices(settings).some((s) => s.id && withMedia.has(s.id))) return []
   return [
     '',
-    '## Fotos de servicios',
-    'Los servicios marcados [con foto] tienen una imagen cargada. Para mostrarla llamá send_service_image con el nombre exacto del servicio.',
-    'Usala cuando el cliente pide ver fotos, ejemplos o resultados, o cuando estás recomendando ese servicio y verlo lo ayuda a decidir.',
-    'La foto se envía sola, como mensaje aparte. NUNCA digas "te adjunto la foto", "te la mando" ni "mirá la imagen": escribí tu respuesta normal y la imagen llega por su cuenta.',
-    'Una sola vez por servicio en la conversación. Los servicios sin esa marca NO tienen foto: describilos con palabras y no ofrezcas mandar nada.',
+    '## Material de servicios',
+    'Los servicios marcados [con material] tienen archivos cargados: fotos, catálogo o lista de precios en PDF, audio o video. Para enviarlos llamá send_service_media con el nombre exacto del servicio.',
+    'Usala cuando el cliente pide ver fotos, ejemplos, resultados o la lista de precios, o cuando estás recomendando ese servicio y verlo lo ayuda a decidir.',
+    'El material se envía solo, como mensajes aparte. NUNCA digas "te adjunto", "te lo mando" ni "mirá el archivo": escribí tu respuesta normal y llega por su cuenta.',
+    'Una sola vez por servicio en la conversación. Los servicios sin esa marca NO tienen material: describilos con palabras y no ofrezcas mandar nada.',
   ]
 }
 
-function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): string {
+function renderConfiguredBlock(
+  settings: BusinessSettings,
+  todayISO: string,
+  withMedia: ReadonlySet<string>,
+): string {
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
-    renderServices(activeServices(settings)),
-    ...renderServicePhotoBlock(settings),
+    renderServices(activeServices(settings), withMedia),
+    ...renderServiceMediaBlock(settings, withMedia),
     '',
-    '## Horarios',
-    renderOperatingHours(settings.operatingHours),
-    renderSpecialDays(settings.specialDays, todayISO),
-    '',
-    `## Duración del slot por defecto: ${settings.slotDurationMinutes} minutos`,
+    // An always-open business gets a sentence instead of a week. Printing the
+    // stored schedule would hand the model a limit it is meant to ignore, and
+    // the model would quote it: "te atiendo de 9 a 18" to someone buying a
+    // course at midnight is exactly the sale this flow exists to catch.
+    ...(isAlwaysOpen(settings)
+      ? ['## Horario de atención', 'Este negocio atiende las 24 horas, todos los días.']
+      : [
+          '## Horarios',
+          renderOperatingHours(settings.operatingHours),
+          renderSpecialDays(settings.specialDays, todayISO),
+          '',
+          `## Duración del slot por defecto: ${settings.slotDurationMinutes} minutos`,
+        ]),
     ...renderDepositBlock(settings),
   ].join('\n')
 }
@@ -530,33 +550,12 @@ const AVAILABILITY_FRESHNESS_BLOCK = [
 // question funnels into check_availability. In hybrid the customer can simply
 // show up, so the model must ask which one they want instead of assuming.
 
-const APPOINTMENTS_ONLY_AVAILABILITY_BLOCK = [
-  '# Consultas de horario y disponibilidad',
-  '- SIEMPRE llamá check_availability para el día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9:00 a 20:00").',
-  '- La herramienta te devuelve `availableBlocks`: tramos de tiempo corrido, cada uno con su frase lista en `range` y con todos sus horarios exactos en `slots`.',
-  '- Antes de responder, ubicá en cuál de estos tres casos estás. El orden importa: empezá por el ATAJO.',
-  '',
-  'ATAJO — el cliente dio una hora exacta ("a las 10", "10:30", "puede ser 3pm", "mañana a las 4"):',
-  '  No listes nada ni muestres tramos. Fijate si esa hora está en los `slots`.',
-  '  Si está, confirmá y avanzá al nombre. Si no está, mirá los slots devueltos:',
-  '    - Si la hora pedida no sigue el patrón de los slots (ej: pide 2:15pm cuando todos son :00 o :30) → "Ese horario no está disponible. Los más cercanos son las 2:00pm y 2:30pm. ¿Cuál prefieres?"',
-  '    - Si la hora pedida sigue el patrón pero no está en la lista → "Lamentablemente las 2:00pm ya está reservada. Tengo disponible a las 2:30pm y 3:00pm. ¿Te funciona?"',
-  '  ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?"',
-  '  ❌ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Cuál te acomoda?"  ← ya te dijo las 10',
-  '',
-  'PASO 2 — el cliente eligió un tramo o dio una preferencia ("en la mañana", "después de las 3", "temprano", "el segundo"):',
-  '  Listá TODOS los horarios exactos de ese tramo. No recortes la lista ni ofrezcas solo dos.',
-  '  ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"',
-  '',
-  'PASO 1 — el cliente preguntó por el día sin hora ni preferencia ("¿qué horarios tienes mañana?"):',
-  '  Solo acá presentás los TRAMOS, en lenguaje natural, y preguntás cuál le acomoda.',
-  '  ✅ "Para mañana tengo disponible de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"',
-  '  ❌ "Tengo libre a las 8:00, 8:30, 9:00, 9:30, 10:00, 10:30..."  ← eso es el paso 2',
-  '',
-  '- Si un tramo tiene un solo horario, decilo como hora puntual, no como rango.',
-  '- Si `availableBlocks` viene vacío, no hay cupo ese día: decílo y ofrecé otra fecha.',
-  '- Si no especificó fecha o servicio, preguntá eso primero y después llamá check_availability.',
-]
+// APPOINTMENTS_ONLY_AVAILABILITY_BLOCK used to live here. It was the mechanics
+// of presenting availability — the only thing in this file that applied to
+// exactly one step of the conversation, and it was sent in every message of
+// every conversation, including the ones parked waiting on a payment capture.
+// It now lives in the show_availability node (nodeCatalog.ts), which is the
+// only state that offers check_availability as its main job.
 
 const HYBRID_AVAILABILITY_BLOCK = [
   '# Consultas de horario y disponibilidad',
@@ -629,6 +628,22 @@ function depositOrderBlock(settings: BusinessSettings): string[] {
     '  ❌ "Te paso los datos de pago y me confirmas tu nombre después."  ← el nombre va primero, sin excepción',
     '',
     'El motivo no es formal: una captura que llega sin nombre y sin horario no se puede registrar, y el encargado se queda con una imagen y nada que aprobar.',
+    '',
+    // Moved here from clinicalBlocks, which only dental and salud ever received.
+    // A barbershop that charges a deposit got the two OTHER copies of the
+    // payment rules and never this one, so it was the only kind of business
+    // whose Emma was never told when to call request_image — the call that makes
+    // the capture reach the owner at all. Not duplicated prose: a rule that was
+    // missing for three of the five niches.
+    'Cuando el cliente diga que ya pagó, o que va a mandar el voucher, la captura o el comprobante:',
+    '  - Verificá primero que tengas servicio + horario + nombre. Si falta alguno, pedí ese y nada más.',
+    '  - Con los tres datos: llamá request_image con purpose "payment" y RECIÉN DESPUÉS pedile la captura con naturalidad.',
+    '  - Sin esa llamada no hay nada registrado que la captura pueda activar, y la foto no le llega al encargado.',
+    'NUNCA confirmes vos que un pago está recibido, verificado o aprobado: vos solo recibís la imagen.',
+    'NUNCA le digas al cliente que vas a reenviar la imagen a alguien ni menciones al encargado por su rol. Para el cliente, esta conversación la resolvés vos de principio a fin.',
+    '  ✅ "¡Recibí tu captura! Dame un momentito y te confirmo 😊"',
+    '  ❌ "Se la paso al doctor para que la revise."',
+    'ÚNICA excepción: cuando la captura ya llegó y el pago está en verificación, sí podés decir que "el encargado lo está verificando" — ahí la espera es real y "dame un momentito" sería una promesa que no podés cumplir. Igual NO prometas un horario ni digas que la cita ya quedó.',
   ]
 }
 
@@ -709,12 +724,9 @@ const VOICE_FIXED_STRINGS_NOTE =
 
 // Vale para todo nicho: el problema no es qué emoji usa sino que repite la misma
 // frase de cierre en cada mensaje hasta que suena a plantilla.
-const VARY_PHRASING_BLOCK = [
-  '# Variá tus respuestas',
-  'No repitas la misma frase en cada mensaje. Alterná entre formas equivalentes.',
-  '  - Para ofrecer agendar: "¿Te agendo?" · "¿Quieres que te reserve un horario?" · "¿Lo separamos?" · "¿Te aparto tu cita?"',
-  'Si en tu mensaje anterior ya usaste una, elegí otra distinta.',
-]
+// VARY_PHRASING_BLOCK was merged into "# Prohibido repetirte" in the body:
+// two headings telling the model not to repeat itself, sent together, is one
+// rule stated twice and a third thing for it to weigh.
 
 // Nichos donde Emma le habla a un paciente, no a un cliente: nunca interpreta
 // un síntoma, y una emergencia tiene que llegar a un humano de inmediato.
@@ -744,30 +756,11 @@ function clinicalBlocks(niche: ClinicalNiche, businessName: string): string[] {
     `Si el cliente describe una situación de urgencia o emergencia (${URGENCY_EXAMPLES[niche]}), responde con calma y empatía, y escala inmediatamente llamando escalate_to_human con razón "Urgencia: [breve descripción]".`,
     'NO intentes dar primeros auxilios ni instrucciones médicas.',
     `Mensaje al cliente antes de escalar: "Entiendo que es urgente. Voy a comunicarme con ${businessName} para que te atiendan lo antes posible."`,
-    '',
-    '# Pagos y comprobantes',
-    'Si el cliente pregunta cómo pagar o a dónde transferir, el dato sale de la sección "Adelanto para reservar" de la configuración de arriba — pero se lo pasás recién cuando ya tenés servicio + horario + nombre y llamaste book_appointment. Si te falta alguno de esos, pedí ese dato primero y no adelantes ni el monto ni el número (ver "Orden para cobrar el adelanto", al final). Si esa sección no aparece, el negocio no pide adelanto: decilo con honestidad; NO inventes números de Yape, Plin ni cuentas bancarias, y NO los saques del conocimiento del negocio.',
-    'Cuando el negocio pide adelanto, la captura del pago va ANTES de que la cita quede registrada. Igual llamás book_appointment primero (PASO 4a): la tool la rechaza a propósito y con eso guarda el horario elegido.',
-    'La captura NO agenda la cita por sí sola: el encargado revisa el pago y su visto bueno es lo que la agenda. Entre una cosa y la otra puede pasar un rato.',
-    'Al informar el adelanto, NO preguntes si quiere mandar la captura: pedila directamente.',
-    '  ✅ "Para confirmar tu cita, mándame la captura del pago de S/ 20 por Yape al 987654321 (Dr. Pérez) 😊"',
-    '  ❌ "¿Te gustaría que te pida la captura del pago una vez que lo realices?"',
-    '  ❌ "Cuando puedas, si querés, me la podés mandar."',
-    'Si el cliente dice que ya pagó, o que va a mandar el voucher, la captura o el comprobante:',
-    '  ANTES de llamar request_image, verificá que tengas: servicio + horario + nombre.',
-    '  - Si te falta el NOMBRE: preguntalo primero: "Perfecto. ¿A nombre de quién agendo la cita?"',
-    '  - Si te falta el HORARIO: preguntá el horario y después el nombre.',
-    '  - Solo cuando tengas los 3 datos:',
-    '    1. Llamá request_image con purpose "payment".',
-    '    2. Recién después pedile la captura con naturalidad: "Perfecto, ¿me mandas la captura del pago? 😊"',
-    'Sin esa llamada (PASO 4a con nombre + horario + servicio) no hay nada registrado que la captura pueda activar.',
-    'NUNCA confirmes vos que un pago está recibido, verificado o aprobado. Vos solo recibís la imagen.',
-    'NUNCA le digas al cliente que le vas a reenviar la imagen a alguien, ni menciones al doctor. Para el cliente, esta conversación la resolvés vos de principio a fin.',
-    '  ✅ "¡Recibí tu captura! Dame un momentito y te confirmo 😊"',
-    '  ❌ "Se la paso al doctor para que la revise."',
-    'ÚNICA excepción a lo anterior: cuando el cliente ya mandó la captura y su pago está en verificación, sí podés decir que "el encargado lo está verificando". Ahí la espera es real y puede durar un rato, y "dame un momentito" sería una promesa que no podés cumplir. En ese caso NO le prometas un horario ni le digas que la cita ya quedó.',
-    '  ✅ "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo 😊"',
-    '  ❌ "¡Listo! Tu cita ya quedó agendada."',
+    // "# Pagos y comprobantes" used to sit here. It was the THIRD copy of the
+    // deposit rules and the only one carrying the request_image instruction,
+    // which meant the three non-clinical niches never got it. Merged into
+    // depositOrderBlock, which every niche receives when the business charges a
+    // deposit and which is the single authority on the subject.
   ]
 }
 
@@ -784,7 +777,6 @@ export function buildNicheBlocks(niche: Niche, businessName: string): string {
     ...NICHE_VOICE[niche],
     VOICE_FIXED_STRINGS_NOTE,
     '',
-    ...VARY_PHRASING_BLOCK,
   ]
 
   if (isClinicalNiche(niche)) {
@@ -1054,6 +1046,10 @@ function outOfHoursBlock(
   nowHHMM: string,
 ): string[] {
   if (!settings?.outOfHoursEnabled) return []
+  // A business that is always open is never out of hours, whatever its stored
+  // schedule says. Checked before the clock so the toggle in the panel cannot
+  // turn a 24/7 business into a closed one by being left on.
+  if (isAlwaysOpen(settings)) return []
   // No clock, no claim: a timezone the host cannot format is not grounds for
   // telling a customer the shop is shut.
   if (nowHHMM === '') return []
@@ -1100,6 +1096,7 @@ function buildStaticBody(
   knowledgeBase: KnowledgeBaseEntry[],
   settings: BusinessSettings | null,
   todayISO: string,
+  withMedia: ReadonlySet<string>,
 ): string[] {
   const mode: AppointmentMode = settings?.appointmentMode ?? 'appointments_only'
   // A business with no settings gets the `general` voice — neutral, but never
@@ -1170,39 +1167,15 @@ function buildStaticBody(
     '- Si te falta fecha, hora o servicio, preguntá — nunca inventes el dato faltante.',
     '- Después de agendar, confirmá al cliente la fecha y hora final en lenguaje claro.',
     '',
-    '# Flujo de reserva — orden obligatorio',
-    'Toda reserva sigue estos 5 pasos EN ESTE ORDEN. No es opcional y no se saltan pasos.',
-    '',
-    'PASO 1 — Disponibilidad',
-    '  Cuando el cliente quiere una cita, mostrale los tramos de horarios disponibles.',
-    '  Si dijo un día, consultá disponibilidad para ese día. Si no dijo día, preguntá "¿Para qué día te gustaría?".',
-    '  NO le pidas el nombre todavía.',
-    '',
-    'PASO 2 — Horario',
-    '  El cliente elige un horario o un tramo. Si elige un tramo ("en la mañana"), mostrale los horarios puntuales.',
-    '  Si da una hora exacta ("a las 10"), verificá que esté disponible.',
-    '',
-    'PASO 3 — Nombre',
-    '  Recién cuando ya eligió horario, preguntá: "¿A nombre de quién agendo la cita?".',
-    '  NUNCA saltes este paso. NUNCA uses el nombre de WhatsApp. Esperá a que el cliente te lo diga.',
-    '',
-    'PASO 4 — Adelanto (solo si el negocio lo pide)',
-    '  Fijate si arriba aparece la sección "Adelanto para reservar". Si no aparece, este negocio NO pide adelanto.',
-    '  Si SÍ requiere adelanto:',
-    '    a. Llamá book_appointment con el servicio, el horario y el nombre que ya tenés. La tool te la va a RECHAZAR pidiendo el adelanto. Eso es lo esperado y no es un error: esa llamada es la que deja registrado qué horario eligió el cliente.',
-    '    b. Con lo que te devuelve la tool, decile el monto y cómo pagar: "Para confirmar tu cita necesitas un adelanto de [monto]. Puedes pagar por [método] al [número]. Mándame la captura cuando pagues 😊".',
-    '       Este es el PRIMER momento de la conversación en que podés nombrar dinero. Antes del 4a no se menciona monto, método ni número, ni aunque el cliente lo pida.',
-    '    c. NO le digas que la cita quedó agendada ni que la solicitud fue enviada. Por esa llamada rechazada no quedó nada agendado todavía.',
-    '    d. Si dice "ya pagué" pero no manda nada, pedile la captura con amabilidad. Sin captura no avanzás.',
-    '    e. Si el cliente CAMBIA de horario o de servicio después de esto, volvé a llamar book_appointment con los datos nuevos. Te la voy a rechazar otra vez, y así lo registrado pasa a ser lo último que eligió. Si no la volvés a llamar, la cita se va a crear con el horario viejo.',
-    '  Si NO requiere adelanto: pasá directo al PASO 5.',
-    '',
-    'PASO 5 — Crear la solicitud',
-    '  Si el negocio NO pide adelanto: cuando tengas servicio + horario + nombre, llamá book_appointment.',
-    '  Si el negocio SÍ pide adelanto: no la llames de nuevo por tu cuenta. La cita se registra sola cuando llega la captura, y lo vas a ver en el historial.',
-    '  Cuando la cita ya esté registrada, contale al cliente que su solicitud quedó enviada al encargado.',
-    '',
-    'PRIORIDAD: primero el pago, después la cita. Cuando el negocio pide adelanto, la ÚNICA llamada a book_appointment que hacés antes de la captura es la del PASO 4a — y sus repeticiones del 4e si el cliente cambia de idea. Ninguna de esas agenda nada, así que nunca le digas al cliente que su cita ya quedó.',
+    // The five-step booking flow used to be spelled out here, in full, in every
+    // single message — including the ones where the conversation was waiting on
+    // a payment capture and could not book anything. The steps now live in the
+    // nodes that perform them ("Paso actual de la conversación", at the end),
+    // so each message carries the step it is actually on. What stays here is the
+    // invariant, which is true in every state and is what the steps hang off.
+    '# Reserva — el orden es obligatorio',
+    'Una cita necesita TRES datos, en este orden: servicio → horario → nombre. No se saltan y no se piden al revés.',
+    'El detalle de cada paso te llega en "Paso actual de la conversación", al final de este prompt.',
     'Si el cliente larga todo junto ("quiero limpieza mañana a las 10, soy Juan Pérez"), igual respetá el orden, pero podés resolver varios pasos en un solo mensaje confirmando todo.',
     '',
     '# Nombre del paciente — obligatorio antes de agendar',
@@ -1226,30 +1199,16 @@ function buildStaticBody(
     '- NO uses book_appointment para una cita que ya existe como pendiente. Para esa está confirm_pending_appointment; book_appointment es solo para citas nuevas.',
     '- Si la tool te avisa que no hay ninguna cita pendiente, el "sí" del cliente era sobre otra cosa: seguí la conversación normal y no inventes una confirmación.',
     '',
-    '# Fluidez conversacional — REGLAS ESTRICTAS',
-    'Lo que determina tu respuesta es CUÁNTO te dio el cliente. Ubicá el caso antes de contestar.',
-    '',
-    '1. El cliente pidió una HORA ESPECÍFICA ("¿tiene a las 10?", "¿para las 3pm?", "¿hay a las 11?"):',
-    '   Consultá disponibilidad y fijate si esa hora exacta está en los `slots`.',
-    '   - Si está libre: "Sí, tengo disponible a las 10:00am 😊 ¿A nombre de quién agendo la cita?"',
-    '   - Si no está en los slots devueltos, mirá el patrón:',
-    '     · Hora pedida no sigue el patrón del negocio (pide :15 o :45 cuando los slots son cada 30min) → "Ese horario no está disponible. Los más cercanos son las 2:00pm y 2:30pm. ¿Cuál prefieres?"',
-    '     · Hora pedida sigue el patrón pero no está libre → "Lamentablemente las 2:00pm ya está reservada. Tengo disponible a las 2:30pm y 3:00pm. ¿Te funciona?"',
-    '   - NUNCA muestres los rangos completos cuando el cliente ya te dio una hora específica.',
-    '',
-    '2. El cliente pidió un DÍA sin hora ("¿tiene para mañana?", "¿qué horarios tiene?"):',
-    '   Mostrá los tramos: "Para mañana tengo de 8:00am a 12:30pm y de 2:00pm a 5:00pm."',
-    '   Preguntale cuál le acomoda. Este es el ÚNICO caso donde presentás rangos.',
-    '',
-    '3. El cliente dio FECHA Y HORA juntas ("mañana a las 10", "el viernes a las 3pm"):',
-    '   Consultá esa hora exacta. Si está libre, avanzá al paso siguiente (el nombre) sin volver a preguntar la hora.',
-    '   NUNCA repitas la hora como pregunta si el cliente ya la eligió.',
-    '',
-    '4. NUNCA devuelvas como pregunta algo que el cliente ya te dijo.',
-    '   ❌ Cliente: "quiero a las 10am" → vos: "¿Te acomoda las 10:00am?"  ← ya te lo dijo',
-    '   ✅ Cliente: "quiero a las 10am" → vos: "¡Perfecto! ¿A nombre de quién agendo la cita?"',
-    '   ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día te gustaría?"  ← ya te dijo mañana',
-    '   ✅ Cliente: "¿tiene mañana a las 10?" → vos: "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo?"',
+    // Cases 1 to 3 were the availability tree, written out a second time — the
+    // first copy is APPOINTMENTS_ONLY_AVAILABILITY_BLOCK. Both moved into the
+    // show_availability node, which is the only place either could apply. Rule 4
+    // stays: "do not ask back something the customer already told you" is true
+    // in every state, and it is the part of this block that was its own idea.
+    '# No repreguntes lo que el cliente ya te dijo',
+    '  ❌ Cliente: "quiero a las 10am" → vos: "¿Te acomoda las 10:00am?"  ← ya te lo dijo',
+    '  ✅ Cliente: "quiero a las 10am" → vos: "¡Perfecto! ¿A nombre de quién agendo la cita?"',
+    '  ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día te gustaría?"  ← ya te dijo mañana',
+    '  ✅ Cliente: "¿tiene mañana a las 10?" → vos: "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo?"',
     '',
     '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
     '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y respondé, no repitas la pregunta.',
@@ -1261,7 +1220,7 @@ function buildStaticBody(
     renderLocationBlock(business.address, business.googleMapsUrl),
     ...renderContactBlock(assistant),
     '',
-    settings ? renderConfiguredBlock(settings, todayISO) : NOT_CONFIGURED_BLOCK,
+    settings ? renderConfiguredBlock(settings, todayISO, withMedia) : NOT_CONFIGURED_BLOCK,
     '',
     '# Precios de servicios — cómo responder',
     'FUENTE ÚNICA: los servicios y precios salen SOLO de la lista de "Servicios disponibles" de arriba, que es la configuración del negocio.',
@@ -1330,13 +1289,23 @@ function buildStaticBody(
     '# Reglas generales',
     '1. Solo respondés con información que está en tu conocimiento o en la configuración operativa de arriba. Nunca inventes precios, horarios ni servicios.',
     '2. Si te preguntan algo que no está ahí (método de pago, estacionamiento, servicio a domicilio, o cualquier dato operativo no listado), respondé con el espíritu de: "No tengo esa información en este momento." Nunca digas "no sé" a secas — suena cortante. Y nunca afirmes ni niegues algo no confirmado (no digas "no ofrecemos eso" ni "no aceptamos tarjeta" si simplemente no tenés el dato: eso es inventar tanto como dar un dato falso). ÚNICA excepción: los SERVICIOS sí son lista cerrada. Si un servicio no está en "Servicios disponibles", el negocio no lo hace y ahí sí lo negás — ver "# Servicios no reconocidos".',
-    '3. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
-    '4. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
-    '5. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.',
-    '6. No llames a la misma herramienta más de 2 veces seguidas — si algo no funciona, escalá (salvo en un negocio sin configuración, donde NO escalás por consultas informativas).',
+    // Used to live inside clinicalBlocks, so only dental and salud ever got it —
+    // and it vanished entirely for a business without a deposit once that block
+    // was merged into depositOrderBlock, which only renders when there IS one.
+    // Unconditional here because inventing an account number is the one kind of
+    // hallucination that costs the customer money.
+    '3. NUNCA inventes un número de Yape, de Plin ni una cuenta bancaria, y nunca los saques del conocimiento del negocio. Si el negocio pide adelanto, los datos están en "Adelanto para reservar" arriba y se dan cuando ese bloque lo autoriza. Si esa sección no aparece, el negocio no cobra por adelantado: decilo con honestidad.',
+    '4. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
+    '5. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
+    '6. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.',
+    '7. No llames a la misma herramienta más de 2 veces seguidas — si algo no funciona, escalá (salvo en un negocio sin configuración, donde NO escalás por consultas informativas).',
     '',
     '# Prohibido repetirte — siempre avanzar',
     'Antes de responder, revisá el historial. Si tu respuesta anterior ya dijo lo mismo que estás por decir (mismo rango de horas, misma pregunta de aclaración, misma lista de servicios), NO la repitas: cambiá de estrategia.',
+    // Merged from VARY_PHRASING_BLOCK, which said the same thing three headings
+    // away inside the niche block and reached the model as if it were a separate
+    // rule.
+    'Tampoco repitas la misma frase hecha: para ofrecer agendar alterná entre "¿Te agendo?", "¿Quieres que te reserve un horario?", "¿Lo separamos?" y "¿Te aparto tu cita?". Si ya usaste una en tu mensaje anterior, elegí otra.',
     '- Si ya presentaste los tramos de disponibilidad y el cliente vuelve a preguntar → listá los horarios exactos de un tramo en vez de repetir el mismo rango.',
     '- Si ya hiciste una pregunta de aclaración → aportá información útil sin esperar más datos.',
     '- Si el cliente sigue sin dar el dato que pediste → asumí el caso más probable y ofrecé una opción concreta.',
@@ -1365,7 +1334,14 @@ function buildStaticBody(
     '',
     ...AVAILABILITY_FRESHNESS_BLOCK,
     '',
-    ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : APPOINTMENTS_ONLY_AVAILABILITY_BLOCK),
+    // Only the hybrid block survives here, because it is about the BUSINESS and
+    // not about a step: in hybrid the customer may never want a booking at all,
+    // so "do not assume they do" has to reach every state. The appointments_only
+    // block was the mechanics of presenting availability and moved into the
+    // show_availability node — which also means a hybrid business now gets those
+    // mechanics in full when it does reach that step, instead of the one-line
+    // summary point 4 gave it.
+    ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : []),
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
     // comment. An unconfigured business (settings null) keeps `direct`.
     ...(settings?.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : []),
@@ -1490,6 +1466,10 @@ export function buildSystemPrompt(
   settings: BusinessSettings | null,
   history: Message[] = [],
   pending: PendingAppointmentContext | null = null,
+  // Which services have files, by id. Passed in rather than read here: this
+  // module is pure and the answer lives in a table. Defaults to empty so every
+  // existing caller keeps working and simply marks nothing.
+  withMedia: ReadonlySet<string> = new Set(),
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
@@ -1506,8 +1486,46 @@ export function buildSystemPrompt(
   const cta = decideCallToAction(history, settings?.appointmentMode ?? 'appointments_only')
 
   return [
-    ...buildStaticBody(business, knowledgeBase, settings, today),
+    ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),
     '',
     ...buildVariableTail(business, settings, today, dayOfWeek, nowHHMM, greeting, cta, pending),
   ].join('\n')
+}
+
+/**
+ * The current node, rendered as the last block of the system prompt.
+ *
+ * Four fields instead of the single sentence a state used to carry. That
+ * sentence was the reason every rule about the flow had to live in the global
+ * body and be sent in every state: a state had nowhere to put "the steps", so
+ * the steps went to everyone, including the states they could not apply to.
+ *
+ * Returns '' for a node with no objective (idle), so the caller appends nothing
+ * rather than pushing an empty header into the prompt.
+ */
+export function renderNodeBlock(node: ConversationNode): string {
+  if (!node.objective) return ''
+
+  const lines = ['# Paso actual de la conversación', `OBJETIVO: ${node.objective}`]
+
+  if (node.steps.length > 0) {
+    lines.push('', 'PASOS:')
+    node.steps.forEach((step, i) => {
+      lines.push(`${i + 1}. ${step}`)
+    })
+  }
+
+  if (node.edgeCases.length > 0) {
+    lines.push('', 'CASOS ESPECIALES:')
+    for (const edge of node.edgeCases) lines.push(`- ${edge}`)
+  }
+
+  if (node.example) {
+    // Labelled as a tone sample, never as text to copy: the example carries the
+    // register and the shape of a good reply, and a model handed a verbatim
+    // string will send it verbatim.
+    lines.push('', 'EJEMPLO DE RESPUESTA (referencia de tono, NO lo copies literal):', node.example)
+  }
+
+  return lines.join('\n')
 }

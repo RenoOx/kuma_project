@@ -11,15 +11,20 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import { getStateConfig, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
+import {
+  getStateConfig,
+  resolveFlow,
+  type TransitionEvidence,
+} from '@/modules/conversation/stateMachine.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
+import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
-import { buildSystemPrompt } from './prompts.js'
+import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
 import { executeTool, type ToolAttachment, type ToolContext } from './toolExecutor.js'
 import { kumaTools } from './tools.js'
 
@@ -134,6 +139,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // the Zod default, so that business behaves exactly as it did before.
   const currentState = params.state ?? conversation.state
   const flowType: FlowType = settings?.flowType ?? 'appointments'
+  // Compiled once per turn and threaded through: every transition of this turn
+  // has to be judged against the same flow, and recompiling per trigger would
+  // let a mid-turn settings change split the conversation across two flows.
+  const flow = resolveFlow(settings)
 
   // Every trigger of this turn goes through here. A failed write costs the
   // transition, never the reply: we log it and carry on from where we were.
@@ -145,7 +154,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     const applied = await conversationService.applyTrigger({
       businessId: params.businessId,
       conversationId: params.conversationId,
-      flowType,
+      flow,
       currentState: from,
       trigger,
       evidence,
@@ -161,7 +170,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // produces a trigger. In every other state it matches nothing and writes
   // nothing.
   let effectiveState = await applyTriggerOrKeep(currentState, 'customer_message')
-  const stateConfig = getStateConfig(flowType, effectiveState)
+  const stateConfig = getStateConfig(flow, effectiveState)
 
   // A tool the state does not list is not refused — it is never offered, so the
   // model never considers it. Different layer from the executor's gates, which
@@ -244,19 +253,26 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   // History drives the call-to-action decision (see decideCallToAction): the
   // model no longer judges whether it already invited recently.
+  // Which services have files, by id. One query per reply rather than a field
+  // on the service, because media lives in its own table now — and the prompt
+  // module is pure, so it cannot go and look.
+  const mediaRows = await serviceMediaService.listForBusiness(params.businessId)
+  const servicesWithMedia = new Set(mediaRows.map((row) => row.serviceId))
+
   const basePrompt = buildSystemPrompt(
     business,
     kbResult.data.entries,
     settings,
     historyResult.data,
     pending,
+    servicesWithMedia,
   )
-  // The state's instruction goes last, after the variable tail — the static
-  // body has to stay first for the prompt cache. An empty promptAddition (both
-  // flows' 'idle') adds nothing at all, not even the header.
-  const systemPrompt = stateConfig.promptAddition
-    ? [basePrompt, '', '# Paso actual de la conversación', stateConfig.promptAddition].join('\n')
-    : basePrompt
+  // The node goes last, after the variable tail — the static body has to stay
+  // first for the prompt cache, and the final position is where an instruction
+  // weighs most. A node with no objective ('idle') renders to nothing at all,
+  // not even the header.
+  const nodeBlock = renderNodeBlock(stateConfig.node)
+  const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...convertHistoryToChatMessages(historyResult.data),

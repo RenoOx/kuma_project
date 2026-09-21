@@ -49,6 +49,30 @@ export interface WhatsappClient {
    * at an `@lid` jid, and a raw send there fails with 463.
    */
   sendImage(jid: string, image: Buffer, caption?: string): Promise<void>
+  /**
+   * Relays a file as a document: a catalogue, a price list, a brochure.
+   *
+   * `fileName` is what the customer sees in the chat and what their phone saves
+   * it as, so it carries the owner's original name rather than the storage id.
+   * `mimetype` is the sniffed one, never anything the uploader claimed.
+   */
+  sendDocument(
+    jid: string,
+    document: Buffer,
+    mimetype: string,
+    fileName: string,
+    caption?: string,
+  ): Promise<void>
+  /**
+   * Relays audio.
+   *
+   * `ptt: false` on purpose — this arrives as a playable audio file, not as a
+   * voice note. A voice note claims a person recorded it just then, which is a
+   * thing Emma must never imply.
+   */
+  sendAudio(jid: string, audio: Buffer, mimetype: string): Promise<void>
+  /** Relays a video, with an optional caption like an image. */
+  sendVideo(jid: string, video: Buffer, caption?: string): Promise<void>
   onMessage(handler: MessageHandler): void
   onDisconnect(handler: DisconnectHandler): void
   onQR(handler: QRHandler): void
@@ -321,6 +345,49 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       log.info(
         { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
         'sock.sendImage: returned',
+      )
+    },
+    // The three below are sendImage with a different payload key. Same LID
+    // handshake, same rememberSentMessage, same logging — a media send that
+    // skipped prepareLidSession would 463 against an owner paired after the LID
+    // migration, and one that skipped rememberSentMessage would come back as an
+    // unrecognised echo.
+    async sendDocument(jid, document, mimetype, fileName, caption) {
+      log.info({ jid, bytes: document.length, mimetype, fileName }, 'sock.sendDocument: calling')
+      await prepareLidSession(jid)
+      const result = await sock.sendMessage(jid, {
+        document,
+        mimetype,
+        fileName,
+        ...(caption ? { caption } : {}),
+      })
+      rememberSentMessage(result?.key?.id, result?.message)
+      log.info(
+        { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
+        'sock.sendDocument: returned',
+      )
+    },
+    async sendAudio(jid, audio, mimetype) {
+      log.info({ jid, bytes: audio.length, mimetype }, 'sock.sendAudio: calling')
+      await prepareLidSession(jid)
+      const result = await sock.sendMessage(jid, { audio, mimetype, ptt: false })
+      rememberSentMessage(result?.key?.id, result?.message)
+      log.info(
+        { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
+        'sock.sendAudio: returned',
+      )
+    },
+    async sendVideo(jid, video, caption) {
+      log.info({ jid, bytes: video.length, hasCaption: !!caption }, 'sock.sendVideo: calling')
+      await prepareLidSession(jid)
+      const result = await sock.sendMessage(jid, {
+        video,
+        ...(caption ? { caption } : {}),
+      })
+      rememberSentMessage(result?.key?.id, result?.message)
+      log.info(
+        { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
+        'sock.sendVideo: returned',
       )
     },
     onMessage(handler) {

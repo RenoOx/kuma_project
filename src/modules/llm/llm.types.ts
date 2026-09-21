@@ -34,6 +34,6 @@ export interface LLMResponse {
   // True if we hit the safety net (MAX_TOOL_ITERATIONS) without a final reply.
   maxIterationsHit: boolean
   // Media the handler sends after the text, in the order the tools produced it.
-  // Empty on every turn that did not call send_service_image.
+  // Empty on every turn that did not call send_service_media.
   attachments: ToolAttachment[]
 }

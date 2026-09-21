@@ -9,6 +9,8 @@ import {
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
 import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
+import * as customerService from '@/modules/customer/customer.service.js'
+import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
 import { wasServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
@@ -21,12 +23,17 @@ export interface ToolContext {
 }
 
 export interface ToolAttachment {
-  // Resolved from the business's own settings, never from anything the model
-  // wrote: the model names a service, this layer turns that into a key.
+  // Resolved from the business's own stored media, never from anything the
+  // model wrote: the model names a service, this layer turns that into a key.
   s3Key: string
   caption: string
   // Carried so the handler can record the send once it actually succeeded.
   serviceId: string
+  /** Decides which Baileys method sends it. Sniffed at upload, never claimed. */
+  type: 'image' | 'pdf' | 'audio' | 'video'
+  mimetype: string
+  /** What the customer sees the file called. The owner's name, not the storage id. */
+  filename: string
 }
 
 export interface ToolExecutionResult {
@@ -57,6 +64,23 @@ export interface ToolExecutionResult {
   attachments?: ToolAttachment[]
 }
 
+const showServicesArgs = z.object({
+  topic: z.string(),
+})
+
+const saveCustomerDataArgs = z.object({
+  fields: z.record(z.string(), z.string()),
+})
+
+const confirmSummaryArgs = z.object({
+  confirmed: z.boolean(),
+})
+
+const correctFieldArgs = z.object({
+  field: z.string().min(1),
+  value: z.string().min(1),
+})
+
 const checkAvailabilityArgs = z.object({
   date_iso: z.string(),
   service: z.string(),
@@ -72,7 +96,7 @@ const confirmPendingArgs = z.object({
   customer_name: z.string().optional(),
 })
 
-const sendServiceImageArgs = z.object({
+const sendServiceMediaArgs = z.object({
   service: z.string(),
 })
 
@@ -156,24 +180,37 @@ function depositRequiredInstruction(
   ].join(' ')
 }
 
+const SHOW_SERVICES_INSTRUCTION =
+  'Anotado. Escribí tu respuesta sobre los servicios como siempre: agrupá por categoría si son muchos, no listes todo de golpe y no menciones esta herramienta.'
+
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
 
-// ── send_service_image ───────────────────────────────────────────────────────
+// ── send_service_media ───────────────────────────────────────────────────────
 //
-// All three keep Emma from narrating the transport. The photo leaves as its own
+// All three keep Emma from narrating the transport. The file leaves as its own
 // WhatsApp message right after her text, so "te adjunto la foto" describes
-// something the customer cannot see happening and reads as a bug when the image
-// lands a second later on its own.
+// something the customer cannot see happening and reads as a bug when it lands
+// a second later on its own.
 
-const NO_SERVICE_IMAGE_INSTRUCTION =
-  'Ese servicio no tiene foto cargada, así que NO se envió ninguna imagen. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste una foto ni que se la vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
+/**
+ * How many files one turn may send, however many a service has.
+ *
+ * Every attachment is its own outbound WhatsApp message. Without a ceiling, a
+ * customer browsing three services could trigger a dozen sends in a single turn
+ * — and a rate-limited number takes the whole business offline, not just the
+ * photos.
+ */
+const MAX_ATTACHMENTS_PER_TURN = 2
 
-const SERVICE_IMAGE_SENT_INSTRUCTION =
-  'La foto se está enviando sola por WhatsApp. Escribí tu respuesta normal sobre el servicio. NO digas "te adjunto la foto", "te la mando" ni "mirá la imagen": para el cliente la foto simplemente llega.'
+const NO_SERVICE_MEDIA_INSTRUCTION =
+  'Ese servicio no tiene material cargado, así que NO se envió nada. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste un archivo ni que se lo vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
 
-const IMAGE_ALREADY_SENT_INSTRUCTION =
-  'Ya le enviaste la foto de ese servicio en esta conversación, así que no se mandó de nuevo. Si volvió a preguntar, referite a la que ya tiene más arriba. NO vuelvas a llamar esta herramienta para ese servicio.'
+const SERVICE_MEDIA_SENT_INSTRUCTION =
+  'El material se está enviando solo por WhatsApp. Escribí tu respuesta normal sobre el servicio. NO digas "te adjunto", "te lo mando" ni "mirá el archivo": para el cliente simplemente llega.'
+
+const MEDIA_ALREADY_SENT_INSTRUCTION =
+  'Ya le enviaste el material de ese servicio en esta conversación, así que no se mandó de nuevo. Si volvió a preguntar, referite a lo que ya tiene más arriba. NO vuelvas a llamar esta herramienta para ese servicio.'
 
 // ── Presentación de la disponibilidad ────────────────────────────────────────
 //
@@ -587,8 +624,8 @@ export async function executeTool(
       }
     }
 
-    if (name === 'send_service_image') {
-      const parsed = sendServiceImageArgs.safeParse(args)
+    if (name === 'send_service_media') {
+      const parsed = sendServiceMediaArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
 
       const settings = await businessService.getSettings(context.businessId)
@@ -616,13 +653,12 @@ export async function executeTool(
         }
       }
 
-      // An id is as necessary as the key: without it the send cannot be recorded,
-      // and an unrecorded send is one that repeats on every turn. A service saved
-      // before ids existed has neither and falls here.
-      if (!service.imageKey || !service.id) {
+      // The id is as necessary as the files: without it the send cannot be
+      // recorded, and an unrecorded send is one that repeats on every turn.
+      if (!service.id) {
         return {
-          result: JSON.stringify({ error: 'no_image', instruction: NO_SERVICE_IMAGE_INSTRUCTION }),
-          error: 'no_image',
+          result: JSON.stringify({ error: 'no_media', instruction: NO_SERVICE_MEDIA_INSTRUCTION }),
+          error: 'no_media',
         }
       }
 
@@ -630,27 +666,45 @@ export async function executeTool(
         return {
           result: JSON.stringify({
             status: 'already_sent',
-            instruction: IMAGE_ALREADY_SENT_INSTRUCTION,
+            instruction: MEDIA_ALREADY_SENT_INSTRUCTION,
           }),
         }
       }
 
+      const media = await serviceMediaService.listForService(context.businessId, service.id)
+      if (media.length === 0) {
+        return {
+          result: JSON.stringify({ error: 'no_media', instruction: NO_SERVICE_MEDIA_INSTRUCTION }),
+          error: 'no_media',
+        }
+      }
+
+      // Capped, and the cap is not cosmetic. Every attachment is its own
+      // outbound WhatsApp message: a customer asking about three services with
+      // four files each would fire twelve sends in one turn, which is how an
+      // account gets rate-limited — something this project has already lived
+      // through once. The owner's display_order decides which ones make the cut.
+      const selected = media.slice(0, MAX_ATTACHMENTS_PER_TURN)
+
       return {
         result: JSON.stringify({
-          status: 'image_sent',
+          status: 'media_sent',
           service: service.name,
-          instruction: SERVICE_IMAGE_SENT_INSTRUCTION,
+          sent: selected.length,
+          instruction: SERVICE_MEDIA_SENT_INSTRUCTION,
         }),
-        attachments: [
-          {
-            s3Key: service.imageKey,
-            // The service name alone. Emma's own text already carries the price
-            // and the pitch, and repeating them under the photo reads like two
-            // people answering the same question.
-            caption: service.name,
-            serviceId: service.id,
-          },
-        ],
+        attachments: selected.map((row) => ({
+          s3Key: row.s3Key,
+          // The service name alone, and only where WhatsApp renders a caption.
+          // Emma's own text already carries the price and the pitch, and
+          // repeating them under the file reads like two people answering the
+          // same question.
+          caption: service.name,
+          serviceId: service.id as string,
+          type: row.type as ToolAttachment['type'],
+          mimetype: row.mimetype,
+          filename: row.filename ?? `${service.name}.${row.type}`,
+        })),
       }
     }
 
@@ -698,6 +752,114 @@ export async function executeTool(
         }
       }
       return { result: JSON.stringify({ status: 'escalated', reason: parsed.data.reason }) }
+    }
+
+    // ── Signalling tools ─────────────────────────────────────────────────────
+    //
+    // These four do almost nothing on their own: they exist so the flow has an
+    // emitter for the step it is on. Before them, six triggers were declared in
+    // the state machine and produced by nobody, which is how a conversation
+    // could reach a node that had no way out of it.
+    //
+    // They are cheap on purpose. The model is already deciding "I am listing
+    // services now" in order to write the reply; naming that decision costs one
+    // tool call and turns it into a transition the code owns.
+
+    if (name === 'show_services') {
+      const parsed = showServicesArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      return {
+        result: JSON.stringify({
+          status: 'noted',
+          topic: parsed.data.topic,
+          instruction: SHOW_SERVICES_INSTRUCTION,
+        }),
+        trigger: 'services_listed',
+      }
+    }
+
+    if (name === 'save_customer_data') {
+      const parsed = saveCustomerDataArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      const settingsResult = await businessService.getSettings(context.businessId)
+      const required = settingsResult.ok ? settingsResult.data.collectDataFields : []
+      const missing = required.filter((field) => !parsed.data.fields[field]?.trim())
+      if (missing.length > 0) {
+        return {
+          result: JSON.stringify({
+            error: 'incomplete_data',
+            missing,
+            instruction: `Todavía faltan estos datos: ${missing.join(', ')}. Pedí el primero que falte y no vuelvas a llamar esta herramienta hasta tenerlos todos.`,
+          }),
+          error: 'incomplete_data',
+        }
+      }
+
+      // Persisting the name here is what closes the gap CLAUDE.md lists: until
+      // now a customer who told Emma their name and did not book kept whatever
+      // WhatsApp push name they happened to have.
+      const saved = await customerService.saveCollectedData(
+        context.businessId,
+        context.customerId,
+        parsed.data.fields,
+      )
+      if (!saved.ok) {
+        return {
+          result: JSON.stringify({ error: saved.error.code, userMessage: saved.error.userMessage }),
+          error: saved.error.code,
+        }
+      }
+
+      return {
+        result: JSON.stringify({ status: 'saved', fields: Object.keys(parsed.data.fields) }),
+        trigger: 'data_complete',
+      }
+    }
+
+    if (name === 'confirm_summary') {
+      const parsed = confirmSummaryArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      return {
+        result: JSON.stringify({
+          status: parsed.data.confirmed ? 'confirmed' : 'correction_requested',
+          instruction: parsed.data.confirmed
+            ? 'El cliente confirmó. Cerrá con la despedida.'
+            : 'El cliente quiere corregir algo. Preguntale QUÉ dato quiere cambiar, uno solo, y no le pidas todos de nuevo.',
+        }),
+        trigger: parsed.data.confirmed ? 'summary_confirmed' : 'correction_requested',
+      }
+    }
+
+    if (name === 'correct_field') {
+      const parsed = correctFieldArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      const saved = await customerService.saveCollectedData(
+        context.businessId,
+        context.customerId,
+        {
+          [parsed.data.field]: parsed.data.value,
+        },
+      )
+      if (!saved.ok) {
+        return {
+          result: JSON.stringify({ error: saved.error.code, userMessage: saved.error.userMessage }),
+          error: saved.error.code,
+        }
+      }
+
+      return {
+        result: JSON.stringify({
+          status: 'corrected',
+          field: parsed.data.field,
+          instruction:
+            'Dato corregido. Volvé a mostrarle el resumen completo con el cambio aplicado y preguntale si ahora está bien.',
+        }),
+        trigger: 'field_corrected',
+      }
     }
 
     return {

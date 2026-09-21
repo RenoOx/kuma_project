@@ -17,7 +17,7 @@ import { ServiceForm } from './ServiceForm.js'
  * stored. The draft lives here until the owner saves it.
  *
  * The photo is the exception to that draft: it is owned by its own endpoints and
- * written as soon as it is picked — see ServicePhotoField.
+ * written as soon as it is picked — see ServiceMediaField.
  */
 export function ServiceList({ services }: { services: PanelService[] }): React.JSX.Element {
   const { save, saving, saved, error } = useSectionSave()
@@ -121,7 +121,6 @@ function ServiceRow({
           {/* A flag, not a thumbnail. Showing the photo here would mean signing a
               URL per service on every page load; the preview lives in the edit
               dialog, where the owner actually asked to see it. */}
-          {service.imageKey ? ' · con foto' : ''}
         </p>
       </div>
 

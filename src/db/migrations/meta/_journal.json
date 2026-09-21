@@ -134,6 +134,13 @@
       "when": 1789958607636,
       "tag": "0018_gray_rachel_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790017760451,
+      "tag": "0019_wealthy_quasar",
+      "breakpoints": true
     }
   ]
 }

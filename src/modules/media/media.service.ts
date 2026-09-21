@@ -78,7 +78,12 @@ export async function uploadMedia(
     )
   }
 
-  return ok({ key: key.data, mime: validated.data.mime, bytes: validated.data.bytes })
+  return ok({
+    key: key.data,
+    mime: validated.data.mime,
+    type: validated.data.type,
+    bytes: validated.data.bytes,
+  })
 }
 
 export async function getPresignedUrl(
