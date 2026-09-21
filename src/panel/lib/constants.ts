@@ -157,7 +157,7 @@ export function nicheCopy(niche: string | null | undefined): NicheCopy {
   return NICHE_COPY.general
 }
 
-// Polling cadences, per PANEL_SPEC. V1 is polling only — no WebSockets.
+// Polling cadences. V1 is polling only — no WebSockets.
 export const POLL_MS = {
   inbox: 5_000,
   appointments: 10_000,
