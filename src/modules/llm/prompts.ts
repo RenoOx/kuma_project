@@ -24,7 +24,7 @@ function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, Knowledg
   }
   return out
 }
-
+//test
 function renderEntry(entry: KnowledgeBaseEntry): string {
   const attachment =
     entry.attachmentType !== 'none' && entry.attachmentUrl
