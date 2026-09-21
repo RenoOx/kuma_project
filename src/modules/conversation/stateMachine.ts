@@ -80,6 +80,15 @@ const ESCALATE = 'escalate_to_human'
 // await_payment is the one exclusion — see the comment there.
 const PENDING_CONFIRM = 'confirm_pending_appointment'
 
+// Offered wherever the conversation is still about WHAT the business does, and
+// withheld from every state that is waiting on money. Under the deposit gate a
+// photo of a service is a distraction from the one thing those states exist to
+// wait for, and await_payment_verification deliberately offers nothing at all.
+//
+// Emitting no trigger, so it never moves the conversation: showing a picture is
+// not a step in the flow.
+const SERVICE_IMAGE = 'send_service_image'
+
 // Booking flow: clinics, barbershops, aesthetics. Ends on a scheduled slot.
 //
 // 'confirmed' is deliberately not terminal — a customer who already booked
@@ -97,7 +106,7 @@ export const appointmentsFlow: FlowDefinition = {
     // asks_availability is its only exit and nothing but that tool produces it.
     // It also matches how threads actually open — "hola, ¿tienen cita mañana?"
     // is one message, not two.
-    tools: ['check_availability', PENDING_CONFIRM, ESCALATE],
+    tools: ['check_availability', SERVICE_IMAGE, PENDING_CONFIRM, ESCALATE],
     promptAddition: 'Saluda al paciente con calidez. Detecta si quiere información o una cita.',
     transitions: {
       asks_info: 'informing',
@@ -113,7 +122,7 @@ export const appointmentsFlow: FlowDefinition = {
     // reports, and nothing infers intents from the customer's text yet. Kept
     // whole rather than deleted: the config is right and the state comes back
     // to life the day a trigger source for intents exists.
-    tools: ['check_availability', PENDING_CONFIRM, ESCALATE],
+    tools: ['check_availability', SERVICE_IMAGE, PENDING_CONFIRM, ESCALATE],
     promptAddition:
       'Responde sobre servicios, precios y horarios usando la base de conocimiento. No intentes agendar todavía.',
     transitions: {
@@ -126,7 +135,14 @@ export const appointmentsFlow: FlowDefinition = {
     // Carries the booking tools as well, because picks_time — the only route to
     // choose_time — is an intent nothing reports. Without them a customer who
     // has just been shown the times has no way to take one.
-    tools: ['check_availability', 'book_appointment', PENDING_CONFIRM, 'request_image', ESCALATE],
+    tools: [
+      'check_availability',
+      'book_appointment',
+      SERVICE_IMAGE,
+      PENDING_CONFIRM,
+      'request_image',
+      ESCALATE,
+    ],
     promptAddition:
       'Muestra los horarios disponibles. Pregunta qué día y servicio prefiere si no lo dijo.',
     transitions: {
@@ -149,7 +165,14 @@ export const appointmentsFlow: FlowDefinition = {
     // The deposit gate in toolExecutor stays the authority on whether a
     // book_appointment call actually goes through — this list is a separate
     // layer, not a replacement for it.
-    tools: ['check_availability', 'book_appointment', PENDING_CONFIRM, 'request_image', ESCALATE],
+    tools: [
+      'check_availability',
+      'book_appointment',
+      SERVICE_IMAGE,
+      PENDING_CONFIRM,
+      'request_image',
+      ESCALATE,
+    ],
     promptAddition: 'El paciente está eligiendo horario. Pide su nombre si no lo tiene.',
     transitions: {
       deposit_required: 'await_payment',
@@ -256,17 +279,18 @@ export const salesFlow: FlowDefinition = {
     },
   },
   greeting: {
-    tools: [ESCALATE],
+    tools: [SERVICE_IMAGE, ESCALATE],
     promptAddition: 'Saluda y detecta por qué producto o curso pregunta.',
     transitions: {
       asks_info: 'informing',
     },
   },
   informing: {
-    // NOTE: the instruction mentions sending images, and Emma has no way to
-    // send one — mediaForwarder runs customer → owner, never the reverse.
-    // Harmless while nothing injects this into the prompt.
-    tools: [ESCALATE],
+    // The instruction's promise of images is real now: send_service_image reads
+    // the photo the owner uploaded for the service and sends it to the customer.
+    // Only services marked [con foto] in the catalogue have one; the tool tells
+    // the model to describe the rest in words.
+    tools: [SERVICE_IMAGE, ESCALATE],
     promptAddition:
       'Informa sobre cursos usando la base de conocimiento. Envía imágenes si están disponibles.',
     transitions: {
@@ -275,9 +299,10 @@ export const salesFlow: FlowDefinition = {
     },
   },
   send_offer: {
-    // No sales-specific tool exists yet: the offer is rendered by the prompt
-    // from business settings, not by a tool call.
-    tools: [ESCALATE],
+    // No sales-specific tool exists yet: the offer itself is rendered by the
+    // prompt from business settings, not by a tool call. The photo is the one
+    // thing a tool can add here — showing the product beside the payment details.
+    tools: [SERVICE_IMAGE, ESCALATE],
     promptAddition: 'Envía los datos de pago: cuentas, montos, métodos.',
     transitions: {
       accepts_offer: 'await_payment',

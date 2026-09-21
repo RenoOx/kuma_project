@@ -4,7 +4,10 @@ import {
   getIntegrations,
   getSettings,
   updateBooking,
+  updateFlow,
   updateGeneral,
+  updateIdentity,
+  updateMessages,
   updatePayments,
   updateSchedule,
   updateServices,
@@ -12,7 +15,10 @@ import {
 } from '../api/settings.js'
 import type {
   BookingPatch,
+  FlowPatch,
   GeneralPatch,
+  IdentityPatch,
+  MessagesPatch,
   OperatingHours,
   PanelIntegrations,
   PanelService,
@@ -50,6 +56,9 @@ export type SettingsSave =
   | { section: 'booking'; patch: BookingPatch }
   | { section: 'services'; services: PanelService[] }
   | { section: 'payments'; patch: PaymentsPatch }
+  | { section: 'identity'; patch: IdentityPatch }
+  | { section: 'messages'; patch: MessagesPatch }
+  | { section: 'flow'; patch: FlowPatch }
 
 export function useSaveSettings() {
   const session = useSession()
@@ -62,6 +71,9 @@ export function useSaveSettings() {
       if (save.section === 'specialDays') return updateSpecialDays(session, save.specialDays)
       if (save.section === 'services') return updateServices(session, save.services)
       if (save.section === 'payments') return updatePayments(session, save.patch)
+      if (save.section === 'identity') return updateIdentity(session, save.patch)
+      if (save.section === 'messages') return updateMessages(session, save.patch)
+      if (save.section === 'flow') return updateFlow(session, save.patch)
       return updateBooking(session, save.patch)
     },
     onSuccess: (_data, save) => {

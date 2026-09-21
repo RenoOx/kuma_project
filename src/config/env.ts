@@ -44,6 +44,27 @@ const envSchema = z.object({
     (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
     z.string().min(1).optional(),
   ),
+  // S3 media storage (service images, payment proofs). All four optional for the
+  // same reason as the Google block: this enables one feature, so requiring them
+  // would stop `npm run dev` and the test suite on any machine without AWS
+  // credentials. isMediaConfigured() gates the feature at runtime instead, and
+  // the panel says storage is unconfigured rather than failing at boot.
+  AWS_ACCESS_KEY_ID: z.preprocess(
+    (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
+  AWS_SECRET_ACCESS_KEY: z.preprocess(
+    (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
+  AWS_S3_BUCKET_NAME: z.preprocess(
+    (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
+  AWS_S3_REGION: z.preprocess(
+    (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 })
 
 export type Env = z.infer<typeof envSchema>

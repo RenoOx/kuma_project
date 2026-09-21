@@ -20,6 +20,8 @@ export const logger = pino({
       'ANTHROPIC_API_KEY',
       'DATABASE_URL',
       'REDIS_URL',
+      'AWS_SECRET_ACCESS_KEY',
+      '*.secretAccessKey',
     ],
     censor: '[REDACTED]',
   },

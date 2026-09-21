@@ -4,16 +4,21 @@ import type { Business, KbCategory, KnowledgeBaseEntry, Message } from '@/db/sch
 import type { PendingAppointmentContext } from '@/modules/appointment/appointment.service.js'
 import type {
   AppointmentMode,
+  AssistantGender,
+  AssistantSettings,
   BusinessSettings,
   DayKey,
   Niche,
 } from '@/modules/business/business.settings.js'
 import {
   activeServices,
+  dayKeyForJsDow,
   formatPaymentMethods,
   formatServicePrice,
+  resolveDayHours,
 } from '@/modules/business/business.settings.js'
 import { KB_CATEGORY_LABELS } from '@/modules/knowledgeBase/knowledgeBase.types.js'
+import { renderTemplate } from '@/shared/templates.js'
 
 function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
   const out: Record<string, KnowledgeBaseEntry[]> = {}
@@ -410,7 +415,12 @@ function renderServices(services: BusinessSettings['services']): string {
     .map((s) => {
       const duration = s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
       const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
-      return `- ${s.name}${duration} — ${formatServicePrice(s)}${reference}`
+      // The marker is the model's only way to know which services it may call
+      // send_service_image for. The key itself never appears here: the tool
+      // resolves a name back to storage, and a key in the prompt would be both
+      // useless to the model and one more thing that could leak.
+      const photo = s.imageKey ? ' [con foto]' : ''
+      return `- ${s.name}${duration} — ${formatServicePrice(s)}${photo}${reference}`
     })
     .join('\n')
 }
@@ -437,11 +447,31 @@ function renderSpecialDays(specialDays: BusinessSettings['specialDays'], todayIS
   ].join('\n')
 }
 
+// Emitted only when at least one active service actually has a photo. A rule
+// about sending pictures costs tokens on every turn of every conversation, and in
+// a business with no photos at all it would only invite the model to promise one.
+//
+// Lives in the static body like the deposit block: which services have a photo is
+// a per-business fact that does not change between messages, so it stays inside
+// the cacheable prefix and only invalidates when the owner uploads or deletes one.
+function renderServicePhotoBlock(settings: BusinessSettings): string[] {
+  if (!activeServices(settings).some((s) => s.imageKey)) return []
+  return [
+    '',
+    '## Fotos de servicios',
+    'Los servicios marcados [con foto] tienen una imagen cargada. Para mostrarla llamá send_service_image con el nombre exacto del servicio.',
+    'Usala cuando el cliente pide ver fotos, ejemplos o resultados, o cuando estás recomendando ese servicio y verlo lo ayuda a decidir.',
+    'La foto se envía sola, como mensaje aparte. NUNCA digas "te adjunto la foto", "te la mando" ni "mirá la imagen": escribí tu respuesta normal y la imagen llega por su cuenta.',
+    'Una sola vez por servicio en la conversación. Los servicios sin esa marca NO tienen foto: describilos con palabras y no ofrezcas mandar nada.',
+  ]
+}
+
 function renderConfiguredBlock(settings: BusinessSettings, todayISO: string): string {
   return [
     '# Configuración operativa del negocio',
     '## Servicios disponibles',
     renderServices(activeServices(settings)),
+    ...renderServicePhotoBlock(settings),
     '',
     '## Horarios',
     renderOperatingHours(settings.operatingHours),
@@ -885,6 +915,177 @@ const NOT_CONFIGURED_BLOCK = [
   'Única diferencia: si el cliente quiere agendar una cita, escalá (book_appointment va a fallar por falta de configuración).',
 ].join('\n')
 
+// ── Configured assistant identity ────────────────────────────────────────────
+
+// How Emma refers to herself. Worth spelling out rather than leaving to the name:
+// a model given "Eres Carlos" still slips into "estoy lista para ayudarte",
+// because the training data for a WhatsApp assistant in Spanish leans feminine.
+function genderLine(gender: AssistantGender): string {
+  if (gender === 'masculino')
+    return 'Hablás de vos mismo en masculino ("estoy listo", "encantado").'
+  if (gender === 'neutro') {
+    return 'Hablás de vos en género neutro: evitá adjetivos marcados ("con gusto te ayudo" en vez de "estoy listo/lista").'
+  }
+  return 'Hablás de vos misma en femenino ("estoy lista", "encantada").'
+}
+
+// Contact details that do not fit the address or the Maps link: a second number,
+// an Instagram handle, a landmark. Shared on request, never volunteered.
+function renderContactBlock(assistant: AssistantSettings | null): string[] {
+  const contact = assistant?.contactInfo
+  if (!contact) return []
+  return [
+    '',
+    '## Datos de contacto',
+    contact,
+    'Compartilos si el cliente los pide. No los ofrezcas por tu cuenta ni los repitas en cada respuesta.',
+  ]
+}
+
+/**
+ * The tone the owner chose, placed AFTER the niche voice so it wins.
+ *
+ * Both layers are real and they answer different questions. The niche decides the
+ * vocabulary, the emoji set and the clinical rules — a dental clinic still says
+ * "evaluación" and still refuses to diagnose. This decides how the customer is
+ * addressed. Which is why a clinic can ask for a formal voice without losing
+ * anything that makes it a clinic.
+ */
+function assistantToneBlock(assistant: AssistantSettings | null): string[] {
+  if (!assistant) return []
+
+  const tone =
+    assistant.tone === 'formal'
+      ? 'Tratá al cliente de USTED. Sin modismos, sin emojis decorativos — como máximo uno funcional. Cordial y directo, nunca frío ni acartonado.'
+      : assistant.tone === 'amigable'
+        ? 'Tuteá, cercano y relajado, con un emoji cuando aporta de verdad. Cercano no es descuidado: nada de escribir mal ni de exceso de signos.'
+        : 'Tuteá, cálido pero profesional: cercano sin perder criterio.'
+
+  return [
+    '',
+    '# Trato configurado por el negocio — MANDA SOBRE EL BLOQUE DE VOZ',
+    tone,
+    'Si el bloque "Voz de este negocio" de arriba contradice esto en el trato, gana esta sección. Lo que ese bloque dice del vocabulario del rubro y de sus reglas clínicas sigue valiendo igual.',
+  ]
+}
+
+/**
+ * Messages the owner wrote that the MODEL rewrites rather than sends.
+ *
+ * The farewell and the "did not understand" line are tone and content, not fixed
+ * strings: both land mid-conversation, where a verbatim template would read as a
+ * canned response dropped into a thread. The literal ones — greeting, handoff,
+ * out of hours, the three payment states — are sent by the code, not from here.
+ */
+function configuredGuidanceBlock(settings: BusinessSettings | null): string[] {
+  const messages = settings?.messages
+  const lines: string[] = []
+
+  if (messages?.farewell) {
+    lines.push(
+      `- Al cerrar una conversación resuelta, despedite sobre esta idea: "${messages.farewell}"`,
+    )
+  }
+  if (messages?.fallback) {
+    lines.push(
+      `- Cuando no entiendas qué está pidiendo el cliente, pedí que reformule sobre esta idea: "${messages.fallback}"`,
+    )
+  }
+  if (lines.length === 0) return []
+
+  return [
+    '',
+    '# Mensajes guía del negocio',
+    'Son guías de contenido y de tono, NO texto para copiar literal: adaptalos al hilo de la conversación.',
+    ...lines,
+  ]
+}
+
+/**
+ * The owner's own standing instructions.
+ *
+ * Last of the instruction blocks and explicitly highest priority, because that is
+ * what the field is for: "no des precios por WhatsApp", "mencioná siempre la
+ * promo del mes". The exceptions are named rather than implied — an owner must not
+ * be able to instruct Emma into inventing a price, confirming a booking that does
+ * not exist, or treating an unverified payment as received.
+ */
+function customInstructionsBlock(settings: BusinessSettings | null): string[] {
+  const custom = settings?.assistant.customInstructions
+  if (!custom) return []
+  return [
+    '',
+    '# Instrucciones del dueño del negocio — MÁXIMA PRIORIDAD',
+    'Las escribió el dueño de este negocio para vos. Ganan sobre cualquier otra instrucción de este prompt, con tres excepciones que NO se negocian: las reglas de formato de WhatsApp, no inventar precios, horarios ni disponibilidad que no estén en la configuración de arriba, y no dar por confirmada una cita ni por recibido un pago que el sistema no confirmó.',
+    custom,
+  ]
+}
+
+// The weekday of a business-local date. Built as UTC midnight on purpose: the
+// string is already that business's own calendar date, so getUTCDay reads it back
+// without the host's timezone shifting it a day either way.
+function weekdayOf(dateISO: string): number {
+  return new Date(`${dateISO}T00:00:00Z`).getUTCDay()
+}
+
+/**
+ * What Emma may and may not do while the business is closed.
+ *
+ * VARIABLE TAIL, never the static body: it turns on and off with the wall clock,
+ * so caching it would invalidate the whole cacheable prefix every time the clock
+ * crossed a boundary.
+ *
+ * Only when the owner switched it on. Off is the default and is what every
+ * business has today — Emma answers the same at 3am as at noon — and that
+ * behaviour must not change by surprise on a deploy.
+ *
+ * A midday break does NOT count as closed. The shop is shut for lunch, not for
+ * the day, and treating it as out-of-hours would have Emma refusing to book every
+ * afternoon; checkAvailability already keeps slots out of the break itself.
+ *
+ * The message is guidance rather than a verbatim send — unlike the paused and
+ * escalated replies, there is no code path here that answers without the model.
+ * The spec is explicit that Emma keeps talking out of hours, so she composes this
+ * turn like any other and this is what steers it.
+ */
+function outOfHoursBlock(
+  settings: BusinessSettings | null,
+  todayISO: string,
+  nowHHMM: string,
+): string[] {
+  if (!settings?.outOfHoursEnabled) return []
+  // No clock, no claim: a timezone the host cannot format is not grounds for
+  // telling a customer the shop is shut.
+  if (nowHHMM === '') return []
+
+  const dayKey = dayKeyForJsDow(weekdayOf(todayISO))
+  if (dayKey === null) return []
+
+  const hours = resolveDayHours(settings, todayISO, dayKey)
+  const open = hours !== null && nowHHMM >= hours.open && nowHHMM < hours.close
+  if (open) return []
+
+  return [
+    '',
+    '# FUERA DE HORARIO — el negocio está cerrado ahora mismo',
+    hours === null
+      ? 'Hoy el negocio no atiende.'
+      : `El horario de hoy es de ${hours.open} a ${hours.close}, y son las ${nowHHMM}.`,
+    'NO cortes la conversación ni digas que no podés atender: seguí respondiendo y tomale los datos.',
+    'Lo que NO podés hacer ahora: agendar una cita, confirmar un horario ni dar por recibido un pago. Si el cliente quiere algo de eso, pedile los datos que falten (servicio, día y hora que prefiere, nombre) y decile que le confirman en cuanto abran.',
+    ...(settings.outOfHoursBehavior === 'greet_and_capture'
+      ? [
+          'Este negocio pidió que fuera de horario te limites a saludar y tomar los datos: no entres en detalle de precios ni de servicios, y no hagas recomendaciones.',
+        ]
+      : [
+          'Este negocio pidió que fuera de horario sigas conversando con normalidad: podés informar precios, servicios y horarios igual que siempre.',
+        ]),
+    ...(settings.messages.outOfHours
+      ? [`Avisale que están cerrados sobre esta idea: "${settings.messages.outOfHours}"`]
+      : []),
+  ]
+}
+
 // ── Prompt assembly ──────────────────────────────────────────────────────────
 //
 // ORDER MATTERS FOR COST. Everything that is identical across requests goes
@@ -907,9 +1108,20 @@ function buildStaticBody(
   const ex = NICHE_EXAMPLES[niche]
   const nicheBlocks = buildNicheBlocks(niche, business.name)
 
+  // Per-business and constant between messages, so it belongs up here inside the
+  // cacheable prefix. It only invalidates when the owner saves the Asistente tab,
+  // which is the same kind of invalidation as changing a price.
+  const assistant = settings?.assistant ?? null
+
   return [
     '# Identidad',
-    `Eres el asistente de ${business.name}. Respondes por WhatsApp.`,
+    assistant
+      ? `Eres ${assistant.name}, asistente de ${business.name}. Respondes por WhatsApp.`
+      : `Eres el asistente de ${business.name}. Respondes por WhatsApp.`,
+    ...(assistant ? [genderLine(assistant.gender)] : []),
+    ...(assistant?.businessDescription
+      ? [`Sobre el negocio: ${assistant.businessDescription}`]
+      : []),
     ...(mode === 'hybrid' ? ['Modalidad: atención presencial y con cita previa'] : []),
     '',
     '# Tono',
@@ -1047,6 +1259,7 @@ function buildStaticBody(
     // the very end of this body — see the comment at the bottom of the array.
     '# Ubicación',
     renderLocationBlock(business.address, business.googleMapsUrl),
+    ...renderContactBlock(assistant),
     '',
     settings ? renderConfiguredBlock(settings, todayISO) : NOT_CONFIGURED_BLOCK,
     '',
@@ -1145,6 +1358,10 @@ function buildStaticBody(
     // Always present now: every niche has a voice, and a business with no
     // settings falls back to `general` rather than to no voice at all.
     nicheBlocks,
+    // Right after the niche voice, because it overrides it on how the customer is
+    // addressed — same ordering argument as REQUIRES_APPROVAL_BLOCK.
+    ...assistantToneBlock(assistant),
+    ...configuredGuidanceBlock(settings),
     '',
     ...AVAILABILITY_FRESHNESS_BLOCK,
     '',
@@ -1152,9 +1369,12 @@ function buildStaticBody(
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
     // comment. An unconfigured business (settings null) keeps `direct`.
     ...(settings?.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : []),
-    // Last of the instruction blocks: it overrides the niche block's payment
-    // rules, which sit above and used to contradict it outright.
+    // Last of the built-in instruction blocks: it overrides the niche block's
+    // payment rules, which sit above and used to contradict it outright.
     ...(settings ? depositOrderBlock(settings) : []),
+    // And after even that: the owner's own instructions outrank everything this
+    // file ships, within the limits the block itself names.
+    ...customInstructionsBlock(settings),
     '',
     // KNOWLEDGE BASE GOES LAST — DO NOT MOVE IT BACK UP.
     //
@@ -1206,6 +1426,7 @@ function renderPendingBlock(pending: PendingAppointmentContext): string[] {
 
 function buildVariableTail(
   business: Business,
+  settings: BusinessSettings | null,
   todayISO: string,
   dayOfWeek: string,
   nowHHMM: string,
@@ -1222,6 +1443,7 @@ function buildVariableTail(
   const lines = [
     '# Contexto actual',
     `Fecha y hora actual: ${dayOfWeek} ${todayISO} ${nowHHMM} (${business.timezone}). Usala como base para resolver "hoy", "mañana", "el sábado", etc., y para saber si el negocio está abierto en este momento comparando la hora contra los horarios de arriba.`,
+    ...outOfHoursBlock(settings, todayISO, nowHHMM),
     '',
     ...(pending ? renderPendingBlock(pending) : []),
     '# Saludo',
@@ -1272,12 +1494,20 @@ export function buildSystemPrompt(
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
   const nowHHMM = timeInTimezone(business.timezone)
-  const greeting = pickGreeting(business.name)
+  // The owner's greeting when they wrote one, the rotating canned set otherwise.
+  // A configured greeting is fixed per business, which makes this half of the tail
+  // MORE cacheable than it was — but it stays here rather than moving up, because
+  // an unconfigured business still gets a random one and the block has to be able
+  // to hold either.
+  const configuredGreeting = settings?.messages.greeting
+  const greeting = configuredGreeting
+    ? renderTemplate(configuredGreeting, { nombre_negocio: business.name })
+    : pickGreeting(business.name)
   const cta = decideCallToAction(history, settings?.appointmentMode ?? 'appointments_only')
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today),
     '',
-    ...buildVariableTail(business, today, dayOfWeek, nowHHMM, greeting, cta, pending),
+    ...buildVariableTail(business, settings, today, dayOfWeek, nowHHMM, greeting, cta, pending),
   ].join('\n')
 }

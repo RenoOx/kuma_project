@@ -3,14 +3,18 @@ import { db } from '@/db/client.js'
 import type { Business } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
-import { AppError, ValidationError } from '@/shared/errors.js'
+import { AppError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type {
   BookingPatch,
   BotPatch,
+  FlowPatch,
   GeneralPatch,
+  IdentityPatch,
+  MessagesPatch,
   PaymentsPatch,
   SchedulePatch,
   ServicesPatch,
@@ -18,6 +22,7 @@ import type {
 } from './settings.merge.js'
 import {
   botPausedFromPatch,
+  identitySettingsPatch,
   mergeSettingsSection,
   type PanelSettingsView,
   readSettings,
@@ -128,6 +133,121 @@ export function updatePayments(
   patch: PaymentsPatch,
 ): Promise<Result<BusinessSettings>> {
   return persistSettings(businessId, patch)
+}
+
+export function updateIdentity(
+  businessId: string,
+  patch: IdentityPatch,
+): Promise<Result<BusinessSettings>> {
+  // Expanded before it reaches the merge: the form sends one "Función" and the
+  // stored shape has two fields for it.
+  return persistSettings(businessId, identitySettingsPatch(patch))
+}
+
+export function updateMessages(
+  businessId: string,
+  patch: MessagesPatch,
+): Promise<Result<BusinessSettings>> {
+  return persistSettings(businessId, patch)
+}
+
+export function updateFlow(
+  businessId: string,
+  patch: FlowPatch,
+): Promise<Result<BusinessSettings>> {
+  return persistSettings(businessId, patch)
+}
+
+export interface ServiceImageUpdate {
+  settings: BusinessSettings
+  /**
+   * The key this service pointed at before, if any. The caller deletes it from
+   * the bucket AFTER the transaction commits — dropping the object first would
+   * leave a service pointing at nothing if the write then failed.
+   */
+  previousKey: string | null
+}
+
+/**
+ * Points one service at a stored photo, or clears it with `imageKey: null`.
+ *
+ * Addressed by service id rather than by array position, which is the whole
+ * reason services carry an id: the owner may have reordered or renamed the
+ * catalogue between picking a file and the upload finishing.
+ *
+ * Reads and writes in one transaction, like every other section, so a concurrent
+ * save of the services list cannot land in between and lose the key.
+ */
+export async function updateServiceImage(
+  businessId: string,
+  serviceId: string,
+  imageKey: string | null,
+): Promise<Result<ServiceImageUpdate>> {
+  try {
+    return await db.transaction(async (tx) => {
+      const business = await businessRepo.findById(businessId, tx)
+      if (!business) {
+        return err(
+          new ValidationError({
+            code: 'business_not_found',
+            message: `business ${businessId} not found while saving a service image`,
+            userMessage: 'No encontramos el negocio.',
+            logContext: { businessId },
+          }),
+        )
+      }
+
+      const parsed = businessSettingsSchema.safeParse(business.settings)
+      if (!parsed.success) {
+        return err(
+          new ValidationError({
+            code: 'invalid_settings',
+            message: 'stored settings do not validate, refusing to attach an image',
+            userMessage: 'Completá la configuración del negocio antes de subir fotos.',
+            logContext: { businessId, serviceId },
+          }),
+        )
+      }
+
+      const target = parsed.data.services.find((service) => service.id === serviceId)
+      if (!target) {
+        return err(
+          new NotFoundError({
+            resource: 'service',
+            userMessage: 'No encontramos ese servicio.',
+            logContext: { businessId, serviceId },
+          }),
+        )
+      }
+
+      const previousKey = target.imageKey ?? null
+      const services = parsed.data.services.map((service) =>
+        service.id === serviceId ? { ...service, imageKey } : service,
+      )
+
+      const merged = mergeSettingsSection(businessId, business.settings, { services })
+      if (!merged.ok) return merged
+
+      await businessRepo.update(
+        businessId,
+        { settings: merged.data as unknown as Record<string, unknown> },
+        tx,
+      )
+
+      logger.info({ businessId, serviceId, cleared: imageKey === null }, 'service image updated')
+      return ok({ settings: merged.data, previousKey })
+    })
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'settings_update_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos guardar la foto del servicio.',
+        logContext: { businessId, serviceId },
+        cause,
+      }),
+    )
+  }
 }
 
 /**

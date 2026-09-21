@@ -12,6 +12,7 @@ import {
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Switch } from '../ui/switch.js'
+import { ServicePhotoField } from './ServicePhotoField.js'
 
 const EMPTY: PanelService = {
   name: '',
@@ -175,6 +176,10 @@ export function ServiceForm({
               </span>
             </div>
           )}
+
+          {/* Last, and with its own persistence: everything above is a draft
+              until Guardar, while the photo is written the moment it is picked. */}
+          <ServicePhotoField serviceId={base.id} />
 
           {error && <p className="text-destructive text-sm">{error}</p>}
         </div>

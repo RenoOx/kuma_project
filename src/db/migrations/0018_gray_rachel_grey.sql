@@ -1,0 +1,1 @@
+ALTER TABLE "payment_verifications" ADD COLUMN "proof_key" text;

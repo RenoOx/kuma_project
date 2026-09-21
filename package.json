@@ -36,10 +36,13 @@
     "smoke:owner": "tsx scripts/smoke-owner.ts",
     "smoke:notifications": "tsx scripts/smoke-notifications.ts",
     "create:business": "tsx scripts/create-test-business.ts",
+    "backfill:service-ids": "tsx scripts/backfill-service-ids.ts",
     "smoke:reminders": "tsx scripts/smoke-reminders.ts",
     "admin": "tsx scripts/admin.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1136.0",
+    "@aws-sdk/s3-request-presigner": "^3.1136.0",
     "@fullcalendar/core": "^6.1.21",
     "@fullcalendar/daygrid": "^6.1.21",
     "@fullcalendar/interaction": "^6.1.21",
