@@ -196,8 +196,13 @@ const UNKNOWN_SERVICE_INSTRUCTION =
 const NO_SERVICE_MEDIA_INSTRUCTION =
   'Ese servicio no tiene material cargado, así que NO se envió nada. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste un archivo ni que se lo vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
 
+// Categorical, and it has to be: the old version banned three phrases in the
+// first person ("te adjunto", "te lo mando", "mirá el archivo") and the model
+// walked around the list — it wrote "Recibiste el material con más detalles
+// sobre el curso", glued to the description. A ban written as examples is a ban
+// on those examples.
 const SERVICE_MEDIA_SENT_INSTRUCTION =
-  'El material se está enviando solo por WhatsApp. Escribí tu respuesta normal sobre el servicio. NO digas "te adjunto", "te lo mando" ni "mirá el archivo": para el cliente simplemente llega.'
+  'El material se está enviando solo por WhatsApp, como mensajes aparte. Escribí tu respuesta normal sobre el servicio y NADA MÁS: prohibido mencionar el archivo, en cualquier tiempo verbal y de cualquier forma — ni que lo mandás, ni que lo mandaste, ni que lo recibió, ni que lo mire, ni que ahí tiene más detalles. El cliente lo ve llegar solo; contárselo suena a error. ❌ "Recibiste el material con más detalles" ❌ "Te adjunto la info" ❌ "Ahí te mandé el folleto". ✅ escribí sobre el servicio como si el archivo no existiera.'
 
 // Says it out loud, and that is the change: the old version suggested referring
 // to the file ("referite a lo que ya tiene más arriba"), the model skipped it,

@@ -451,7 +451,7 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 function renderServices(
   services: BusinessSettings['services'],
   withMedia: ReadonlySet<string>,
-  showDuration: boolean,
+  books: boolean,
 ): string {
   if (services.length === 0) return '(El negocio no tiene servicios activos en este momento.)'
   return services
@@ -459,9 +459,16 @@ function renderServices(
       // Omitted entirely for a business that books nothing: a duration next to a
       // course is a number the model will quote at a customer as if it meant
       // something.
-      const duration =
-        !showDuration || s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
-      const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
+      const duration = !books || s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
+      // Same for the evaluation flag and the reference link that hangs off it.
+      // "Requiere evaluación previa" means "we price it after seeing the case,
+      // come in for a consultation" — and the consultation is an appointment
+      // this business does not take. The panel stopped offering the switch, but
+      // a service that carried it before the business switched to selling would
+      // otherwise keep printing a line whose rules are no longer in the prompt,
+      // leaving the model to improvise a price policy.
+      const priced = books ? s : { ...s, requiresEvaluation: false }
+      const reference = books && s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
       // Its own indented line rather than appended to the first one: the price
       // and the marker have to stay adjacent to the name for the rules below to
       // be readable, and a description is a sentence, not a field.
@@ -471,7 +478,7 @@ function renderServices(
       // name back to storage, and a key in the prompt would be both useless to
       // the model and one more thing that could leak.
       const media = s.id && withMedia.has(s.id) ? ' [con material]' : ''
-      return `- ${s.name}${duration} — ${formatServicePrice(s)}${media}${description}${reference}`
+      return `- ${s.name}${duration} — ${formatServicePrice(priced)}${media}${description}${reference}`
     })
     .join('\n')
 }
@@ -517,7 +524,13 @@ function renderServiceMediaBlock(
     '"[con material]" es una marca para vos, no parte del nombre. NUNCA la escribas en un mensaje al cliente.',
     'NO es opcional. Siempre que le des el DETALLE de un servicio marcado [con material] —el cliente preguntó por ese servicio, pidió más información, pidió ver fotos o ejemplos, o vos se lo estás recomendando— llamá la herramienta en ese mismo turno. Contarlo con palabras y no mandar el archivo que el negocio cargó es un error.',
     'Cuando solo estás LISTANDO el catálogo (varios servicios con nombre y precio) NO la llames: esperá a que el cliente elija uno y ahí sí, con el detalle, va el material.',
-    'El material se envía solo, como mensajes aparte. NUNCA digas "te adjunto", "te lo mando" ni "mirá el archivo": escribí tu respuesta normal y llega por su cuenta.',
+    // Categorical, not a list of examples. Written as three first-person phrases
+    // it was a ban on those three: the model wrote "Recibiste el material con más
+    // detalles sobre el curso" — second person, past tense — and walked right
+    // around it. Same wording as SERVICE_MEDIA_SENT_INSTRUCTION on purpose; this
+    // one reaches every turn and that one only after the tool ran, so a weak copy
+    // here leaves the hole open.
+    'El material se envía solo, como mensajes aparte, y el cliente lo ve llegar. NUNCA lo menciones: en ningún tiempo verbal y de ninguna forma — ni que lo mandás, ni que lo mandaste, ni que lo recibió, ni que lo mire, ni que ahí tiene más detalles. ❌ "Recibiste el material con más detalles" ❌ "te adjunto" ❌ "ahí te mandé el folleto". ✅ escribí sobre el servicio como si el archivo no existiera.',
     'Los servicios sin esa marca NO tienen material: describilos con palabras y no ofrezcas mandar nada.',
   ]
 }
