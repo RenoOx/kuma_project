@@ -34,7 +34,24 @@ export const serviceMedia = pgTable(
     businessId: text('business_id')
       .notNull()
       .references(() => businesses.id, { onDelete: 'cascade' }),
-    /** The nanoid of a service inside `businesses.settings.services`. No FK — see above. */
+    /**
+     * What owns this file: a service, or a step of the conversation flow.
+     *
+     * Defaulted to 'service' so every row that predates conversation-step media
+     * reads correctly without a backfill. It is not cosmetic — `removeOrphans`
+     * compares rows against the services list and deletes whatever is not named
+     * there, so without this column the first save of the services list would
+     * wipe every file belonging to a step.
+     */
+    ownerKind: text('owner_kind').notNull().default('service'),
+    /**
+     * The nanoid of whatever owns the file: a service inside
+     * `businesses.settings.services`, or a node id inside
+     * `settings.conversationFlow`. No FK — see above; neither one is a row.
+     *
+     * The column keeps its original name because renaming it is a destructive
+     * migration for a distinction the `owner_kind` column already carries.
+     */
     serviceId: text('service_id').notNull(),
     /** Full path inside the private bucket. Built by media.keys, never by a request. */
     s3Key: text('s3_key').notNull(),
@@ -50,8 +67,13 @@ export const serviceMedia = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Every read is "the media of this service, in this business, in order".
-    index('service_media_business_service_idx').on(t.businessId, t.serviceId, t.displayOrder),
+    // Every read is "the media of this owner, in this business, in order".
+    index('service_media_business_service_idx').on(
+      t.businessId,
+      t.ownerKind,
+      t.serviceId,
+      t.displayOrder,
+    ),
     // Used by the orphan sweep, which asks for every row of a business and
     // compares it against the services that still exist.
     index('service_media_business_id_idx').on(t.businessId),

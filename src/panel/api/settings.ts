@@ -96,51 +96,57 @@ export function updateServices(
   return apiSend<BusinessSettingsView>(session, 'PATCH', '/settings/services', { services })
 }
 
-// ── Service media ────────────────────────────────────────────────────────────
+// ── Media ────────────────────────────────────────────────────────────────────
 //
-// Addressed by service id, and separate from the catalogue PATCH above: the file
-// is multipart, and an upload that failed must not take the owner's text edits
-// down with it.
+// Two owners, one shape. A file hangs either off a service of the catalogue or
+// off a step of the conversation, and everything after that — upload, delete,
+// order — is identical, so only the path differs.
+//
+// Separate from the section PATCHes above: the file is multipart, and an upload
+// that failed must not take the owner's text edits down with it.
 
-export function getServiceMedia(
-  session: PanelSession,
-  serviceId: string,
-): Promise<ServiceMediaView[]> {
-  return apiGet<ServiceMediaView[]>(session, `/settings/services/${serviceId}/media`)
+/** Which list a file belongs to. The server checks the id against that list. */
+export interface MediaOwner {
+  kind: 'service' | 'node'
+  id: string
 }
 
-export function uploadServiceMedia(
+function mediaBase(owner: MediaOwner): string {
+  return owner.kind === 'node'
+    ? `/settings/conversation/nodes/${owner.id}/media`
+    : `/settings/services/${owner.id}/media`
+}
+
+export function getOwnerMedia(
   session: PanelSession,
-  serviceId: string,
+  owner: MediaOwner,
+): Promise<ServiceMediaView[]> {
+  return apiGet<ServiceMediaView[]>(session, mediaBase(owner))
+}
+
+export function uploadOwnerMedia(
+  session: PanelSession,
+  owner: MediaOwner,
   file: File,
 ): Promise<ServiceMediaView> {
-  return apiUpload<ServiceMediaView>(session, `/settings/services/${serviceId}/media`, file)
+  return apiUpload<ServiceMediaView>(session, mediaBase(owner), file)
 }
 
-export function deleteServiceMedia(
+export function deleteOwnerMedia(
   session: PanelSession,
-  serviceId: string,
+  owner: MediaOwner,
   mediaId: string,
 ): Promise<{ id: string }> {
-  return apiSend<{ id: string }>(
-    session,
-    'DELETE',
-    `/settings/services/${serviceId}/media/${mediaId}`,
-  )
+  return apiSend<{ id: string }>(session, 'DELETE', `${mediaBase(owner)}/${mediaId}`)
 }
 
 /** The arrangement, sent whole — see the server's reorder guard. */
-export function reorderServiceMedia(
+export function reorderOwnerMedia(
   session: PanelSession,
-  serviceId: string,
+  owner: MediaOwner,
   ids: string[],
 ): Promise<ServiceMediaView[]> {
-  return apiSend<ServiceMediaView[]>(
-    session,
-    'PATCH',
-    `/settings/services/${serviceId}/media/order`,
-    { ids },
-  )
+  return apiSend<ServiceMediaView[]>(session, 'PATCH', `${mediaBase(owner)}/order`, { ids })
 }
 
 export function updatePayments(

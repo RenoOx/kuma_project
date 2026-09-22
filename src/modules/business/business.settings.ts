@@ -192,8 +192,35 @@ const conversationFlowSchema = z.object({
     .record(
       z.string().min(1).max(64),
       z.object({
+        label: z.string().max(64).optional(),
         edgeCases: z.array(z.string().min(1).max(500)).max(12).optional(),
         example: z.string().max(1000).optional(),
+        // Capped rather than open-ended: this lands at the very end of the
+        // system prompt, where an instruction weighs most, and a page of text
+        // there stops being a note and starts competing with the general rules
+        // in the body.
+        extraInstructions: z.string().max(1500).optional(),
+        // The routes the owner drew out of this step. Four at most, because
+        // every one of them is a line in the prompt AND an option the model has
+        // to weigh on every turn — past a handful it stops choosing and starts
+        // guessing. Whether these can actually RUN is validateFlow's call, not
+        // Zod's: it depends on which steps the composition contains.
+        branches: z
+          .array(
+            z.object({
+              id: z
+                .string()
+                .min(1)
+                .max(64)
+                // The model copies this out of the prompt and back into a tool
+                // call, so it is restricted to what survives that round trip.
+                .regex(/^[a-z0-9_-]+$/, 'solo minúsculas, números, guion y guion bajo'),
+              when: z.string().min(1).max(300),
+              to: z.string().min(1).max(64),
+            }),
+          )
+          .max(4)
+          .optional(),
       }),
     )
     .default({}),

@@ -14,7 +14,12 @@ import { Skeleton } from '../ui/skeleton.js'
  * number off WhatsApp, and repeated pairing attempts are what get a number
  * rate-limited. Both stay with Vamvu Labs, in the admin surface.
  */
-export function IntegrationsPanel(): React.JSX.Element {
+export function IntegrationsPanel({
+  showCalendar = true,
+}: {
+  /** False for a business with nothing to book: there are no citas to sync. */
+  showCalendar?: boolean
+}): React.JSX.Element {
   const { data, isLoading } = useIntegrations()
 
   if (isLoading || !data) {
@@ -53,17 +58,19 @@ export function IntegrationsPanel(): React.JSX.Element {
                 : 'Sin conexión'
           }
         />
-        <Row
-          icon={<CalendarCheck size={18} aria-hidden />}
-          title="Google Calendar"
-          detail={
-            data.googleCalendar.connected
-              ? 'Las citas se copian a tu calendario'
-              : 'Las citas solo viven en el panel'
-          }
-          connected={data.googleCalendar.connected}
-          note={null}
-        />
+        {showCalendar && (
+          <Row
+            icon={<CalendarCheck size={18} aria-hidden />}
+            title="Google Calendar"
+            detail={
+              data.googleCalendar.connected
+                ? 'Las citas se copian a tu calendario'
+                : 'Las citas solo viven en el panel'
+            }
+            connected={data.googleCalendar.connected}
+            note={null}
+          />
+        )}
       </CardContent>
     </Card>
   )

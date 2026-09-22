@@ -5,6 +5,7 @@ import { IntegrationsPanel } from '../components/config/IntegrationsPanel.js'
 import { ScheduleSettings } from '../components/config/ScheduleSettings.js'
 import { SpecialDays } from '../components/config/SpecialDays.js'
 import { Skeleton } from '../components/ui/skeleton.js'
+import { useMe } from '../hooks/useMeta.js'
 import { useSettings } from '../hooks/useSettings.js'
 
 /**
@@ -21,6 +22,12 @@ import { useSettings } from '../hooks/useSettings.js'
  */
 export function ConfigPage(): React.JSX.Element {
   const { data, isLoading, isError } = useSettings()
+  const me = useMe()
+  // Hours and special days stay for everyone: they decide when Emma answers, not
+  // when somebody is seen. What goes is the booking machinery — slot length,
+  // minimum notice, reminders, booking mode — which a business with nothing to
+  // book can only misconfigure.
+  const books = me.data?.booksAppointments ?? true
 
   if (isLoading) return <ConfigSkeleton />
 
@@ -46,7 +53,7 @@ export function ConfigPage(): React.JSX.Element {
           <>
             <ScheduleSettings hours={data.settings.operatingHours} />
             <SpecialDays days={data.settings.specialDays ?? []} />
-            <BookingSettings settings={data.settings} />
+            {books && <BookingSettings settings={data.settings} />}
           </>
         ) : (
           <Notice
@@ -59,7 +66,7 @@ export function ConfigPage(): React.JSX.Element {
           />
         )}
 
-        <IntegrationsPanel />
+        <IntegrationsPanel showCalendar={books} />
       </div>
     </div>
   )

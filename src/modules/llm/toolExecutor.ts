@@ -8,6 +8,7 @@ import {
   findKnownService,
   formatPaymentMethods,
 } from '@/modules/business/business.settings.js'
+import { ROUTE_TRIGGER } from '@/modules/conversation/nodeCatalog.js'
 import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
@@ -20,6 +21,16 @@ export interface ToolContext {
   businessId: string
   conversationId: string
   customerId: string
+  /**
+   * The routes the CURRENT step declares.
+   *
+   * Passed in rather than re-resolved here: llm.service compiles the flow once
+   * per turn, and a second resolution could disagree with the first if the
+   * owner saved mid-turn. It is also the only thing that makes advance_flow
+   * safe — without it the executor would have to take the model's word for
+   * which routes exist.
+   */
+  branches?: ReadonlyArray<{ id: string; when: string; to: string }>
 }
 
 export interface ToolAttachment {
@@ -75,6 +86,10 @@ const saveCustomerDataArgs = z.object({
 const confirmSummaryArgs = z.object({
   confirmed: z.boolean(),
 })
+
+// The id is echoed back from the prompt, so it is bounded but not enumerated:
+// which ids are valid depends on the step, and only context.branches knows.
+const advanceFlowArgs = z.object({ branch: z.string().min(1).max(64) })
 
 const correctFieldArgs = z.object({
   field: z.string().min(1),
@@ -671,7 +686,11 @@ export async function executeTool(
         }
       }
 
-      const media = await serviceMediaService.listForService(context.businessId, service.id)
+      const media = await serviceMediaService.listForOwner(
+        context.businessId,
+        'service',
+        service.id,
+      )
       if (media.length === 0) {
         return {
           result: JSON.stringify({ error: 'no_media', instruction: NO_SERVICE_MEDIA_INSTRUCTION }),
@@ -832,6 +851,41 @@ export async function executeTool(
             : 'El cliente quiere corregir algo. Preguntale QUÉ dato quiere cambiar, uno solo, y no le pidas todos de nuevo.',
         }),
         trigger: parsed.data.confirmed ? 'summary_confirmed' : 'correction_requested',
+      }
+    }
+
+    if (name === 'advance_flow') {
+      const parsed = advanceFlowArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      const branches = context.branches ?? []
+      const chosen = branches.find((branch) => branch.id === parsed.data.branch)
+      if (!chosen) {
+        // Named rather than generic: the model gets the list back and can pick
+        // again in the same turn instead of guessing twice.
+        return {
+          result: JSON.stringify({
+            error: 'unknown_branch',
+            available: branches.map((branch) => ({ id: branch.id, cuando: branch.when })),
+            instruction:
+              branches.length === 0
+                ? 'Este paso no tiene rutas. No vuelvas a llamar esta herramienta acá.'
+                : 'Ese id de ruta no existe en este paso. Usá uno de los de la lista, o seguí conversando si ninguno aplica.',
+          }),
+          error: 'unknown_branch',
+        }
+      }
+
+      return {
+        result: JSON.stringify({
+          status: 'advanced',
+          instruction:
+            'La conversación avanzó. Seguí con el objetivo del paso nuevo, sin anunciarle al cliente que cambiaste de paso.',
+        }),
+        trigger: ROUTE_TRIGGER,
+        // The branch travels as evidence because every route shares one trigger:
+        // the trigger says "the owner's routing fired", this says which one.
+        evidence: { branch: chosen.id },
       }
     }
 

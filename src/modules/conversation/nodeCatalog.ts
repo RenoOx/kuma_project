@@ -15,13 +15,24 @@ import { activeServices } from '@/modules/business/business.settings.js'
 // module had six declared triggers nobody emitted, and a sales business that
 // answered once and then went silent forever.
 
-// The four fields the spec asks every node to carry. Rendered into the system
-// prompt as the LAST block, where an instruction weighs most.
+// The fields every node carries. Rendered into the system prompt as the LAST
+// block, where an instruction weighs most.
 export interface ConversationNode {
   objective: string
   steps: string[]
   edgeCases: string[]
   example: string
+  /**
+   * The owner's own note for this step. Never set by a blueprint — it exists
+   * only to carry what they wrote, appended AFTER the steps rather than
+   * replacing them.
+   *
+   * The distinction is the whole reason this field exists instead of making
+   * `steps` editable: the steps are the motor. An owner who could rewrite
+   * show_availability's steps could delete "SIEMPRE consultá la disponibilidad
+   * real del día pedido", and Emma would start inventing hours.
+   */
+  extraInstructions?: string
 }
 
 // Config a node cannot work without. Checked by validateFlow BEFORE a
@@ -37,6 +48,20 @@ export type NodeRequirement =
 // never writes an edge. Anything else is a fixed jump declared here; the
 // compiler drops it when its target is not in the composition.
 export type ExitTarget = 'next' | { node: string }
+
+/** A route the OWNER wrote, as opposed to the fixed exits a blueprint declares. */
+export interface NodeBranch {
+  /**
+   * What the model names when it takes this route. Stable and short: it goes in
+   * the prompt and comes back in a tool call, so it has to survive being
+   * retyped by a language model.
+   */
+  id: string
+  /** The owner's words for when this route applies. Rendered into the prompt. */
+  when: string
+  /** Id of the step this leads to. Dropped by the compiler if it is not in the flow. */
+  to: string
+}
 
 export interface NodeBlueprint {
   id: string
@@ -68,6 +93,21 @@ const SHOW_SERVICES = 'show_services'
 const SAVE_DATA = 'save_customer_data'
 const CONFIRM_SUMMARY = 'confirm_summary'
 const CORRECT_FIELD = 'correct_field'
+/**
+ * The one generic emitter.
+ *
+ * Every other exit in this catalogue fires because a specific thing happened —
+ * a booking was made, a capture arrived, the owner approved. That is what keeps
+ * `validateFlow`'s promise honest, and it is also why an owner could never add a
+ * route of their own: there was no code path to fire it.
+ *
+ * This tool is that code path. The owner writes the CONDITION in their own words
+ * and the model decides whether it holds; the executor checks the branch it
+ * named against the ones the step actually declares. So the trigger still has a
+ * real emitter and the target is still one the compiler resolved — the guarantee
+ * survives, and the owner gets to draw the route.
+ */
+const ADVANCE_FLOW = 'advance_flow'
 
 const to = (node: string): ExitTarget => ({ node })
 
@@ -95,7 +135,22 @@ export const EMITTED_TRIGGERS: ReadonlyMap<string, string> = new Map([
   ['summary_confirmed', 'toolExecutor.ts — confirm_summary'],
   ['correction_requested', 'toolExecutor.ts — confirm_summary (customer said no)'],
   ['field_corrected', 'toolExecutor.ts — correct_field'],
+  ['route_selected', 'toolExecutor.ts — advance_flow'],
 ])
+
+/**
+ * The trigger every owner-written route fires.
+ *
+ * One trigger for all of them, with the branch travelling as evidence rather
+ * than as its own trigger name. The alternative — a trigger per route — would
+ * put owner-typed strings into EMITTED_TRIGGERS, which is the registry of what
+ * the CODE can fire, and would turn a hand-maintained safety net into a list
+ * anyone can append to.
+ */
+export const ROUTE_TRIGGER = 'route_selected'
+
+/** The tool a step gets automatically once the owner gives it a route. */
+export const ROUTE_TOOL = ADVANCE_FLOW
 
 // Universal exit. Added by the compiler to every node, so no blueprint declares
 // it and no owner can remove it.
@@ -368,7 +423,11 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
         'Te queda así:\nServicio: Limpieza dental\nFecha: jueves 25 de septiembre\nHora: 3:00pm\nNombre: Juan Pérez\n\n¿Está todo correcto?',
     },
     exits: {
-      summary_confirmed: 'next',
+      // Always 'confirmed', never 'next', for the same reason show_availability
+      // names await_payment outright: 'next' is POSITIONAL, and correccion_datos
+      // has to sit next to this node to be readable in the panel. With 'next',
+      // a customer who said "sí, está todo bien" was sent to the correction step.
+      summary_confirmed: to('confirmed'),
       correction_requested: to('correccion_datos'),
     },
   },

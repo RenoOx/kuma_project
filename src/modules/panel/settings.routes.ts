@@ -211,8 +211,17 @@ panelSettingsRoutes.patch('/api/panel/:businessId/settings/conversation', async 
  * Served rather than duplicated in the SPA: the catalogue is the contract
  * between what the owner composes and what Emma runs, and a second copy in the
  * browser would drift the first time a node's steps change. Only the fields the
- * card shows — the wording and what the owner may override — never the tools or
- * the transitions, which are not theirs to see or to touch.
+ * card shows — the wording, what the owner may override, and now the exits the
+ * diagram draws. Never the tools: which tools a step offers is ours, and showing
+ * them would invite a request to change them.
+ *
+ * `exits` is served RAW, in blueprint form, rather than already resolved against
+ * the current composition. That is deliberate: the diagram has to redraw while
+ * the owner reorders, BEFORE anything is saved, and a graph resolved on the
+ * server would be stale until the next PATCH. The panel resolves it the same way
+ * the compiler does (see resolveExits in panel/lib/flowGraph.ts), and the server
+ * stays the authority — validateFlow is what decides whether a flow may be
+ * stored, not the picture.
  */
 panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', (c) => {
   const business = panelBusiness(c)
@@ -233,6 +242,7 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
       // missing is more useful shown-and-explained than silently absent.
       available: (bp.requires ?? []).every((r) => requirementMet(r, settings)),
       requires: bp.requires ?? [],
+      exits: bp.exits,
     })),
     // What runs right now, composed or derived. The card opens on this rather
     // than on an empty list, so the owner edits their actual flow instead of
@@ -276,7 +286,11 @@ async function toView(businessId: string, row: ServiceMedia) {
 
 panelSettingsRoutes.get('/api/panel/:businessId/settings/services/:serviceId/media', async (c) => {
   const business = panelBusiness(c)
-  const rows = await serviceMediaService.listForService(business.id, c.req.param('serviceId'))
+  const rows = await serviceMediaService.listForOwner(
+    business.id,
+    'service',
+    c.req.param('serviceId'),
+  )
   return c.json(await Promise.all(rows.map((row) => toView(business.id, row))))
 })
 
@@ -295,7 +309,8 @@ panelSettingsRoutes.post('/api/panel/:businessId/settings/services/:serviceId/me
 
   const added = await serviceMediaService.addMedia({
     businessId: business.id,
-    serviceId,
+    ownerKind: 'service',
+    ownerId: serviceId,
     filename: file.filename,
     buffer: file.buffer,
   })
@@ -322,7 +337,80 @@ panelSettingsRoutes.patch(
 
     const reordered = await serviceMediaService.reorder(
       business.id,
+      'service',
       c.req.param('serviceId'),
+      body.data.ids,
+    )
+    if (!reordered.ok) return failure(c, reordered.error)
+    return c.json(await Promise.all(reordered.data.map((row) => toView(business.id, row))))
+  },
+)
+
+// ── Media of a conversation step ─────────────────────────────────────────────
+//
+// The same four operations as a service's media, against the same table and the
+// same service layer. What differs is the owner: these files hang off a STEP of
+// the flow, so Emma sends them on entering it rather than when a customer names
+// a product.
+//
+// Kept as its own set of routes rather than a parameter on the service ones:
+// the tenant check is different (the step has to be in the running composition,
+// not in the services list) and a wrong one there is an orphan by construction.
+
+panelSettingsRoutes.get(
+  '/api/panel/:businessId/settings/conversation/nodes/:nodeId/media',
+  async (c) => {
+    const business = panelBusiness(c)
+    const rows = await serviceMediaService.listForOwner(business.id, 'node', c.req.param('nodeId'))
+    return c.json(await Promise.all(rows.map((row) => toView(business.id, row))))
+  },
+)
+
+panelSettingsRoutes.post(
+  '/api/panel/:businessId/settings/conversation/nodes/:nodeId/media',
+  async (c) => {
+    const business = panelBusiness(c)
+    const nodeId = c.req.param('nodeId')
+
+    const known = settingsService.flowNodeExists(business, nodeId)
+    if (!known.ok) return failure(c, known.error)
+
+    const file = await parseMultipartFile(c)
+    if (!file.ok) return file.res
+
+    const added = await serviceMediaService.addMedia({
+      businessId: business.id,
+      ownerKind: 'node',
+      ownerId: nodeId,
+      filename: file.filename,
+      buffer: file.buffer,
+    })
+    if (!added.ok) return failure(c, added.error)
+    return c.json(await toView(business.id, added.data))
+  },
+)
+
+panelSettingsRoutes.delete(
+  '/api/panel/:businessId/settings/conversation/nodes/:nodeId/media/:mediaId',
+  async (c) => {
+    const business = panelBusiness(c)
+    const removed = await serviceMediaService.removeOne(business.id, c.req.param('mediaId'))
+    if (!removed.ok) return failure(c, removed.error)
+    return c.json({ id: removed.data.id })
+  },
+)
+
+panelSettingsRoutes.patch(
+  '/api/panel/:businessId/settings/conversation/nodes/:nodeId/media/order',
+  async (c) => {
+    const business = panelBusiness(c)
+    const body = await parseBody(c, reorderSchema)
+    if (!body.ok) return body.res
+
+    const reordered = await serviceMediaService.reorder(
+      business.id,
+      'node',
+      c.req.param('nodeId'),
       body.data.ids,
     )
     if (!reordered.ok) return failure(c, reordered.error)

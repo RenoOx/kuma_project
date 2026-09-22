@@ -23,8 +23,16 @@ const NAV: NavItem[] = [
   { to: '/configuracion', label: () => 'Configuración', icon: Settings },
 ]
 
-export function Sidebar({ niche }: { niche: string | undefined }): React.JSX.Element {
+export function Sidebar({
+  niche,
+  booksAppointments = true,
+}: {
+  niche: string | undefined
+  /** Defaults to true so the nav never loses an entry while /me is in flight. */
+  booksAppointments?: boolean
+}): React.JSX.Element {
   const copy = nicheCopy(niche)
+  const items = booksAppointments ? NAV : NAV.filter((item) => item.to !== '/citas')
   const { pathname } = useLocation()
   const pending = usePendingAppointmentCount()
 
@@ -48,7 +56,7 @@ export function Sidebar({ niche }: { niche: string | undefined }): React.JSX.Ele
         'md:order-none md:min-h-0 md:flex-1 md:flex-col md:border-t-0 md:p-3',
       )}
     >
-      {NAV.map((item) => {
+      {items.map((item) => {
         const active = section === item.to
         const Icon = item.icon
         return (

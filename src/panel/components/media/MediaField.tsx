@@ -8,9 +8,10 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
+import type { MediaOwner } from '../../api/settings.js'
 import type { ServiceMediaType, ServiceMediaView } from '../../api/types.js'
-import { useServiceMedia } from '../../hooks/useServiceMedia.js'
+import { useOwnerMedia } from '../../hooks/useServiceMedia.js'
 import { useSettings } from '../../hooks/useSettings.js'
 import { Button } from '../ui/button.js'
 import { Label } from '../ui/label.js'
@@ -25,43 +26,58 @@ const TYPE_LABEL: Record<ServiceMediaType, string> = {
   video: 'Video',
 }
 
+const LIMITS =
+  'Se guardan al instante, sin esperar a Guardar. Imagen o audio hasta 5MB, PDF hasta 10MB, video hasta 16MB.'
+
 /**
- * The files a service carries: photos, a price list, a voice note, a demo.
+ * The files one owner carries: photos, a price list, a voice note, a demo.
  *
- * Unlike every other field in this dialog, this one writes immediately: the file
- * goes to storage and its row to the database the moment it is picked, rather
- * than waiting for Guardar. Holding a 16MB video in memory until an unrelated
- * save would be worse, and the copy says which of the two is happening.
+ * One component for both owners. A service's files answer a question the
+ * customer asked; a step's files are what the business shows on reaching that
+ * point of the conversation. Everything below that distinction — the limits, the
+ * order, the immediate write — is the same, and two components would drift.
  *
- * Disabled with a reason in the two cases where an upload cannot work at all: a
- * service that was never saved has no id for its files to hang off, and a deploy
+ * Unlike every other field around it, this one writes immediately: the file goes
+ * to storage and its row to the database the moment it is picked, rather than
+ * waiting for Guardar. Holding a 16MB video in memory until an unrelated save
+ * would be worse, and the copy says which of the two is happening.
+ *
+ * Disabled with a reason in the two cases where an upload cannot work at all: an
+ * owner that was never saved has no id for its files to hang off, and a deploy
  * with no S3 credentials has nowhere to put them. Both are explained rather than
  * silently greyed out.
  */
-export function ServiceMediaField({
-  serviceId,
+export function MediaField({
+  owner,
+  label,
+  unsavedHint,
 }: {
-  /** Undefined while the service is being created — it has no id yet. */
-  serviceId: string | undefined
+  /** Undefined while the owner is being created — it has no id yet. */
+  owner: MediaOwner | undefined
+  label: string
+  unsavedHint: string
 }): React.JSX.Element {
   const settings = useSettings()
-  const media = useServiceMedia(serviceId)
+  const media = useOwnerMedia(owner)
   const input = useRef<HTMLInputElement>(null)
+  // Several of these render at once on the Conversación card, one per step. A
+  // fixed id would tie every label to the first field on the page.
+  const inputId = useId()
 
   const mediaConfigured = settings.data?.mediaConfigured ?? false
-  const unsaved = serviceId === undefined
+  const unsaved = owner === undefined
   const blocked = unsaved || !mediaConfigured
   const disabled = blocked || media.busy
 
   const hint = unsaved
-    ? 'Guardá el servicio primero y volvé a abrirlo para subirle archivos.'
+    ? unsavedHint
     : !mediaConfigured
       ? 'El almacenamiento todavía no está configurado. Escribinos a Vamvu Labs.'
-      : 'Se guardan al instante, sin esperar a Guardar. Imagen o audio hasta 5MB, PDF hasta 10MB, video hasta 16MB.'
+      : LIMITS
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor="svc-media">Material del servicio</Label>
+      <Label htmlFor={inputId}>{label}</Label>
 
       {media.items.length > 0 && (
         <ul className="flex flex-col gap-1.5">
@@ -95,8 +111,8 @@ export function ServiceMediaField({
       </div>
 
       {media.items.length > 1 && (
-        // Said out loud because the order is not decorative: the executor caps
-        // how many files one reply may carry, and the cut is taken from the top.
+        // Said out loud because the order is not decorative: a reply carries at
+        // most two files in total, and the cut is taken from the top.
         <p className="text-muted-foreground text-xs">
           Emma manda los dos primeros de la lista. Usá las flechas para elegir cuáles.
         </p>
@@ -104,7 +120,7 @@ export function ServiceMediaField({
 
       <input
         ref={input}
-        id="svc-media"
+        id={inputId}
         type="file"
         accept={ACCEPT}
         className="hidden"

@@ -16,6 +16,15 @@ export interface PanelMe {
   id: string
   name: string
   niche: string
+  /**
+   * False for a business that only sells (flowType 'sales').
+   *
+   * The shell hides everything that exists to manage appointments — the Agenda
+   * screen, the booking rules, Google Calendar — because an institute selling
+   * courses has no slots, no reminders and no calendar to sync. The hours stay:
+   * they decide when Emma answers, which every business has.
+   */
+  booksAppointments: boolean
   ownerName: string | null
   timezone: string
   /** Null for a business with no settings yet — the calendar then shades nothing. */
@@ -244,6 +253,11 @@ export interface CustomerRecord {
 
 export interface CustomerDetail {
   customer: CustomerRecord
+  /**
+   * What this customer answered in the capture step, keyed by the field name
+   * the owner configured. Empty for a business that collects nothing.
+   */
+  collectedData: Record<string, string>
   /** Names this number has booked under, newest booking first. */
   appointmentNames: string[]
   appointments: Array<{
@@ -541,12 +555,49 @@ export interface ConversationNodeOption {
   /** False when this business lacks the configuration the node needs. */
   available: boolean
   requires: string[]
+  /**
+   * The fixed exits this step declares, keyed by trigger, exactly as the
+   * blueprint holds them.
+   *
+   * `'next'` is POSITIONAL — it means "whatever step the owner put after this
+   * one" — so it can only be resolved against a composition. `{ node }` is a
+   * fixed jump, kept only when that step is in the flow. Both rules live in
+   * `lib/flowGraph.ts`, mirroring the server's `resolveExit`.
+   *
+   * Read-only. The owner authors routes (`ConversationBranch`), never these.
+   */
+  exits: Record<string, ConversationExitTarget>
+}
+
+/** Where a fixed exit leads. Mirrors `ExitTarget` in nodeCatalog.ts. */
+export type ConversationExitTarget = 'next' | { node: string }
+
+/**
+ * A route the owner drew out of a step.
+ *
+ * The only edge anybody outside the compiler authors. `when` is read by Emma to
+ * decide whether the route applies; `id` is what she answers with and the owner
+ * never sees it.
+ */
+export interface ConversationBranch {
+  id: string
+  when: string
+  to: string
 }
 
 /** What the owner overrode for one node. Absent keys mean "use the default". */
 export interface ConversationNodeOverride {
+  /** Renames the step in this panel. The id is what the flow actually runs on. */
+  label?: string
   edgeCases?: string[]
   example?: string
+  /**
+   * The owner's note for this step. Added after the steps, never replacing
+   * them — the steps are the motor and stay with the code.
+   */
+  extraInstructions?: string
+  /** At most four: past a handful Emma stops choosing and starts guessing. */
+  branches?: ConversationBranch[]
 }
 
 export interface ConversationFlow {

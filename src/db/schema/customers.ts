@@ -14,6 +14,18 @@ export const customers = pgTable(
       .references(() => businesses.id, { onDelete: 'cascade' }),
     phone: text('phone').notNull(),
     name: text('name'),
+    /**
+     * Everything the business learned about this customer that is not a column.
+     *
+     * Today it holds one key, `collected`: the answers the collect-data step
+     * gathered, as the owner named the fields. Before this, every field but the
+     * name was acknowledged and dropped — it survived only in the transcript, so
+     * nothing could branch on "this student already has the prerequisite".
+     *
+     * Free-form because the fields are: `settings.collectDataFields` is written
+     * by the owner in their own words, and giving each one a column would mean a
+     * migration every time a business added a question.
+     */
     metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     // The transport address WhatsApp actually routes by, captured from the last

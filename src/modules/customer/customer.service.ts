@@ -1,3 +1,4 @@
+import { db } from '@/db/client.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as customerRepo from './customer.repo.js'
@@ -152,18 +153,40 @@ export async function updateLastSeen(businessId: string, id: string): Promise<Re
 // matches on the stem rather than on an exact string.
 const NAME_FIELD = /nombre|name/i
 
+/** Where the collected answers live inside `customers.metadata`. */
+const COLLECTED_KEY = 'collected'
+
+export type CollectedData = Record<string, string>
+
+/** The answers this customer has given, as the owner named the fields. */
+export function collectedDataOf(customer: Customer): CollectedData {
+  const blob = customer.metadata
+  if (typeof blob !== 'object' || blob === null) return {}
+  const bucket = (blob as Record<string, unknown>)[COLLECTED_KEY]
+  if (typeof bucket !== 'object' || bucket === null) return {}
+  return Object.fromEntries(
+    Object.entries(bucket as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  )
+}
+
 /**
  * Persists what the collect-data step gathered.
  *
- * Only the name reaches a column today, because that is the only one the
- * customer row has. It is also the one that mattered: until this existed, a
- * customer who told Emma their name and did not go on to book kept whatever
- * push name WhatsApp happened to carry, which is the gap CLAUDE.md lists under
- * "pendientes conocidos".
+ * The name reaches its own column, because a column is what the rest of the app
+ * reads it from. Everything else lands in `metadata.collected`, keyed by the
+ * field name the owner wrote.
  *
- * The other fields are accepted and acknowledged rather than dropped silently —
- * they live in the conversation transcript, which is where the owner reads them
- * today. Giving them a home of their own is a schema change, not this function.
+ * Until this, every field but the name was accepted, acknowledged and dropped:
+ * it survived only in the conversation transcript. That is fine for a human
+ * reading a chat and useless for anything else — a flow cannot branch on "this
+ * student already has the prerequisite" if the answer was never stored.
+ *
+ * MERGED, never replaced. A customer who corrects one field in
+ * `correccion_datos` must not lose the four they already answered, and the
+ * merge happens in one transaction so two turns arriving together cannot
+ * overwrite each other with a stale read.
  */
 export async function saveCollectedData(
   businessId: string,
@@ -171,19 +194,40 @@ export async function saveCollectedData(
   fields: Record<string, string>,
 ): Promise<Result<void>> {
   try {
-    const found = await customerRepo.findById(businessId, id)
-    if (!found) {
-      return err(
-        new NotFoundError({ resource: 'customer', logContext: { businessId, customerId: id } }),
-      )
-    }
+    await db.transaction(async (tx) => {
+      const found = await customerRepo.findById(businessId, id, tx)
+      if (!found)
+        throw new NotFoundError({
+          resource: 'customer',
+          logContext: { businessId, customerId: id },
+        })
 
-    const nameEntry = Object.entries(fields).find(([key]) => NAME_FIELD.test(key))
-    const name = nameEntry?.[1]?.trim()
-    if (name) await customerRepo.updateName(businessId, id, name)
+      const nameEntry = Object.entries(fields).find(([key]) => NAME_FIELD.test(key))
+      const name = nameEntry?.[1]?.trim()
+      if (name) await customerRepo.updateName(businessId, id, name, tx)
+
+      const clean = Object.fromEntries(
+        Object.entries(fields)
+          .map(([key, value]) => [key, value.trim()] as const)
+          .filter(([, value]) => value !== ''),
+      )
+      if (Object.keys(clean).length === 0) return
+
+      const blob =
+        typeof found.metadata === 'object' && found.metadata !== null
+          ? (found.metadata as Record<string, unknown>)
+          : {}
+      await customerRepo.updateMetadata(
+        businessId,
+        id,
+        { ...blob, [COLLECTED_KEY]: { ...collectedDataOf(found), ...clean } },
+        tx,
+      )
+    })
 
     return ok(undefined)
   } catch (cause) {
+    if (cause instanceof NotFoundError) return err(cause)
     return err(
       new AppError({
         code: 'customer_update_failed',

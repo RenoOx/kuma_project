@@ -30,7 +30,7 @@ export function PageLayout({ children }: { children: React.ReactNode }): React.J
           already flips its axis instead of mounting a second component. */}
       <div className="contents md:flex md:w-52 md:shrink-0 md:flex-col md:border-r md:border-emma-sidebar-border">
         <Header businessName={me?.name} />
-        <Sidebar niche={me?.niche} />
+        <Sidebar niche={me?.niche} booksAppointments={me?.booksAppointments ?? true} />
       </div>
       {/* The gutter every screen sits in. Holding it here rather than inside
           each page is what keeps the blocks lined up: a page cannot drift to

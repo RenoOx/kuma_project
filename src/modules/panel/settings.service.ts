@@ -3,7 +3,7 @@ import { db } from '@/db/client.js'
 import type { Business } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
-import { validateFlow } from '@/modules/conversation/stateMachine.js'
+import { presetFor, validateFlow } from '@/modules/conversation/stateMachine.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
@@ -132,7 +132,7 @@ export async function updateServices(
   if (!saved.ok) return saved
 
   const keep = saved.data.services.map((service) => service.id).filter((id): id is string => !!id)
-  await serviceMediaService.purgeOrphans(businessId, keep)
+  await serviceMediaService.purgeOrphans(businessId, 'service', keep)
 
   return saved
 }
@@ -198,7 +198,7 @@ export async function updateConversationFlow(
   patch: ConversationPatch,
 ): Promise<Result<BusinessSettings>> {
   try {
-    return await db.transaction(async (tx) => {
+    const saved = await db.transaction(async (tx) => {
       const business = await businessRepo.findById(businessId, tx)
       if (!business) {
         return err(
@@ -232,6 +232,21 @@ export async function updateConversationFlow(
       )
       return ok(merged.data)
     })
+    if (!saved.ok) return saved
+
+    // The flow's own orphan sweep, and the mirror of the one in updateServices:
+    // a step the owner removed simply stops being in the list, so comparing the
+    // stored rows against what the list still names is the only way to notice
+    // its files are now unreachable.
+    //
+    // After the transaction rather than inside it: this talks to S3, and holding
+    // a database transaction open across a call to another service is how a slow
+    // bucket turns into a lock timeout. Like updateServices, it never fails its
+    // caller — the next save retries whatever this one missed.
+    const nodes = saved.data.conversationFlow?.nodes ?? presetFor(saved.data).nodes
+    await serviceMediaService.purgeOrphans(businessId, 'node', nodes)
+
+    return saved
   } catch (cause) {
     return err(
       new AppError({

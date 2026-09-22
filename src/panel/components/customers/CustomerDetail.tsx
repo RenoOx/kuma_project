@@ -60,6 +60,27 @@ export function CustomerDetail({
                 </PanelLink>
               </Button>
 
+              {/* Only when there is something to show: a business that collects
+                  nothing would otherwise get an empty heading on every contact.
+                  Before these were stored, the owner read them by scrolling the
+                  chat. */}
+              {Object.keys(data.collectedData).length > 0 && (
+                <>
+                  <Separator />
+                  <section className="space-y-2">
+                    <h3 className="text-emma-text text-xs font-medium">Datos que dejó</h3>
+                    <dl className="bg-card grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-border p-2.5">
+                      {Object.entries(data.collectedData).map(([field, value]) => (
+                        <div key={field} className="contents">
+                          <dt className="text-muted-foreground truncate text-xs">{field}</dt>
+                          <dd className="min-w-0 break-words text-sm">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                </>
+              )}
+
               <Separator />
 
               <section className="space-y-2">
