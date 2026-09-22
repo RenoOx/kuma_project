@@ -216,8 +216,17 @@ const NO_SERVICE_MEDIA_INSTRUCTION =
 // walked around the list — it wrote "Recibiste el material con más detalles
 // sobre el curso", glued to the description. A ban written as examples is a ban
 // on those examples.
+// A TEST the model can run on its own draft, not a list it can walk around.
+//
+// The previous two versions were both bans by enumeration, and the model found a
+// phrasing outside each list: first "Recibiste el material con más detalles"
+// (second person, past), then "He enviado más información sobre el curso" (first
+// person, present perfect). Every list of forbidden phrases is a permit for the
+// next one. The rule is now a property the reply either has or does not — "does
+// it still read if no file exists?" — with the examples kept only as
+// illustration of a rule that no longer depends on them.
 const SERVICE_MEDIA_SENT_INSTRUCTION =
-  'El material se está enviando solo por WhatsApp, como mensajes aparte. Escribí tu respuesta normal sobre el servicio y NADA MÁS: prohibido mencionar el archivo, en cualquier tiempo verbal y de cualquier forma — ni que lo mandás, ni que lo mandaste, ni que lo recibió, ni que lo mire, ni que ahí tiene más detalles. El cliente lo ve llegar solo; contárselo suena a error. ❌ "Recibiste el material con más detalles" ❌ "Te adjunto la info" ❌ "Ahí te mandé el folleto". ✅ escribí sobre el servicio como si el archivo no existiera.'
+  'El material sale solo, como mensajes aparte de WhatsApp. REGLA: tu respuesta tiene que poder leerse completa como si ningún archivo existiera. Antes de enviarla, releéla tapando el archivo: si alguna frase queda coja, sobra o promete algo que no está en el texto, reescribila. Eso descarta cualquier mención al archivo, en cualquier persona y cualquier tiempo verbal — mandar, haber mandado, enviar, adjuntar, compartir, que le llegue, que lo mire, que ahí tiene más detalles. El cliente lo ve llegar solo; contárselo suena a error. ❌ "He enviado más información" ❌ "Recibiste el material" ❌ "Te adjunto la info". ✅ escribí sobre el servicio y nada más.'
 
 // Says it out loud, and that is the change: the old version suggested referring
 // to the file ("referite a lo que ya tiene más arriba"), the model skipped it,

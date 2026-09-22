@@ -16,6 +16,7 @@ import {
   resolveFlow,
   type TransitionEvidence,
 } from '@/modules/conversation/stateMachine.js'
+import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import * as messageService from '@/modules/message/message.service.js'
@@ -282,6 +283,21 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     log.error({ err: cause }, 'could not read service media; replying without file markers')
   }
 
+  // Only for a business that actually collects something. A clinic with no
+  // configured fields has nothing stored and would pay a query per message to
+  // find that out — and this is the hot path of every inbound message, which is
+  // exactly what conversation.service warns about hiding reads inside.
+  //
+  // Never fatal: these facts make a reply better, and a failed read must not
+  // cost the customer an answer.
+  let customerFacts: Record<string, string> = {}
+  if ((settings?.collectDataFields.length ?? 0) > 0) {
+    const found = await customerService.getById(params.businessId, conversation.customerId)
+    if (found.ok) customerFacts = customerService.collectedDataOf(found.data)
+    else
+      log.warn({ code: found.error.code }, 'could not read customer facts; replying without them')
+  }
+
   const basePrompt = buildSystemPrompt(
     business,
     kbResult.data.entries,
@@ -289,6 +305,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     historyResult.data,
     pending,
     servicesWithMedia,
+    customerFacts,
   )
   // The node goes last, after the variable tail — the static body has to stay
   // first for the prompt cache, and the final position is where an instruction

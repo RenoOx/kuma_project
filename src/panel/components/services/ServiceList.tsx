@@ -99,6 +99,11 @@ export function ServiceList({
         onClose={() => setEditing(null)}
         onSubmit={submit}
         schedulesAppointments={schedulesAppointments}
+        // Every category already in use, so the form can offer them instead of
+        // letting the owner retype one and split a group in two.
+        knownCategories={[
+          ...new Set(draft.map((s) => s.category?.trim()).filter((c): c is string => !!c)),
+        ]}
         error={null}
       />
     </>

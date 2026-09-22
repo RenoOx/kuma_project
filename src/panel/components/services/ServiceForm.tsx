@@ -50,6 +50,7 @@ export function ServiceForm({
   onClose,
   onSubmit,
   schedulesAppointments,
+  knownCategories,
   error,
 }: {
   open: boolean
@@ -64,12 +65,15 @@ export function ServiceForm({
    * to guess at is worse than one that is not there.
    */
   schedulesAppointments: boolean
+  /** Categories the other services already use, offered as suggestions. */
+  knownCategories: string[]
   error: string | null
 }): React.JSX.Element {
   const base = service ?? EMPTY
 
   const [name, setName] = useState(base.name)
   const [description, setDescription] = useState(base.description ?? '')
+  const [category, setCategory] = useState(base.category ?? '')
   const [duration, setDuration] = useState(toField(base.durationMinutes))
   const [priceMin, setPriceMin] = useState(toField(base.priceMin))
   const [priceMax, setPriceMax] = useState(toField(base.priceMax))
@@ -93,6 +97,7 @@ export function ServiceForm({
     setSeededFrom(seed)
     setName(base.name)
     setDescription(base.description ?? '')
+    setCategory(base.category ?? '')
     setDuration(toField(base.durationMinutes))
     setPriceMin(toField(base.priceMin))
     setPriceMax(toField(base.priceMax))
@@ -110,6 +115,9 @@ export function ServiceForm({
       // the server to read it as "never wrote one", and `...base` above would
       // otherwise keep a previous description alive after the owner cleared it.
       ...(trimmedDescription ? { description: trimmedDescription } : { description: undefined }),
+      // Same rule as the description: cleared means absent, not ''. Leaving ''
+      // would make this service its own group of one.
+      ...(category.trim() ? { category: category.trim() } : { category: undefined }),
       durationMinutes: toNumber(duration),
       priceMin: toNumber(priceMin),
       priceMax: toNumber(priceMax),
@@ -162,6 +170,30 @@ export function ServiceForm({
             <span className="text-muted-foreground text-xs">
               Es lo que Emma cuenta cuando el cliente pide más información. Sin esto solo puede
               repetir el precio.
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="svc-category">Categoría</Label>
+            <Input
+              id="svc-category"
+              list="svc-category-options"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              maxLength={40}
+              placeholder="ej. Nivel inicial"
+            />
+            {/* Suggestions, not a closed list: each business names its own
+                groups. Offering the ones already in use is what keeps "Nivel
+                inicial" and "nivel basico" from becoming two groups. */}
+            <datalist id="svc-category-options">
+              {knownCategories.map((option) => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <span className="text-muted-foreground text-xs">
+              Opcional. Con dos o más categorías distintas, Emma agrupa el catálogo en vez de
+              listarlo plano.
             </span>
           </div>
 
