@@ -4,6 +4,7 @@ import type { Business } from '@/db/schema/index.js'
 import type {
   AssistantFunction,
   BusinessSettings,
+  FlowType,
   Service,
 } from '@/modules/business/business.settings.js'
 import {
@@ -342,6 +343,20 @@ function normalizeName(name: string): string {
 }
 
 /**
+ * The flow a business is stored on, read from the raw jsonb.
+ *
+ * Raw rather than parsed for the same reason as storedServices: this has to
+ * answer for a business whose settings do not fully validate, and the answer
+ * decides whether a composition survives a switch. Absent reads as
+ * 'appointments', which is what flowTypeSchema defaults to — a business
+ * configured before the field existed is on the booking flow.
+ */
+function storedFlowType(currentRaw: unknown): FlowType {
+  if (!isPlainObject(currentRaw)) return 'appointments'
+  return currentRaw.flowType === 'sales' ? 'sales' : 'appointments'
+}
+
+/**
  * Carries service identity across a whole-array replacement.
  *
  * The panel owns the service list and sends it back entire, which is fine for
@@ -476,6 +491,23 @@ export function mergeSettingsSection(
   // that arrived without ids would otherwise be persisted exactly as it came.
   if (patch.services !== undefined) {
     merged.services = normalizeServices(currentRaw, patch.services, idFactory)
+  }
+
+  // Changing what the assistant is FOR drops the conversation it had composed.
+  //
+  // A composition is a list of node ids, and the nodes that make sense depend on
+  // the flow: a business that saved "Disponibilidad" while it booked appointments
+  // keeps a runnable composition after switching to selling — validateFlow still
+  // accepts it, because its requirement is only that services exist. So resolveFlow
+  // goes on running the booking flow, the owner sees no error at all, and Emma
+  // keeps offering slots for a business that no longer has an agenda.
+  //
+  // Dropping it hands the business back to presetFor, which derives a composition
+  // from the flow it now has. The owner loses the wording they overrode, which is
+  // the honest trade: the alternative is a saved flow that contradicts the switch
+  // they just flipped.
+  if (patch.flowType !== undefined && patch.flowType !== storedFlowType(currentRaw)) {
+    delete merged.conversationFlow
   }
 
   const parsed = businessSettingsSchema.safeParse(merged)

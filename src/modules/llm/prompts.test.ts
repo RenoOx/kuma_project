@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { Business } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { buildSystemPrompt, GREETING_VARIANTS, pickGreeting, renderNodeBlock } from './prompts.js'
+import {
+  buildSystemPrompt,
+  CTA_VARIANTS,
+  GREETING_VARIANTS,
+  pickGreeting,
+  renderNodeBlock,
+  SALES_CTA_VARIANTS,
+} from './prompts.js'
 
 const BUSINESS_NAME = 'Bella Vida Salón & Spa'
 
@@ -129,6 +136,99 @@ describe('the diagnosis path survives in every state', () => {
     const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
     expect(prompt).toContain('Servicios que NO requieren evaluación')
   })
+
+  it('does not offer a diagnostic consultation to a business with no agenda', () => {
+    // The other half of the same contract. A consultation is an appointment, so
+    // a business that books nothing cannot honour the offer — and the model
+    // makes it anyway when the worked examples are in front of it.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings({ flowType: 'sales' }))
+    expect(prompt).not.toContain('consulta de evaluación')
+    expect(prompt).not.toContain('consulta de diagnóstico')
+  })
+})
+
+describe('a business that sells is never told how to book', () => {
+  const sales = fakeSettings({ flowType: 'sales' })
+
+  it('closes with an invitation it can actually honour', () => {
+    // "¿Quieres reservar?" went out to an institute answering "¿qué cursos
+    // tienen?". Every CTA_VARIANT is a booking invitation, and the picker only
+    // branched on appointmentMode — which assistantFunctionFields pins to
+    // appointments_only for a selling business, so the branch never fired.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], sales)
+    // Minus the one both sets share on purpose — "¿Te ayudo con algo más?" asks
+    // nobody to book anything, so it is valid in either flow. Asserting against
+    // the raw CTA_VARIANTS made this test fail one run in three, which is the
+    // test being wrong about the claim, not the code.
+    const bookingOnly = CTA_VARIANTS.filter((v) => !SALES_CTA_VARIANTS.includes(v))
+    expect(bookingOnly.length).toBeGreaterThan(0)
+    for (const variant of bookingOnly) {
+      expect(prompt, variant).not.toContain(variant)
+    }
+    expect(SALES_CTA_VARIANTS.some((v) => prompt.includes(v))).toBe(true)
+  })
+
+  it('drops the machinery for tools it is never offered', () => {
+    // llm.service filters the tool list by state, so a selling business is never
+    // given check_availability or book_appointment. Sending the procedure for
+    // calling them taught the model a move it could not make.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], sales)
+    expect(prompt).not.toContain('# Reserva — el orden es obligatorio')
+    expect(prompt).not.toContain('# Confirmación de citas pendientes')
+    expect(prompt).not.toContain('obligatorio antes de agendar')
+    expect(prompt).not.toContain('book_appointment')
+    expect(prompt).not.toContain('check_availability')
+  })
+
+  it('keeps the rules that are not about booking at all', () => {
+    // The gate has to be surgical: a closed catalogue and not asking twice are
+    // true in any conversation, and a business that sells needs them more, not
+    // less — a plausible-sounding course is exactly what gets invented.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], sales)
+    expect(prompt).toContain('# Servicios no reconocidos')
+    expect(prompt).toContain('# No repreguntes lo que el cliente ya te dijo')
+    expect(prompt).toContain('NUNCA inventes un número de Yape')
+  })
+
+  it('still gives all of it to a business that books', () => {
+    const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
+    expect(prompt).toContain('# Reserva — el orden es obligatorio')
+    expect(prompt).toContain('# Confirmación de citas pendientes')
+    expect(prompt).toContain('check_availability')
+    expect(CTA_VARIANTS.some((v) => prompt.includes(v))).toBe(true)
+  })
+})
+
+describe('what a service is, in words', () => {
+  it('puts the description in the catalogue line', () => {
+    // Without it a service is name, price and duration — so "contame más" could
+    // only be answered with the price the customer already had. It used to live
+    // in the KB under `servicios`, a category now filtered out of every read
+    // that feeds this prompt.
+    const prompt = buildSystemPrompt(
+      fakeBusiness(),
+      [],
+      fakeSettings({
+        services: [
+          {
+            name: 'Corte',
+            priceMin: 25,
+            priceMax: 25,
+            active: true,
+            description: 'Incluye lavado y peinado.',
+          },
+        ],
+      }),
+    )
+    expect(prompt).toContain('Incluye lavado y peinado.')
+  })
+
+  it('leaves no empty line for a service that has none', () => {
+    const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
+    // No dangling indented line under the entry when there is nothing to put there.
+    const line = prompt.split('\n').find((l) => l.startsWith('- Corte'))
+    expect(line).toBe('- Corte — S/ 25')
+  })
 })
 
 describe('payment rules reach every niche', () => {
@@ -215,10 +315,22 @@ describe('renderNodeBlock', () => {
 describe('a selling business is always open', () => {
   const salesSettings = fakeSettings({ flowType: 'sales', outOfHoursEnabled: true })
 
-  it('says so instead of printing a weekly schedule', () => {
+  it('gives the premises hours as information, not as a limit', () => {
+    // This used to print "atiende las 24 horas, todos los días" and drop the
+    // schedule, which told an institute's students the doors were open at 3am.
+    // Two separate facts: EMMA answers at any hour, the LOCAL opens when it
+    // opens. Only the first one is 24/7.
     const prompt = buildSystemPrompt(fakeBusiness(), [], salesSettings)
-    expect(prompt).toContain('atiende las 24 horas')
-    expect(prompt).not.toContain('## Horarios')
+    expect(prompt).toContain('## Horario de atención en el local')
+    expect(prompt).toContain('SOLO informativo')
+    expect(prompt).not.toContain('atiende las 24 horas')
+  })
+
+  it('keeps the agenda mechanics out of that block', () => {
+    // Special days and the slot length are both about filling a calendar, and
+    // there is no calendar here.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], salesSettings)
+    expect(prompt).not.toContain('Duración del slot')
   })
 
   it('never tells the customer it is closed, whatever the toggle says', () => {

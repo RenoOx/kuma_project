@@ -197,6 +197,26 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
   Cuelgan de `requiresEvaluation`, un flag por servicio, y tienen que estar
   presentes en TODOS los estados — si se atan a `listado_servicios`, un cliente
   que abre con "¿cuánto cuesta X?" se queda sin la consulta de diagnóstico
+
+  **La capa 1 se ramifica por `schedulesAppointments(settings)`**, vía la
+  variable `books` de `buildStaticBody`. Un negocio de venta no recibe la
+  mecánica de reserva (razonamiento de fechas, el orden servicio→horario→nombre,
+  el nombre obligatorio, confirmación de citas pendientes, frescura de
+  disponibilidad), ni los bloques de evaluación previa, ni las invitaciones de
+  agenda: son instrucciones para tools que `llm.service` nunca le ofrece, y el
+  modelo las intentaba igual. Medido: 229 → 178 líneas. El prompt de un negocio
+  de agenda **no cambió** al hacerlo, y eso se verifica con el diff de 5 nichos ×
+  con/sin adelanto.
+
+  **Lo que se ramifica pero no desaparece**: `unrecognizedServiceBlock` y "no
+  repreguntes" tienen versión de venta. El catálogo cerrado importa MÁS ahí — un
+  curso que suena plausible para un instituto es exactamente lo que se inventa.
+
+  **Los corchetes son marcas internas.** `[con material]` se le escapó a un
+  cliente el 2026-09-21, copiado tal cual de la línea del catálogo. La regla que
+  lo prohíbe es la 3 de `# Reglas generales`, incondicional a propósito: ese
+  negocio no tenía adelanto ni bloque clínico, así que cualquier lugar gateado se
+  la habría perdido
 - **Gate de depósito**: `toolExecutor` rechaza `book_appointment` si
   `requiresDeposit=true` y no hay evidencia de pago reciente. El rechazo
   congela el contexto de pago en la expectativa de imagen
@@ -266,11 +286,17 @@ Agenda con adelanto  ...→show_availability→await_payment→await_payment_ver
 Solo informativo     idle→greeting→informing→listado_servicios
 ```
 
-**`flowType: 'sales'` recibe hoy el preset informativo.** Le falta un ladrillo:
-la tool que registra "el cliente aceptó y quiere pagar". No se puede escribir sin
-una intención congelada sin horario, y `FrozenBooking` exige `scheduledAtISO` —
-inventarlo le mostraría al dueño una hora de cita que nadie acordó. Por eso
-"Vende" está deshabilitado en el panel.
+**`flowType: 'sales'` recibe hoy el preset informativo**, y "Vende" **sí** se
+puede elegir en el panel: saluda, asesora y muestra el catálogo con su material.
+Eso corre y es lo que un instituto necesita para informar.
+
+Le falta el final: un trigger que lleve de `listado_servicios` a `collect_data`.
+Los tres nodos del cierre —`collect_data`, `confirmacion`, `correccion_datos`—
+ya están completos, con sus tools y sus emisores reales en `toolExecutor.ts`; lo
+único que no existe es la salida que entra en ellos. **No necesita el
+`FrozenBooking` que trababa este ladrillo**: "el cliente eligió el curso X" no
+tiene horario, así que no hay `scheduledAtISO` que inventar. Cobrar adentro sí
+sigue trabado, porque `await_payment` lleva `entryGuard: 'booking_intent'`.
 
 El único que aplica transiciones sigue siendo `conversationService.applyTrigger`,
 que ahora recibe el flujo compilado (`FlowDefinition`) en vez de `flowType`.
@@ -319,6 +345,13 @@ Campos clave:
 - `collectDataFields`: string[] — campos a recolectar en flujo sales
 - `postBooking`: switches de recordatorios y seguimientos
 - `minBookingNoticeMinutes`: entero 0-1440, default 30
+- `services[].description`: texto ≤600, opcional. De qué se trata el servicio, en
+  palabras del dueño. **Es lo único que Emma tiene para responder "contame más"**:
+  sin esto un servicio es nombre, precio y duración, y lo mejor que podía hacer
+  era repetir el precio que ya había dado. Vivía en la categoría `servicios` de
+  la KB, que está retirada y **filtrada de todas las lecturas que alimentan el
+  prompt** — o sea que lo escrito ahí ya no le llega. Va en el ítem, no de vuelta
+  al KB: precio y horario tienen forma estructurada y esto no compite con ellos
 
 Helpers obligatorios — no leer los campos crudos:
 - `activeServices(settings)` en vez de `settings.services`
@@ -753,9 +786,12 @@ Heredados de los planes ya cerrados:
   avisa de los choques al enviar, pero no sugiere horarios libres.
 - **Contraste del texto muted** (ver Tema visual).
 - `clientRegistry` es un Map en memoria: multi-instancia lo rompe.
-- **El flujo de venta necesita un ladrillo más** (ver "Presets"). Hasta entonces
-  "Vende" está deshabilitado en el panel y un negocio `sales` corre el preset
-  informativo.
+- **El flujo de venta necesita un ladrillo más para cerrar** (ver "Presets"):
+  informa y muestra el catálogo, pero no captura los datos al final.
+- **El panel todavía no se adapta al modo venta.** Un negocio `sales` sigue
+  viendo Agenda, días especiales, duración del turno, anticipación mínima,
+  recordatorios y Google Calendar, que no tienen nada que hacer ahí. El prompt sí
+  se adapta; la pantalla no. Falta mapear card por card.
 - **Composición y reorden del panel**: el dueño edita CASOS ESPECIALES y EJEMPLO
   de cada nodo, y el orden. OBJETIVO, PASOS, tools y transiciones son del código.
 - **Prod está dos migraciones atrás**: `0019` (`service_media`) y `0017`

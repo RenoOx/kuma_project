@@ -138,16 +138,49 @@ export const HYBRID_CTA_VARIANTS: ReadonlyArray<string> = [
   '¿Vienes hoy o te reservo un horario? 😊',
 ]
 
-function ctaVariantsFor(mode: AppointmentMode): ReadonlyArray<string> {
-  return mode === 'hybrid' ? HYBRID_CTA_VARIANTS : CTA_VARIANTS
+// A business that sells has nothing to reserve, and every one of the four above
+// asks the customer to book something. An institute answering "¿qué cursos
+// tienen?" closed with "¿Quieres reservar?" — an invitation to a thing that does
+// not exist, which is how a real conversation ended up unanswerable.
+//
+// The invitation is still an invitation: it moves the customer one step, it just
+// moves them toward the material and the detail instead of toward a slot.
+//
+// "¿Te ayudo con algo más?" appears in CTA_VARIANTS too, deliberately: it asks
+// nobody to book anything. containsCallToAction scans all three sets, so the
+// overlap costs nothing there.
+export const SALES_CTA_VARIANTS: ReadonlyArray<string> = [
+  '¿Te interesa alguno en particular?',
+  '¿Te cuento más de alguno?',
+  '¿Querés que te mande la información?',
+  '¿Te ayudo con algo más?',
+]
+
+/**
+ * Which set of invitations this business may use.
+ *
+ * Decided by the flow FIRST, and that order is the fix: `appointmentMode` is
+ * pinned to appointments_only for a selling business (assistantFunctionFields),
+ * so branching on it alone handed a course seller the booking invitations.
+ */
+export type CtaFlavour = 'appointments' | 'hybrid' | 'sales'
+
+export function ctaFlavourFor(settings: BusinessSettings | null): CtaFlavour {
+  if (settings && !schedulesAppointments(settings)) return 'sales'
+  return settings?.appointmentMode === 'hybrid' ? 'hybrid' : 'appointments'
+}
+
+function ctaVariantsFor(flavour: CtaFlavour): ReadonlyArray<string> {
+  if (flavour === 'sales') return SALES_CTA_VARIANTS
+  return flavour === 'hybrid' ? HYBRID_CTA_VARIANTS : CTA_VARIANTS
 }
 
 // randomFn es inyectable para tests deterministas; en producción usa Math.random.
 export function pickCallToAction(
-  mode: AppointmentMode = 'appointments_only',
+  flavour: CtaFlavour = 'appointments',
   randomFn: () => number = Math.random,
 ): string {
-  const variants = ctaVariantsFor(mode)
+  const variants = ctaVariantsFor(flavour)
   const index = Math.floor(randomFn() * variants.length)
   const variant = variants[index] ?? variants[0]
   if (!variant) throw new Error('CTA variants must not be empty')
@@ -198,11 +231,14 @@ function isBookingFlowActive(history: Message[]): boolean {
   )
 }
 
-// Checks both sets regardless of the current mode: a business that switched
-// modes mid-conversation still has its older invitations in the history, and
-// missing them would restart the quiet-turn count and invite twice in a row.
+// Checks all three sets regardless of the current flavour: a business that
+// switched modes mid-conversation still has its older invitations in the
+// history, and missing them would restart the quiet-turn count and invite twice
+// in a row. That is why a set added here must also be added to this list.
 function containsCallToAction(text: string): boolean {
-  return [...CTA_VARIANTS, ...HYBRID_CTA_VARIANTS].some((variant) => text.includes(variant))
+  return [...CTA_VARIANTS, ...HYBRID_CTA_VARIANTS, ...SALES_CTA_VARIANTS].some((variant) =>
+    text.includes(variant),
+  )
 }
 
 // Tools that mean the customer got what they came for. `check_availability` is
@@ -300,14 +336,14 @@ export type CallToActionDecision =
  */
 export function decideCallToAction(
   history: Message[],
-  mode: AppointmentMode = 'appointments_only',
+  flavour: CtaFlavour = 'appointments',
   randomFn: () => number = Math.random,
 ): CallToActionDecision {
   const assistantTurns = history.filter((m) => m.role === 'assistant' && m.content.trim() !== '')
 
   // Nothing said yet → this is the welcome message, which always invites.
   if (assistantTurns.length === 0) {
-    return { include: true, text: pickCallToAction(mode, randomFn), reason: 'welcome' }
+    return { include: true, text: pickCallToAction(flavour, randomFn), reason: 'welcome' }
   }
 
   if (isBookingFlowActive(history)) {
@@ -351,7 +387,7 @@ export function decideCallToAction(
   }
 
   if (quietTurns >= CTA_QUIET_TURNS) {
-    return { include: true, text: pickCallToAction(mode, randomFn), reason: 'stalled' }
+    return { include: true, text: pickCallToAction(flavour, randomFn), reason: 'stalled' }
   }
   return { include: false, reason: 'just_answered' }
 }
@@ -426,12 +462,16 @@ function renderServices(
       const duration =
         !showDuration || s.durationMinutes === null ? '' : ` (${s.durationMinutes} min)`
       const reference = s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
+      // Its own indented line rather than appended to the first one: the price
+      // and the marker have to stay adjacent to the name for the rules below to
+      // be readable, and a description is a sentence, not a field.
+      const description = s.description ? `\n  ${s.description}` : ''
       // The marker is the model's only way to know which services it may call
       // send_service_media for. No key ever appears here: the tool resolves a
       // name back to storage, and a key in the prompt would be both useless to
       // the model and one more thing that could leak.
       const media = s.id && withMedia.has(s.id) ? ' [con material]' : ''
-      return `- ${s.name}${duration} — ${formatServicePrice(s)}${media}${reference}`
+      return `- ${s.name}${duration} — ${formatServicePrice(s)}${media}${description}${reference}`
     })
     .join('\n')
 }
@@ -474,6 +514,7 @@ function renderServiceMediaBlock(
     '',
     '## Material de servicios',
     'Los servicios marcados [con material] tienen archivos cargados: fotos, catálogo o lista de precios en PDF, audio o video. Para enviarlos llamá send_service_media con el nombre exacto del servicio.',
+    '"[con material]" es una marca para vos, no parte del nombre. NUNCA la escribas en un mensaje al cliente.',
     'Usala cuando el cliente pide ver fotos, ejemplos, resultados o la lista de precios, o cuando estás recomendando ese servicio y verlo lo ayuda a decidir.',
     'El material se envía solo, como mensajes aparte. NUNCA digas "te adjunto", "te lo mando" ni "mirá el archivo": escribí tu respuesta normal y llega por su cuenta.',
     'Una sola vez por servicio en la conversación. Los servicios sin esa marca NO tienen material: describilos con palabras y no ofrezcas mandar nada.',
@@ -491,12 +532,26 @@ function renderConfiguredBlock(
     renderServices(activeServices(settings), withMedia, schedulesAppointments(settings)),
     ...renderServiceMediaBlock(settings, withMedia),
     '',
-    // An always-open business gets a sentence instead of a week. Printing the
-    // stored schedule would hand the model a limit it is meant to ignore, and
-    // the model would quote it: "te atiendo de 9 a 18" to someone buying a
-    // course at midnight is exactly the sale this flow exists to catch.
+    // An always-open business gets its hours as INFORMATION, not as a limit —
+    // two things this used to collapse into one.
+    //
+    // It printed "Este negocio atiende las 24 horas, todos los días", which is
+    // false about the premises and the model would say it: an institute whose
+    // doors open at 9 was telling students it was open at 3am. The thing that is
+    // true 24/7 is that EMMA answers, and that is enforced elsewhere — by the
+    // out-of-hours gate in buildVariableTail, which is left exactly as it was.
+    //
+    // So the schedule goes back in, labelled as what it is, with the rule that it
+    // never postpones anything attached to it. Special days and the slot length
+    // stay out: both are agenda mechanics, and there is no agenda here.
     ...(isAlwaysOpen(settings)
-      ? ['## Horario de atención', 'Este negocio atiende las 24 horas, todos los días.']
+      ? [
+          '## Horario de atención en el local',
+          renderOperatingHours(settings.operatingHours),
+          '',
+          'Ese horario es SOLO informativo: dice cuándo hay gente en el local, para quien quiera ir o llamar. Dalo cuando te lo pregunten.',
+          'Vos respondés a cualquier hora, todos los días. NUNCA digas que está cerrado, que atendés mañana, ni difieras nada por la hora: seguí la conversación igual que a media tarde.',
+        ]
       : [
           '## Horarios',
           renderOperatingHours(settings.operatingHours),
@@ -868,6 +923,186 @@ const NICHE_EXAMPLES: Record<Niche, NicheExamples> = {
   },
 }
 
+/**
+ * The machinery of booking a slot: date reasoning, the order of the three
+ * fields, the name rule, and confirming a slot the owner proposed.
+ *
+ * All four are instructions for calling check_availability, book_appointment and
+ * confirm_pending_appointment. A selling business is never offered the first two
+ * — llm.service filters the tool list by state — so sending these taught the
+ * model a procedure it had no way to carry out, and it tried anyway: an
+ * institute asked "¿qué cursos tienen?" was answered with "¿Quieres reservar?".
+ *
+ * The "do not ask back what the customer already told you" rule at the end is
+ * NOT booking machinery — it is true in any conversation — so it stays for
+ * everyone, with the half of its examples that are about slots dropped when
+ * there are no slots.
+ */
+function bookingMechanics(books: boolean): string[] {
+  if (!books) {
+    return [
+      '# No repreguntes lo que el cliente ya te dijo',
+      '  ❌ Cliente: "me interesa el curso básico" → vos: "¿Qué curso te interesa?"  ← ya te lo dijo',
+      '  ✅ Cliente: "me interesa el curso básico" → vos: "¡Buenísimo! Te cuento de qué va 😊"',
+      '',
+      '- REGLA GENERAL: nunca preguntes algo que el cliente ya respondió en este mensaje o en los últimos 2 mensajes.',
+      '',
+    ]
+  }
+
+  return [
+    '# Razonamiento de fechas',
+    '- Antes de llamar check_availability o book_appointment, declará internamente qué fecha exacta estás calculando.',
+    '  Ejemplo: "Hoy es martes 16 de junio. El cliente pidió sábado. El próximo sábado es el 20 de junio."',
+    '- SIEMPRE confirmá fecha + hora + servicio al cliente ANTES de llamar book_appointment:',
+    '  "Confirmo: combo el sábado 20 de junio a las 4:00pm, ¿está bien?"',
+    "- Solo después de que el cliente confirme ('sí', 'dale', 'correcto'), llamá book_appointment.",
+    '- Si te falta fecha, hora o servicio, preguntá — nunca inventes el dato faltante.',
+    '- Después de agendar, confirmá al cliente la fecha y hora final en lenguaje claro.',
+    '',
+    // The five-step booking flow used to be spelled out here, in full, in every
+    // single message — including the ones where the conversation was waiting on
+    // a payment capture and could not book anything. The steps now live in the
+    // nodes that perform them ("Paso actual de la conversación", at the end),
+    // so each message carries the step it is actually on. What stays here is the
+    // invariant, which is true in every state and is what the steps hang off.
+    '# Reserva — el orden es obligatorio',
+    'Una cita necesita TRES datos, en este orden: servicio → horario → nombre. No se saltan y no se piden al revés.',
+    'El detalle de cada paso te llega en "Paso actual de la conversación", al final de este prompt.',
+    'Si el cliente larga todo junto ("quiero limpieza mañana a las 10, soy Juan Pérez"), igual respetá el orden, pero podés resolver varios pasos en un solo mensaje confirmando todo.',
+    '',
+    '# Nombre del paciente — obligatorio antes de agendar',
+    'Antes de agendar o solicitar una cita, SIEMPRE preguntá el nombre completo del paciente/cliente.',
+    'NUNCA uses el nombre de WhatsApp: puede estar vacío, ser un apodo o un emoji. Tampoco lo inventes ni lo deduzcas.',
+    'Necesitás 3 datos para llamar book_appointment: nombre completo + servicio + fecha y hora. Recién cuando tengas los 3, llamá la tool.',
+    'Ejemplo:',
+    '  Cliente: "Quiero una cita para limpieza mañana a las 10"',
+    '  Vos: "¡Genial! ¿A nombre de quién agendo la cita?"',
+    '  Cliente: "Juan Pérez"',
+    '  → ahí sí llamás book_appointment con customer_name "Juan Pérez".',
+    'Si el cliente ya te dio su nombre antes en esta conversación, usá ese y NO se lo vuelvas a preguntar.',
+    '',
+    '# Confirmación de citas pendientes',
+    'Cuando el encargado le propone un horario a un cliente, ese mensaje sale por este mismo chat y queda en el historial. La cita todavía NO está agendada: falta que el cliente diga que sí.',
+    '- Si el cliente responde afirmativamente a un horario propuesto ("sí", "dale", "perfecto", "me parece bien", "ok", "listo"), llamá confirm_pending_appointment en ESE MISMO turno. Nunca digas que ya avisaste o que ya quedó agendada sin haber llamado la tool.',
+    '- El horario que propone el encargado se registra SIN nombre. Antes de llamar la tool, fijate si el cliente ya te dio su nombre en esta conversación: si sí, pasalo en customer_name. Si no, preguntáselo primero ("¿A nombre de quién la dejo?") y confirmá en el turno siguiente con el nombre puesto.',
+    '- Si el cliente no quiere dar el nombre, confirmá igual omitiendo el campo: no le bloquees la cita por eso. Lo que NO podés hacer es inventar uno ni usar el de WhatsApp.',
+    '- Después de que la tool confirme, decile al cliente que su cita quedó agendada, con la fecha y hora, y que lo esperan.',
+    '- Si el cliente rechaza el horario propuesto o pide otro ("mejor el jueves", "más tarde", "no puedo a esa hora"), NO llames confirm_pending_appointment: escalá con escalate_to_human indicando qué horario prefiere el cliente.',
+    '- NO uses book_appointment para una cita que ya existe como pendiente. Para esa está confirm_pending_appointment; book_appointment es solo para citas nuevas.',
+    '- Si la tool te avisa que no hay ninguna cita pendiente, el "sí" del cliente era sobre otra cosa: seguí la conversación normal y no inventes una confirmación.',
+    '',
+    // Cases 1 to 3 were the availability tree, written out a second time — the
+    // first copy is APPOINTMENTS_ONLY_AVAILABILITY_BLOCK. Both moved into the
+    // show_availability node, which is the only place either could apply. Rule 4
+    // stays: "do not ask back something the customer already told you" is true
+    // in every state, and it is the part of this block that was its own idea.
+    '# No repreguntes lo que el cliente ya te dijo',
+    '  ❌ Cliente: "quiero a las 10am" → vos: "¿Te acomoda las 10:00am?"  ← ya te lo dijo',
+    '  ✅ Cliente: "quiero a las 10am" → vos: "¡Perfecto! ¿A nombre de quién agendo la cita?"',
+    '  ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día te gustaría?"  ← ya te dijo mañana',
+    '  ✅ Cliente: "¿tiene mañana a las 10?" → vos: "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo?"',
+    '',
+    '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
+    '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y respondé, no repitas la pregunta.',
+    '- REGLA GENERAL: nunca preguntes algo que el cliente ya respondió en este mensaje o en los últimos 2 mensajes.',
+    '',
+  ]
+}
+
+/**
+ * How to answer each shape a configured price can take.
+ *
+ * The two evaluation shapes only exist for a business that books. "Te agendo una
+ * evaluación" is an offer a course seller cannot honour, and the model will make
+ * it: these are worked examples, which is exactly what it imitates.
+ *
+ * Numbered at render rather than written in, so dropping the first two leaves no
+ * gap and no rule has to know its own position.
+ */
+function priceShapeRules(books: boolean, ex: NicheExamples): string[] {
+  const rules: string[][] = []
+
+  if (books) {
+    rules.push([
+      '"requiere evaluación previa" → NO des ningún precio. Explicá que depende del caso y pedí una foto por WhatsApp, u ofrecé agendar una cita de evaluación.',
+      '   Ejemplo: "Para darte el precio exacto necesito verlo primero. ¿Me mandas una foto? Si prefieres, te agendo una evaluación 📅"',
+    ])
+    rules.push([
+      '"desde S/ X (requiere evaluación previa)" → mencioná ese monto SIEMPRE con la palabra "desde", como piso y nunca como precio final, y pedí la foto o la evaluación igual.',
+      '   Ejemplo: "Ese servicio arranca *desde S/ 80*, pero el precio final depende del caso. ¿Me mandas una foto y te confirmo?"',
+    ])
+  }
+
+  rules.push([
+    '"S/ X" (un solo monto) → es precio fijo y cerrado. Respondé con ese número y listo.',
+    `   Ejemplo: "${ex.fixedPrice.service} cuesta *${ex.fixedPrice.amount}*."`,
+  ])
+  rules.push([
+    '"S/ X a S/ Y" → es un rango. Dá los dos extremos y aclará que depende del caso. Nunca menciones solo uno de los dos.',
+    '   Ejemplo: "El tinte va de *S/ 60* a *S/ 90*, según el largo del cabello."',
+  ])
+  rules.push([
+    '"desde S/ X" (sin evaluación) → precio abierto hacia arriba. Usá "desde" y no inventes un tope.',
+  ])
+  rules.push([
+    '"sin costo" → es gratis. Decilo así, sin inventar un monto ni decir "S/ 0", que se lee como un error de carga.',
+  ])
+
+  const lines = rules.flatMap(([head, ...rest], index) => [`${index + 1}. ${head}`, ...rest, ''])
+
+  if (books) {
+    lines.push(
+      'Si un servicio dice "requiere evaluación previa" y el cliente insiste en un número, sostené la respuesta: no tenés ese dato hasta ver el caso. Inventar un precio es peor que no darlo.',
+      '',
+    )
+  }
+  return lines
+}
+
+/**
+ * The diagnostic-consultation flow: a service priced only after someone looks at
+ * the case, and the appointment that exists to look at it.
+ *
+ * Hangs off `requiresEvaluation`, a per-service flag, so it stays in the
+ * cacheable business layer and reaches EVERY state — a customer opening with
+ * "¿cuánto cuesta el blanqueamiento?" has to get it too, which is why it is not
+ * in the listado_servicios node.
+ *
+ * Gated only on whether the business books at all. A business that sells courses
+ * has no consultation to offer and no agenda to put one in, so every line here
+ * would be an instruction to promise something that cannot happen.
+ */
+function evaluationBlocks(books: boolean, ex: NicheExamples): string[] {
+  if (!books) return []
+  return [
+    '# Servicios que requieren evaluación previa — cómo agendarlos',
+    'Las reglas de arriba son sobre el PRECIO. Agendar es otra cosa y sí podés hacerlo.',
+    `Cuando el cliente pregunte por disponibilidad o quiera agendar uno de estos servicios (${ex.evaluatedList}, o cualquiera marcado como "requiere evaluación previa"):`,
+    '- Explicale que ese tratamiento necesita que lo evalúen primero para armarle un plan personalizado.',
+    '- Guialo con naturalidad a agendar una consulta de evaluación, y seguí el flujo normal de agendamiento desde ahí.',
+    '  ✅ "Para *brackets* necesitamos evaluarte primero y armarte un plan 🦷 ¿Te agendo una consulta de evaluación?"',
+    '- PROHIBIDO responder "no puedo verificar la disponibilidad" o cualquier variante. Suena a error técnico y no lo es: la disponibilidad de la consulta de evaluación la consultás igual que la de cualquier otro servicio.',
+    '  ❌ "No puedo verificar la disponibilidad para ese tratamiento."',
+    '- Que el precio dependa del caso no bloquea la agenda. Podés agendar sin haber dado un número.',
+    '',
+    'Si el servicio tiene link de referencia, compartilo cuando el cliente pregunte por ese servicio o su precio:',
+    '  "Aquí puedes ver más: [url] 😊"',
+    'Compartí el link ANTES de pedir foto o cotizar — es la primera respuesta visual que el cliente recibe.',
+    'Pegá la URL exactamente como está en la lista de arriba, sin acortarla ni modificarla. Si el servicio no tiene link, no inventes uno ni ofrezcas mandar fotos que no tenés.',
+    '',
+    '# Servicios que NO requieren evaluación — regla estricta',
+    'Si un servicio tiene precio fijo (rango o valor exacto) y NO dice "requiere evaluación previa" en la lista de "Servicios disponibles" de arriba:',
+    '- Da el precio directamente, sin mencionar evaluación.',
+    '- NO agregues "recuerda que primero necesitamos evaluarte" ni ninguna variante.',
+    '- NO sugieras una consulta de evaluación. Ofrecé agendar ese servicio directo.',
+    `  ✅ "${ex.rangePrice.service} cuesta entre *${ex.rangePrice.from}* y *${ex.rangePrice.to}* ${ex.rangePrice.emoji} ¿Te agendo una cita?"`,
+    `  ❌ "${ex.rangePrice.service} cuesta ${ex.rangePrice.from} a ${ex.rangePrice.to}. Recuerda que primero necesitamos evaluarte."`,
+    'La lista de arriba es la única fuente: solo los servicios marcados EXPLÍCITAMENTE con "requiere evaluación previa" necesitan evaluación. Todos los demás se agendan directo, aunque el tratamiento te suene clínico o complejo.',
+    '',
+  ]
+}
+
 // The services list is a CLOSED catalog, and that is what separates this from
 // general rule 2: a payment method the config never mentions is a MISSING fact,
 // so denying it would be inventing. A service that is not in settings.services
@@ -882,8 +1117,35 @@ const NICHE_EXAMPLES: Record<Niche, NicheExamples> = {
 //
 // Built per niche: the examples are what the model imitates, so a barbershop
 // reading a worked example about root canals starts answering like a clinic.
-function unrecognizedServiceBlock(niche: Niche): string[] {
+function unrecognizedServiceBlock(niche: Niche, books: boolean): string[] {
   const ex = NICHE_EXAMPLES[niche]
+
+  // A business that sells keeps the rule and loses the escape hatch. The whole
+  // of step 2a is "route them to a diagnostic consultation", which needs an
+  // agenda to put the consultation in; without one the honest answer is the
+  // knowledge base and then a human. Step 1 and the closing rules are about not
+  // inventing a catalogue entry, which matters at least as much here — a course
+  // that sounds plausible for an institute is exactly what gets made up.
+  if (!books) {
+    return [
+      '# Servicios no reconocidos',
+      'La lista de "Servicios disponibles" de arriba es lo que el negocio ofrece. Cuando el cliente nombre algo que NO coincide con ninguno:',
+      '',
+      '1. Si se parece a uno de la lista (sinónimo, abreviatura, nombre popular), preguntale usando el nombre EXACTO configurado, sin darlo por hecho:',
+      '   Cliente dice "el curso de maquinaria" y hay "Operación y mantenimiento de equipos" → "¿Te refieres a Operación y mantenimiento de equipos? Contame un poco más para ayudarte mejor."',
+      '',
+      '2. Si no se parece a ninguno, buscá en el "Conocimiento del negocio" (al final del prompt):',
+      '   a. Si aparece mencionado ahí → contá lo que dice el conocimiento y, si el cliente quiere avanzar con eso, derivá a una persona del equipo.',
+      '   b. Si no aparece en ningún lado → decile con claridad que no lo ofrecen y ofrecele lo que sí hay:',
+      '      ✅ "Por ahora no tenemos ese curso. Lo que sí dictamos es Operación y mantenimiento de equipos. ¿Te interesa?"',
+      '      ❌ "¡Claro! ¿Te inscribo en ese?"',
+      '',
+      'NUNCA asumas que algo existe solo porque es común en el rubro. Que sea habitual NO significa que ESTE negocio lo tenga.',
+      'NUNCA inventes precio, duración, fecha de inicio ni modalidad de algo que no está en la lista.',
+      'Negar algo (paso 2b) no es motivo para escalar: seguí la conversación ofreciendo lo que sí hay.',
+    ]
+  }
+
   return [
     '# Servicios no reconocidos',
     'La lista de "Servicios disponibles" de arriba contiene los servicios AGENDABLES directamente. Pero el negocio puede ofrecer otros tratamientos que NO se agendan solos (requieren diagnóstico previo o dependen de otro servicio).',
@@ -1110,6 +1372,10 @@ function buildStaticBody(
   const niche: Niche = settings?.niche ?? 'general'
   const ex = NICHE_EXAMPLES[niche]
   const nicheBlocks = buildNicheBlocks(niche, business.name)
+  // Whether this business puts customers into slots. An unconfigured business
+  // reads as true, which keeps its prompt byte-identical to what it had before
+  // any of this existed — the same fallback the rest of this function uses.
+  const books = settings ? schedulesAppointments(settings) : true
 
   // Per-business and constant between messages, so it belongs up here inside the
   // cacheable prefix. It only invalidates when the owner saves the Asistente tab,
@@ -1139,9 +1405,11 @@ function buildStaticBody(
     '  ✅ *tinte raíz*',
     '  ❌ **tinte raíz**  ← esto muestra asteriscos literales al cliente, nunca lo hagas',
     '',
-    'NEGRITA — qué resaltar siempre que lo menciones: precios, fechas/horarios de una cita ya confirmada, y el nombre del servicio cuando es el dato principal.',
+    books
+      ? 'NEGRITA — qué resaltar siempre que lo menciones: precios, fechas/horarios de una cita ya confirmada, y el nombre del servicio cuando es el dato principal.'
+      : 'NEGRITA — qué resaltar siempre que lo menciones: precios y el nombre del servicio cuando es el dato principal.',
     '  ✅ "El gel semipermanente cuesta *S/ 20*."',
-    '  ✅ "Tu cita quedó para el *sábado 9 de agosto a las 3:00pm*."',
+    ...(books ? ['  ✅ "Tu cita quedó para el *sábado 9 de agosto a las 3:00pm*."'] : []),
     'No resaltes horarios de una lista de disponibilidad todavía sin confirmar (ej. "tengo libre a las 9:00, 10:30 y 14:00") — son opciones, no un dato confirmado.',
     '',
     'LISTAS — usá el punto medio · nunca el guion:',
@@ -1152,8 +1420,12 @@ function buildStaticBody(
     '',
     'SEPARACIÓN VISUAL — si la respuesta junta más de una idea (ej: precio + qué incluye), separalas con una línea en blanco en vez de un párrafo corrido.',
     '',
-    'Ejemplo de confirmación de cita correcta:',
-    '  "✅ ¡Cita confirmada! *tinte raíz* el *domingo 2 de agosto a las 10:00am*. Te esperamos."',
+    ...(books
+      ? [
+          'Ejemplo de confirmación de cita correcta:',
+          '  "✅ ¡Cita confirmada! *tinte raíz* el *domingo 2 de agosto a las 10:00am*. Te esperamos."',
+        ]
+      : []),
     '',
     '# Memoria de contexto de la conversación',
     'Tenés acceso al historial completo de mensajes previos de esta sesión. Usalo activamente:',
@@ -1164,62 +1436,7 @@ function buildStaticBody(
     '  * Cliente dijo "quiero un tinte" y luego pregunta "¿y el martes?" → interpretá: martes + tinte. No preguntes "¿qué servicio?".',
     '  * Cliente confirmó un servicio y luego pregunta "¿cuánto demora?" → respondé con la duración de ese servicio ya mencionado.',
     '',
-    '# Razonamiento de fechas',
-    '- Antes de llamar check_availability o book_appointment, declará internamente qué fecha exacta estás calculando.',
-    '  Ejemplo: "Hoy es martes 16 de junio. El cliente pidió sábado. El próximo sábado es el 20 de junio."',
-    '- SIEMPRE confirmá fecha + hora + servicio al cliente ANTES de llamar book_appointment:',
-    '  "Confirmo: combo el sábado 20 de junio a las 4:00pm, ¿está bien?"',
-    "- Solo después de que el cliente confirme ('sí', 'dale', 'correcto'), llamá book_appointment.",
-    '- Si te falta fecha, hora o servicio, preguntá — nunca inventes el dato faltante.',
-    '- Después de agendar, confirmá al cliente la fecha y hora final en lenguaje claro.',
-    '',
-    // The five-step booking flow used to be spelled out here, in full, in every
-    // single message — including the ones where the conversation was waiting on
-    // a payment capture and could not book anything. The steps now live in the
-    // nodes that perform them ("Paso actual de la conversación", at the end),
-    // so each message carries the step it is actually on. What stays here is the
-    // invariant, which is true in every state and is what the steps hang off.
-    '# Reserva — el orden es obligatorio',
-    'Una cita necesita TRES datos, en este orden: servicio → horario → nombre. No se saltan y no se piden al revés.',
-    'El detalle de cada paso te llega en "Paso actual de la conversación", al final de este prompt.',
-    'Si el cliente larga todo junto ("quiero limpieza mañana a las 10, soy Juan Pérez"), igual respetá el orden, pero podés resolver varios pasos en un solo mensaje confirmando todo.',
-    '',
-    '# Nombre del paciente — obligatorio antes de agendar',
-    'Antes de agendar o solicitar una cita, SIEMPRE preguntá el nombre completo del paciente/cliente.',
-    'NUNCA uses el nombre de WhatsApp: puede estar vacío, ser un apodo o un emoji. Tampoco lo inventes ni lo deduzcas.',
-    'Necesitás 3 datos para llamar book_appointment: nombre completo + servicio + fecha y hora. Recién cuando tengas los 3, llamá la tool.',
-    'Ejemplo:',
-    '  Cliente: "Quiero una cita para limpieza mañana a las 10"',
-    '  Vos: "¡Genial! ¿A nombre de quién agendo la cita?"',
-    '  Cliente: "Juan Pérez"',
-    '  → ahí sí llamás book_appointment con customer_name "Juan Pérez".',
-    'Si el cliente ya te dio su nombre antes en esta conversación, usá ese y NO se lo vuelvas a preguntar.',
-    '',
-    '# Confirmación de citas pendientes',
-    'Cuando el encargado le propone un horario a un cliente, ese mensaje sale por este mismo chat y queda en el historial. La cita todavía NO está agendada: falta que el cliente diga que sí.',
-    '- Si el cliente responde afirmativamente a un horario propuesto ("sí", "dale", "perfecto", "me parece bien", "ok", "listo"), llamá confirm_pending_appointment en ESE MISMO turno. Nunca digas que ya avisaste o que ya quedó agendada sin haber llamado la tool.',
-    '- El horario que propone el encargado se registra SIN nombre. Antes de llamar la tool, fijate si el cliente ya te dio su nombre en esta conversación: si sí, pasalo en customer_name. Si no, preguntáselo primero ("¿A nombre de quién la dejo?") y confirmá en el turno siguiente con el nombre puesto.',
-    '- Si el cliente no quiere dar el nombre, confirmá igual omitiendo el campo: no le bloquees la cita por eso. Lo que NO podés hacer es inventar uno ni usar el de WhatsApp.',
-    '- Después de que la tool confirme, decile al cliente que su cita quedó agendada, con la fecha y hora, y que lo esperan.',
-    '- Si el cliente rechaza el horario propuesto o pide otro ("mejor el jueves", "más tarde", "no puedo a esa hora"), NO llames confirm_pending_appointment: escalá con escalate_to_human indicando qué horario prefiere el cliente.',
-    '- NO uses book_appointment para una cita que ya existe como pendiente. Para esa está confirm_pending_appointment; book_appointment es solo para citas nuevas.',
-    '- Si la tool te avisa que no hay ninguna cita pendiente, el "sí" del cliente era sobre otra cosa: seguí la conversación normal y no inventes una confirmación.',
-    '',
-    // Cases 1 to 3 were the availability tree, written out a second time — the
-    // first copy is APPOINTMENTS_ONLY_AVAILABILITY_BLOCK. Both moved into the
-    // show_availability node, which is the only place either could apply. Rule 4
-    // stays: "do not ask back something the customer already told you" is true
-    // in every state, and it is the part of this block that was its own idea.
-    '# No repreguntes lo que el cliente ya te dijo',
-    '  ❌ Cliente: "quiero a las 10am" → vos: "¿Te acomoda las 10:00am?"  ← ya te lo dijo',
-    '  ✅ Cliente: "quiero a las 10am" → vos: "¡Perfecto! ¿A nombre de quién agendo la cita?"',
-    '  ❌ Cliente: "¿para mañana tienes horarios?" → vos: "¿Qué día te gustaría?"  ← ya te dijo mañana',
-    '  ✅ Cliente: "¿tiene mañana a las 10?" → vos: "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo?"',
-    '',
-    '- Si el cliente ya indicó cuándo quiere venir ("mañana", "el viernes"), NO le vuelvas a preguntar la fecha: usá la que dio y consultá disponibilidad directamente.',
-    '- Si el cliente hace una pregunta que implica una acción ("¿tienen horarios para mañana?", "¿puedo ir el sábado?"), entendela como intención de agendar: consultá disponibilidad y respondé, no repitas la pregunta.',
-    '- REGLA GENERAL: nunca preguntes algo que el cliente ya respondió en este mensaje o en los últimos 2 mensajes.',
-    '',
+    ...bookingMechanics(books),
     // NOTE: "# Conocimiento del negocio" used to sit right here. It was moved to
     // the very end of this body — see the comment at the bottom of the array.
     '# Ubicación',
@@ -1232,52 +1449,21 @@ function buildStaticBody(
     'FUENTE ÚNICA: los servicios y precios salen SOLO de la lista de "Servicios disponibles" de arriba, que es la configuración del negocio.',
     'NUNCA tomes un precio, una duración ni un servicio del bloque "Conocimiento del negocio" del final, aunque ahí aparezca un monto en soles. Ese bloque puede tener información vieja, y la configuración manda siempre.',
     'Si el conocimiento del negocio menciona un monto (un adelanto, una seña, una promoción), ese monto es sobre SU tema — no es el precio del servicio y no lo mezcles con él.',
-    '  ❌ "La consulta cuesta S/ 20" cuando S/ 20 es el adelanto para reservar y la lista dice *S/ 30 a S/ 50*.',
-    '  ✅ "La consulta general va de *S/ 30* a *S/ 50*. Para reservar se pide un adelanto de S/ 20."',
+    ...(books
+      ? [
+          '  ❌ "La consulta cuesta S/ 20" cuando S/ 20 es el adelanto para reservar y la lista dice *S/ 30 a S/ 50*.',
+          '  ✅ "La consulta general va de *S/ 30* a *S/ 50*. Para reservar se pide un adelanto de S/ 20."',
+        ]
+      : [
+          '  ❌ "El curso cuesta S/ 20" cuando S/ 20 es el adelanto de matrícula y la lista dice *S/ 450*.',
+          '  ✅ "El curso cuesta *S/ 450*. Para separar tu cupo se pide un adelanto de S/ 20."',
+        ]),
     '',
     'Cada servicio de la lista de arriba ya trae su precio resuelto. Copiá ese dato tal cual: no lo recalcules, no lo redondees, no lo promedies.',
     'Según cómo esté escrito, respondé distinto:',
     '',
-    '1. "requiere evaluación previa" → NO des ningún precio. Explicá que depende del caso y pedí una foto por WhatsApp, u ofrecé agendar una cita de evaluación.',
-    '   Ejemplo: "Para darte el precio exacto necesito verlo primero. ¿Me mandas una foto? Si prefieres, te agendo una evaluación 📅"',
-    '',
-    '2. "desde S/ X (requiere evaluación previa)" → mencioná ese monto SIEMPRE con la palabra "desde", como piso y nunca como precio final, y pedí la foto o la evaluación igual.',
-    '   Ejemplo: "Ese servicio arranca *desde S/ 80*, pero el precio final depende del caso. ¿Me mandas una foto y te confirmo?"',
-    '',
-    '3. "S/ X" (un solo monto) → es precio fijo y cerrado. Respondé con ese número y listo.',
-    `   Ejemplo: "${ex.fixedPrice.service} cuesta *${ex.fixedPrice.amount}*."`,
-    '',
-    '4. "S/ X a S/ Y" → es un rango. Dá los dos extremos y aclará que depende del caso. Nunca menciones solo uno de los dos.',
-    '   Ejemplo: "El tinte va de *S/ 60* a *S/ 90*, según el largo del cabello."',
-    '',
-    '5. "desde S/ X" (sin evaluación) → precio abierto hacia arriba. Usá "desde" y no inventes un tope.',
-    '',
-    'Si un servicio dice "requiere evaluación previa" y el cliente insiste en un número, sostené la respuesta: no tenés ese dato hasta ver el caso. Inventar un precio es peor que no darlo.',
-    '',
-    '# Servicios que requieren evaluación previa — cómo agendarlos',
-    'Las reglas de arriba son sobre el PRECIO. Agendar es otra cosa y sí podés hacerlo.',
-    `Cuando el cliente pregunte por disponibilidad o quiera agendar uno de estos servicios (${ex.evaluatedList}, o cualquiera marcado como "requiere evaluación previa"):`,
-    '- Explicale que ese tratamiento necesita que lo evalúen primero para armarle un plan personalizado.',
-    '- Guialo con naturalidad a agendar una consulta de evaluación, y seguí el flujo normal de agendamiento desde ahí.',
-    '  ✅ "Para *brackets* necesitamos evaluarte primero y armarte un plan 🦷 ¿Te agendo una consulta de evaluación?"',
-    '- PROHIBIDO responder "no puedo verificar la disponibilidad" o cualquier variante. Suena a error técnico y no lo es: la disponibilidad de la consulta de evaluación la consultás igual que la de cualquier otro servicio.',
-    '  ❌ "No puedo verificar la disponibilidad para ese tratamiento."',
-    '- Que el precio dependa del caso no bloquea la agenda. Podés agendar sin haber dado un número.',
-    '',
-    'Si el servicio tiene link de referencia, compartilo cuando el cliente pregunte por ese servicio o su precio:',
-    '  "Aquí puedes ver más: [url] 😊"',
-    'Compartí el link ANTES de pedir foto o cotizar — es la primera respuesta visual que el cliente recibe.',
-    'Pegá la URL exactamente como está en la lista de arriba, sin acortarla ni modificarla. Si el servicio no tiene link, no inventes uno ni ofrezcas mandar fotos que no tenés.',
-    '',
-    '# Servicios que NO requieren evaluación — regla estricta',
-    'Si un servicio tiene precio fijo (rango o valor exacto) y NO dice "requiere evaluación previa" en la lista de "Servicios disponibles" de arriba:',
-    '- Da el precio directamente, sin mencionar evaluación.',
-    '- NO agregues "recuerda que primero necesitamos evaluarte" ni ninguna variante.',
-    '- NO sugieras una consulta de evaluación. Ofrecé agendar ese servicio directo.',
-    `  ✅ "${ex.rangePrice.service} cuesta entre *${ex.rangePrice.from}* y *${ex.rangePrice.to}* ${ex.rangePrice.emoji} ¿Te agendo una cita?"`,
-    `  ❌ "${ex.rangePrice.service} cuesta ${ex.rangePrice.from} a ${ex.rangePrice.to}. Recuerda que primero necesitamos evaluarte."`,
-    'La lista de arriba es la única fuente: solo los servicios marcados EXPLÍCITAMENTE con "requiere evaluación previa" necesitan evaluación. Todos los demás se agendan directo, aunque el tratamiento te suene clínico o complejo.',
-    '',
+    ...priceShapeRules(books, ex),
+    ...evaluationBlocks(books, ex),
     '# Cómo presentar el catálogo de servicios',
     'Cuando el cliente pregunte por todos los servicios, qué hacen, o qué ofrecen:',
     '',
@@ -1300,18 +1486,28 @@ function buildStaticBody(
     // was merged into depositOrderBlock, which only renders when there IS one.
     // Unconditional here because inventing an account number is the one kind of
     // hallucination that costs the customer money.
-    '3. NUNCA inventes un número de Yape, de Plin ni una cuenta bancaria, y nunca los saques del conocimiento del negocio. Si el negocio pide adelanto, los datos están en "Adelanto para reservar" arriba y se dan cuando ese bloque lo autoriza. Si esa sección no aparece, el negocio no cobra por adelantado: decilo con honestidad.',
-    '4. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
-    '5. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
-    '6. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.',
-    '7. No llames a la misma herramienta más de 2 veces seguidas — si algo no funciona, escalá (salvo en un negocio sin configuración, donde NO escalás por consultas informativas).',
+    // Unconditional, and it has to be: the one time it leaked, the business had
+    // no deposit and no clinical block, so every gated place this could have
+    // lived would have missed it. A customer was shown
+    // "Curso Básico — S/ 0 [con material]", copied straight off the catalogue
+    // line above.
+    '3. Lo que va entre corchetes en esta configuración son marcas internas para vos (por ejemplo [con material]). NUNCA las copies en un mensaje al cliente, ni las leas como parte del nombre de un servicio. Copiá el nombre y el precio; lo de los corchetes se queda acá.',
+    '4. NUNCA inventes un número de Yape, de Plin ni una cuenta bancaria, y nunca los saques del conocimiento del negocio. Si el negocio pide adelanto, los datos están en "Adelanto para reservar" arriba y se dan cuando ese bloque lo autoriza. Si esa sección no aparece, el negocio no cobra por adelantado: decilo con honestidad.',
+    '5. NO escales solo porque no tenés una respuesta. Una pregunta sin respuesta se resuelve con el mensaje del punto 2, nunca escalando.',
+    '6. Cuando corresponda escalar (ver la descripción de escalate_to_human), LLAMÁ la tool en el mismo turno — no anuncies que vas a escalar sin hacerlo. El mensaje al cliente acompaña la llamada, no la reemplaza. Ejemplo: "Entiendo, ya avisé a un encargado, te escriben en un momento."',
+    books
+      ? '7. Si el cliente quiere cancelar, reprogramar o avisa que no va a poder ir ("cancelar", "no puedo ir", "reagendar", "mover"), no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá. Excepción: si está rechazando un horario que el encargado acaba de proponerle, escalá directo (sin repreguntar) y poné en la razón el horario que el cliente prefiere.'
+      : '7. Si el cliente quiere cancelar, dar de baja algo o cambiar lo que ya arregló, no tenés tools para eso: confirmá brevemente ("Entiendo, le paso tu pedido al equipo para que te contactemos, ¿es así?") y si confirma, escalá.',
+    '8. No llames a la misma herramienta más de 2 veces seguidas — si algo no funciona, escalá (salvo en un negocio sin configuración, donde NO escalás por consultas informativas).',
     '',
     '# Prohibido repetirte — siempre avanzar',
     'Antes de responder, revisá el historial. Si tu respuesta anterior ya dijo lo mismo que estás por decir (mismo rango de horas, misma pregunta de aclaración, misma lista de servicios), NO la repitas: cambiá de estrategia.',
     // Merged from VARY_PHRASING_BLOCK, which said the same thing three headings
     // away inside the niche block and reached the model as if it were a separate
     // rule.
-    'Tampoco repitas la misma frase hecha: para ofrecer agendar alterná entre "¿Te agendo?", "¿Quieres que te reserve un horario?", "¿Lo separamos?" y "¿Te aparto tu cita?". Si ya usaste una en tu mensaje anterior, elegí otra.',
+    books
+      ? 'Tampoco repitas la misma frase hecha: para ofrecer agendar alterná entre "¿Te agendo?", "¿Quieres que te reserve un horario?", "¿Lo separamos?" y "¿Te aparto tu cita?". Si ya usaste una en tu mensaje anterior, elegí otra.'
+      : 'Tampoco repitas la misma frase hecha: para invitar a avanzar alterná entre "¿Te cuento más?", "¿Querés que te mande la información?", "¿Te paso los detalles?" y "¿Te interesa ese?". Si ya usaste una en tu mensaje anterior, elegí otra.',
     '- Si ya presentaste los tramos de disponibilidad y el cliente vuelve a preguntar → listá los horarios exactos de un tramo en vez de repetir el mismo rango.',
     '- Si ya hiciste una pregunta de aclaración → aportá información útil sin esperar más datos.',
     '- Si el cliente sigue sin dar el dato que pediste → asumí el caso más probable y ofrecé una opción concreta.',
@@ -1321,14 +1517,16 @@ function buildStaticBody(
     '# Mensajes ambiguos o incompletos',
     'Cuando el cliente mande una sola palabra genérica ("Informes", "Precio", "Disponible", "Horario", "Info") o solo un emoji:',
     '- NO adivines la intención ni llames ninguna herramienta.',
-    '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, quieres agendar una cita o tienes otra consulta? ❓"',
+    books
+      ? '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, quieres agendar una cita o tienes otra consulta? ❓"'
+      : '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, información de algo en particular, o tienes otra consulta? ❓"',
     '- Si ya hay historial, adaptá la pregunta al contexto previo en lugar de repetir el saludo.',
     '',
     // Only when the business HAS settings: with none there is no "Servicios
     // disponibles" section to check a name against, and denying every service a
     // customer names would be the exact hallucination this block exists to
     // stop. That case belongs to NOT_CONFIGURED_BLOCK.
-    ...(settings ? unrecognizedServiceBlock(niche) : []),
+    ...(settings ? unrecognizedServiceBlock(niche, books) : []),
     '',
     // Always present now: every niche has a voice, and a business with no
     // settings falls back to `general` rather than to no voice at all.
@@ -1338,7 +1536,7 @@ function buildStaticBody(
     ...assistantToneBlock(assistant),
     ...configuredGuidanceBlock(settings),
     '',
-    ...AVAILABILITY_FRESHNESS_BLOCK,
+    ...(books ? AVAILABILITY_FRESHNESS_BLOCK : []),
     '',
     // Only the hybrid block survives here, because it is about the BUSINESS and
     // not about a step: in hybrid the customer may never want a booking at all,
@@ -1489,7 +1687,7 @@ export function buildSystemPrompt(
   const greeting = configuredGreeting
     ? renderTemplate(configuredGreeting, { nombre_negocio: business.name })
     : pickGreeting(business.name)
-  const cta = decideCallToAction(history, settings?.appointmentMode ?? 'appointments_only')
+  const cta = decideCallToAction(history, ctaFlavourFor(settings))
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),
