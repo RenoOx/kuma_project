@@ -79,6 +79,26 @@ const serviceSchema = z
     // happens once, at the write boundary, in normalizeServices.
     id: z.string().min(1).max(64).optional(),
     name: z.string().min(1),
+    // What the thing actually is, in the owner's words. Emma has no other way
+    // to answer "contame más": a service was name, price and duration, so the
+    // best she could do was resend the price she had already given.
+    //
+    // This used to live in the knowledge base under the `servicios` category.
+    // That category was retired because KB entries repeating prices and hours
+    // gave Emma a second source of truth to contradict herself with — correct,
+    // but it left the description with nowhere to go, and the retired rows are
+    // filtered out of every read that feeds the prompt (knowledgeBase.repo.ts).
+    // It belongs on the item: a price has structured form and this does not
+    // compete with it.
+    //
+    // Optional, and '' collapses to undefined the same way a cleared message
+    // does — so a business that never fills it in renders exactly as before.
+    description: z
+      .string()
+      .trim()
+      .max(600)
+      .transform((v) => (v.length === 0 ? undefined : v))
+      .optional(),
     durationMinutes: z
       .number()
       .int()
@@ -139,8 +159,12 @@ const appointmentModeSchema = z.enum(['appointments_only', 'hybrid']).default('a
 //   - sales        → inform, charge, collect data (courses, certifications)
 // Defaults to appointments so businesses configured before this field existed
 // keep their exact behaviour without a data migration.
-// NOTE: does not replace appointmentMode yet — both coexist. appointmentMode is
-// still the field prompts.ts reads for the call-to-action decision.
+// NOTE: does not replace appointmentMode yet — both coexist. appointmentMode
+// decides between the booking and the walk-in wording; this decides whether
+// there is anything to book at all, so the prompt reads THIS first (see
+// ctaFlavourFor). It has to: assistantFunctionFields pins a selling business to
+// appointmentMode 'appointments_only', so branching on that alone handed a
+// course seller "¿Quieres reservar?".
 const flowTypeSchema = z.enum(['appointments', 'sales']).default('appointments')
 
 // Fields Emma must collect from the customer before closing, in the sales flow.
@@ -590,6 +614,10 @@ export function formatServicePrice(service: Service): string {
   // Unreachable through the schema (the refine above demands a priceMin when
   // requiresEvaluation is false), kept so this stays total.
   if (priceMin === null) return 'precio no configurado'
+  // Free, not broken. "S/ 0" is what a customer was actually shown for a course
+  // whose price had not been typed in yet, and it reads as a system error rather
+  // than as a number anyone meant.
+  if (priceMin === 0 && (priceMax === null || priceMax === 0)) return 'sin costo'
   if (priceMax === null) return `desde S/ ${priceMin}`
   if (priceMin === priceMax) return `S/ ${priceMin}`
   return `S/ ${priceMin} a S/ ${priceMax}`

@@ -298,6 +298,47 @@ describe('servicesPatchSchema', () => {
   })
 })
 
+describe('switching what the assistant is for', () => {
+  // A composition is a list of node ids, and which ones make sense depends on
+  // the flow. "Disponibilidad" still satisfies validateFlow after the switch to
+  // selling — its only requirement is that services exist — so resolveFlow kept
+  // running the booking flow and Emma kept offering slots for a business with no
+  // agenda, with nothing anywhere reporting an error.
+  const withFlow: BusinessSettings = {
+    ...BASE_SETTINGS,
+    conversationFlow: {
+      nodes: ['idle', 'greeting', 'informing', 'listado_servicios', 'show_availability'],
+      overrides: {},
+    },
+  }
+
+  it('drops a composed conversation when the flow changes', () => {
+    const result = mergeSettingsSection('biz1', withFlow, { flowType: 'sales' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.conversationFlow).toBeUndefined()
+    expect(result.data.flowType).toBe('sales')
+  })
+
+  it('leaves it alone when the patch only repeats the flow it already had', () => {
+    // The identity form sends `assistantFunction` on every save, so it arrives
+    // with a flowType even when the owner only renamed the assistant. Comparing
+    // against what is stored — not merely "the key is present" — is what keeps
+    // that from wiping the composition.
+    const result = mergeSettingsSection('biz1', withFlow, { flowType: 'appointments' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.conversationFlow?.nodes).toContain('show_availability')
+  })
+
+  it('leaves it alone when the patch is about something else entirely', () => {
+    const result = mergeSettingsSection('biz1', withFlow, { requiresDeposit: true })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.conversationFlow?.nodes).toContain('show_availability')
+  })
+})
+
 describe('paymentsPatchSchema', () => {
   it('accepts a partial patch', () => {
     const parsed = paymentsPatchSchema.parse({ requiresDeposit: true })

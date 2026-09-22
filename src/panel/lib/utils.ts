@@ -162,6 +162,10 @@ export function formatServicePrice(service: {
       : `desde S/ ${priceMin} (requiere evaluación previa)`
   }
   if (priceMin === null) return 'precio no configurado'
+  // Free, not broken. "S/ 0" is what a customer was actually shown for a course
+  // whose price had not been typed in yet, and it reads as a system error rather
+  // than as a number anyone meant.
+  if (priceMin === 0 && (priceMax === null || priceMax === 0)) return 'sin costo'
   if (priceMax === null) return `desde S/ ${priceMin}`
   if (priceMin === priceMax) return `S/ ${priceMin}`
   return `S/ ${priceMin} a S/ ${priceMax}`

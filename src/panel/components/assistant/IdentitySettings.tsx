@@ -8,7 +8,6 @@ import type {
 } from '../../api/types.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
 import { Field, SettingsCard } from '../config/SettingsCard.js'
-import { Badge } from '../ui/badge.js'
 import { Input } from '../ui/input.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
 import { Textarea } from '../ui/textarea.js'
@@ -35,16 +34,17 @@ const FUNCTION_LABELS: Record<AssistantFunction, string> = {
   ambas: 'Agenda y atiende sin cita',
 }
 
-// 'vende' writes flowType 'sales', whose state machine cannot advance yet: the
-// only way out of its greeting is the asks_info trigger and nothing in the code
-// emits it, so the business would answer once and then go quiet. Offered but
-// disabled rather than hidden, so a business already stored on it can still see
-// what it is on and switch away.
-const FUNCTION_SOON: ReadonlySet<AssistantFunction> = new Set<AssistantFunction>(['vende'])
-
+// 'vende' was disabled here until the state machine could carry it. The reason
+// was real: the only way out of its greeting was the asks_info trigger, which
+// nothing emitted, so the business answered once and went quiet. The composed
+// flow closed that — greeting now leaves on customer_message and presetFor
+// hands a selling business a composition that runs — so the lock is gone.
+//
+// What it still does NOT do is charge or collect data at the end. The hint says
+// exactly that rather than promising the flow it will grow into.
 const FUNCTION_HINTS: Record<AssistantFunction, string> = {
   agenda: 'Solo con cita previa: Emma informa y reserva horarios.',
-  vende: 'Sin agenda: Emma informa, cobra y toma los datos del cliente.',
+  vende: 'Sin agenda: Emma informa, muestra el catálogo y manda el material.',
   ambas: 'Atiende por orden de llegada y también reserva horarios.',
 }
 
@@ -173,27 +173,18 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
       </Field>
 
       <Field label="Función" hint={FUNCTION_HINTS[fn]} htmlFor="asst-function">
-        <div className="flex flex-col gap-1.5">
-          {FUNCTION_SOON.has(fn) && (
-            <Badge variant="secondary" className="w-fit text-[10px]">
-              Próximamente
-            </Badge>
-          )}
-          <Select value={fn} onValueChange={(v) => setFn(v as AssistantFunction)}>
-            <SelectTrigger id="asst-function">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(FUNCTION_LABELS) as AssistantFunction[]).map((value) => (
-                <SelectItem key={value} value={value} disabled={FUNCTION_SOON.has(value)}>
-                  {FUNCTION_SOON.has(value)
-                    ? `${FUNCTION_LABELS[value]} · Próximamente`
-                    : FUNCTION_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <Select value={fn} onValueChange={(v) => setFn(v as AssistantFunction)}>
+          <SelectTrigger id="asst-function">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(FUNCTION_LABELS) as AssistantFunction[]).map((value) => (
+              <SelectItem key={value} value={value}>
+                {FUNCTION_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Field>
 
       <Field

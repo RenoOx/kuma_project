@@ -12,6 +12,7 @@ import {
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Switch } from '../ui/switch.js'
+import { Textarea } from '../ui/textarea.js'
 import { ServiceMediaField } from './ServiceMediaField.js'
 
 const EMPTY: PanelService = {
@@ -68,17 +69,47 @@ export function ServiceForm({
   const base = service ?? EMPTY
 
   const [name, setName] = useState(base.name)
+  const [description, setDescription] = useState(base.description ?? '')
   const [duration, setDuration] = useState(toField(base.durationMinutes))
   const [priceMin, setPriceMin] = useState(toField(base.priceMin))
   const [priceMax, setPriceMax] = useState(toField(base.priceMax))
   const [requiresEvaluation, setRequiresEvaluation] = useState(base.requiresEvaluation)
   const [referenceUrl, setReferenceUrl] = useState(base.referenceUrl ?? '')
 
+  // Re-seeded whenever the dialog is pointed at a different service.
+  //
+  // The six useState calls above run once, and this Dialog is never unmounted —
+  // ServiceList renders it always and only toggles `open`. So opening "Nuevo
+  // servicio" and then editing a real one left the fields holding the blank
+  // values from the first open, while the title and the id — read straight from
+  // props — showed the real service. An owner saving from that state was
+  // handing back a service with no name and no price.
+  //
+  // Keyed on the service's own content, not on `open`: a parent re-render while
+  // the dialog sits open must not wipe what is being typed.
+  const seed = JSON.stringify(service)
+  const [seededFrom, setSeededFrom] = useState(seed)
+  if (seededFrom !== seed) {
+    setSeededFrom(seed)
+    setName(base.name)
+    setDescription(base.description ?? '')
+    setDuration(toField(base.durationMinutes))
+    setPriceMin(toField(base.priceMin))
+    setPriceMax(toField(base.priceMax))
+    setRequiresEvaluation(base.requiresEvaluation)
+    setReferenceUrl(base.referenceUrl ?? '')
+  }
+
   const submit = (): void => {
     const trimmedRef = referenceUrl.trim()
+    const trimmedDescription = description.trim()
     onSubmit({
       ...base,
       name: name.trim(),
+      // Dropped when empty rather than sent as '': the key has to be absent for
+      // the server to read it as "never wrote one", and `...base` above would
+      // otherwise keep a previous description alive after the owner cleared it.
+      ...(trimmedDescription ? { description: trimmedDescription } : { description: undefined }),
       durationMinutes: toNumber(duration),
       priceMin: toNumber(priceMin),
       priceMax: toNumber(priceMax),
@@ -110,6 +141,22 @@ export function ServiceForm({
               placeholder="ej. Corte de cabello"
               maxLength={120}
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="svc-description">Descripción</Label>
+            <Textarea
+              id="svc-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={600}
+              rows={3}
+              placeholder="Qué incluye, a quién le sirve, cuánto dura, qué se lleva…"
+            />
+            <span className="text-muted-foreground text-xs">
+              Es lo que Emma cuenta cuando el cliente pide más información. Sin esto solo puede
+              repetir el precio.
+            </span>
           </div>
 
           {schedulesAppointments && (

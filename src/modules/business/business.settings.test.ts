@@ -4,6 +4,7 @@ import {
   type BusinessSettings,
   businessSettingsSchema,
   DEFAULT_ASSISTANT_FIELDS,
+  formatServicePrice,
   parseBusinessSettings,
   remindersExplicitlyDisabled,
   resolveDayHours,
@@ -285,5 +286,37 @@ describe('business.settings — active services', () => {
     expect(service?.priceMin).toBe(300)
     expect(service?.priceMax).toBe(500)
     expect(service?.durationMinutes).toBe(45)
+  })
+})
+
+describe('formatServicePrice', () => {
+  const service = (over: Record<string, unknown>) =>
+    businessSettingsSchema.shape.services.element.parse({
+      name: 'x',
+      priceMin: null,
+      priceMax: null,
+      ...over,
+    })
+
+  it('calls a zero price free instead of printing S/ 0', () => {
+    // A customer was shown "Curso Básico — S/ 0" for a course whose price had
+    // not been typed in yet. Zero is a number the owner may well have meant;
+    // "S/ 0" reads as a system error.
+    expect(formatServicePrice(service({ priceMin: 0, priceMax: 0 }))).toBe('sin costo')
+    expect(formatServicePrice(service({ priceMin: 0, priceMax: null }))).toBe('sin costo')
+  })
+
+  it('leaves every other shape exactly as it was', () => {
+    expect(formatServicePrice(service({ priceMin: 25, priceMax: 25 }))).toBe('S/ 25')
+    expect(formatServicePrice(service({ priceMin: 25, priceMax: 40 }))).toBe('S/ 25 a S/ 40')
+    expect(formatServicePrice(service({ priceMin: 25, priceMax: null }))).toBe('desde S/ 25')
+    expect(formatServicePrice(service({ requiresEvaluation: true }))).toBe(
+      'requiere evaluación previa',
+    )
+  })
+
+  it('does not swallow a zero floor on a range that goes somewhere', () => {
+    // 0-to-40 is a real range, not a free service.
+    expect(formatServicePrice(service({ priceMin: 0, priceMax: 40 }))).toBe('S/ 0 a S/ 40')
   })
 })

@@ -295,6 +295,8 @@ export interface PanelService {
    */
   id?: string
   name: string
+  /** What it is, in the owner's words. Absent until they write one. */
+  description?: string
   /** Null when the service has no fixed length; the slot grid decides. */
   durationMinutes: number | null
   priceMin: number | null
