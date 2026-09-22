@@ -75,6 +75,25 @@ export async function updateLastSeen(
  * to "<phone>@s.whatsapp.net" once WhatsApp exposes their number, and the newer
  * one is the one future proactive sends have to use.
  */
+/**
+ * Replaces the metadata blob. Callers merge; this writes what they hand over.
+ *
+ * Kept dumb on purpose: merging needs the previous value, and reading it inside
+ * an update would make two customers answering at once silently overwrite each
+ * other. The service reads and merges in one transaction instead.
+ */
+export async function updateMetadata(
+  businessId: string,
+  id: string,
+  metadata: Record<string, unknown>,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(customers)
+    .set({ metadata, updatedAt: new Date() })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
 export async function updateWaJid(
   businessId: string,
   id: string,

@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PanelApiError } from '../api/client.js'
 import {
-  deleteServiceMedia,
-  getServiceMedia,
-  reorderServiceMedia,
-  uploadServiceMedia,
+  deleteOwnerMedia,
+  getOwnerMedia,
+  type MediaOwner,
+  reorderOwnerMedia,
+  uploadOwnerMedia,
 } from '../api/settings.js'
 import type { ServiceMediaView } from '../api/types.js'
 import { useSession } from '../lib/session.js'
@@ -22,9 +23,13 @@ export interface ServiceMediaControls {
 }
 
 /**
- * One service's files: what to show, and the three writes that change them.
+ * One owner's files: what to show, and the three writes that change them.
  *
- * Fetched per service rather than alongside the settings, because signing is per
+ * An owner is a service of the catalogue or a step of the conversation. The two
+ * behave identically from here down — same table, same limits, same order — so
+ * they share one hook rather than two that would drift.
+ *
+ * Fetched per owner rather than alongside the settings, because signing is per
  * object: batching it into GET /settings would cost a signature for every file
  * of every service on every page load, and hand out URLs that expire before the
  * owner opens the card holding them.
@@ -33,11 +38,13 @@ export interface ServiceMediaControls {
  * service "[con material]" in her prompt, so uploading the first one or deleting
  * the last one changes what the catalogue says about that service.
  */
-export function useServiceMedia(serviceId: string | undefined): ServiceMediaControls {
+export function useOwnerMedia(owner: MediaOwner | undefined): ServiceMediaControls {
   const session = useSession()
   const queryClient = useQueryClient()
 
-  const key = ['serviceMedia', session.businessId, serviceId]
+  // The kind is part of the key, not decoration: a service and a step are both
+  // nanoids and a shared key would serve one's files as the other's.
+  const key = ['serviceMedia', session.businessId, owner?.kind, owner?.id]
 
   const query = useQuery<ServiceMediaView[]>({
     queryKey: key,
@@ -45,10 +52,10 @@ export function useServiceMedia(serviceId: string | undefined): ServiceMediaCont
       // Unreachable while `enabled` is false; thrown rather than asserted so a
       // future caller that drops the guard fails loudly instead of requesting
       // `/services/undefined/media`.
-      if (serviceId === undefined) throw new Error('serviceId is required')
-      return getServiceMedia(session, serviceId)
+      if (owner === undefined) throw new Error('media owner is required')
+      return getOwnerMedia(session, owner)
     },
-    enabled: serviceId !== undefined,
+    enabled: owner !== undefined,
     // URLs are signed for an hour. Re-signing on every dialog open would be a
     // request per glance at files that have not changed.
     staleTime: 30 * 60 * 1000,
@@ -59,23 +66,23 @@ export function useServiceMedia(serviceId: string | undefined): ServiceMediaCont
     void queryClient.invalidateQueries({ queryKey: ['settings', session.businessId] })
   }
 
-  const requireId = (): string => {
-    if (serviceId === undefined) throw new Error('serviceId is required')
-    return serviceId
+  const requireOwner = (): MediaOwner => {
+    if (owner === undefined) throw new Error('media owner is required')
+    return owner
   }
 
   const uploadMutation = useMutation<ServiceMediaView, Error, File>({
-    mutationFn: (file) => uploadServiceMedia(session, requireId(), file),
+    mutationFn: (file) => uploadOwnerMedia(session, requireOwner(), file),
     onSuccess: invalidate,
   })
 
   const removeMutation = useMutation<{ id: string }, Error, string>({
-    mutationFn: (mediaId) => deleteServiceMedia(session, requireId(), mediaId),
+    mutationFn: (mediaId) => deleteOwnerMedia(session, requireOwner(), mediaId),
     onSuccess: invalidate,
   })
 
   const reorderMutation = useMutation<ServiceMediaView[], Error, string[]>({
-    mutationFn: (ids) => reorderServiceMedia(session, requireId(), ids),
+    mutationFn: (ids) => reorderOwnerMedia(session, requireOwner(), ids),
     onSuccess: invalidate,
   })
 

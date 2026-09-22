@@ -9,6 +9,9 @@ import {
   IDLE_TRIGGER,
   NODE_BY_ID,
   type NodeBlueprint,
+  type NodeBranch,
+  ROUTE_TOOL,
+  ROUTE_TRIGGER,
   requirementMet,
 } from './nodeCatalog.js'
 
@@ -35,6 +38,8 @@ export type EntryGuard = 'booking_intent'
 // having one.
 export interface TransitionEvidence {
   bookingIntent?: boolean
+  /** Which owner-written route was taken. Only ever set alongside ROUTE_TRIGGER. */
+  branch?: string
 }
 
 // Written as a switch over the closed union so that adding a guard breaks the
@@ -57,6 +62,14 @@ export interface StateConfig {
   node: ConversationNode
   // trigger → next state. A trigger absent from this map means "stay put".
   transitions: Record<string, string>
+  /**
+   * The routes the owner wrote out of this step, already resolved.
+   *
+   * Deliberately NOT folded into `transitions`: those are keyed by trigger, and
+   * every route here shares one trigger. Keeping them apart is also what lets
+   * the four callers of applyTrigger stay exactly as they were.
+   */
+  branches: NodeBranch[]
   // Refuses entry unless the trigger arrives with evidence that satisfies this.
   entryGuard?: EntryGuard
 }
@@ -67,10 +80,35 @@ export type FlowDefinition = Record<string, StateConfig>
 // carries a state its flow does not define.
 export const INITIAL_STATE = 'idle'
 
+/**
+ * What the owner overrode for one node. An absent key means "use the default".
+ *
+ * Every field here is wording. Nothing that decides behaviour — tools, exits,
+ * guards — is overridable, and that boundary is applied in compileFlow rather
+ * than declared anywhere else, so there is exactly one place to read it.
+ */
+export interface NodeOverride {
+  /** What the panel calls this step. Cosmetic: the id is what the flow runs on. */
+  label?: string
+  edgeCases?: string[]
+  example?: string
+  /** Appended after the steps, never replacing them. */
+  extraInstructions?: string
+  /**
+   * Routes out of this step that the owner wrote, on top of the fixed exits.
+   *
+   * These are the only edges anybody outside this module authors. They cannot
+   * create a dead end (validateFlow still runs) and they cannot reach a step
+   * that is not in the flow (the compiler drops those), so "the owner draws an
+   * arrow" stays inside the same guarantee as everything else.
+   */
+  branches?: NodeBranch[]
+}
+
 /** What the owner composed: which nodes, in what order, and their wording. */
 export interface FlowComposition {
   nodes: string[]
-  overrides: Record<string, { edgeCases?: string[]; example?: string }>
+  overrides: Record<string, NodeOverride>
 }
 
 // ── Presets ──────────────────────────────────────────────────────────────────
@@ -99,20 +137,38 @@ const PRESET_APPOINTMENTS_DEPOSIT = [
   'confirmed',
 ]
 
-// The selling flow is NOT composable yet, and saying so here is the point.
-//
-// It needs one more brick — the tool that records "the customer accepted and
-// wants to pay" — and that tool cannot be written without a frozen intent that
-// has no slot in it: today's FrozenBooking demands a scheduledAtISO, and making
-// one up would show the owner an appointment time that was never agreed.
-//
-// Until that lands, a selling business gets the informational flow. That is a
-// flow that WORKS: it greets, advises and lists services. The alternative is
-// what shipped before this module — a flow whose only exit nothing emitted, so
-// the business answered once and went silent forever.
-
 /** Nothing to book and nothing to charge: the business only answers questions. */
 const PRESET_INFO_ONLY = ['idle', 'greeting', 'informing', 'listado_servicios']
+
+// The selling flow, which for months was an alias of the informational one.
+//
+// What was missing was never the closing nodes — collect_data, confirmacion and
+// correccion_datos have always been complete, with real emitters. It was the way
+// IN: nothing in the code fired a trigger that led from the catalogue to the
+// capture, and validateFlow rightly refused to pretend otherwise.
+//
+// ROUTE_TOOL is that way in. "The customer chose course X" has no slot in it, so
+// it never needed the FrozenBooking that blocked this — which is why the exit
+// out of listado_servicios is a route the model judges and not an event.
+const PRESET_SALES = [
+  'idle',
+  'greeting',
+  'informing',
+  'listado_servicios',
+  'collect_data',
+  'confirmacion',
+  'correccion_datos',
+  'confirmed',
+]
+
+// Shipped WITH the preset rather than left for the owner to draw: a selling
+// business that opens the panel for the first time should already close, and a
+// route is the one part of a flow they have no way to guess is missing.
+const SALES_ENTRY_BRANCH: NodeBranch = {
+  id: 'ruta-cierre',
+  when: 'El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.',
+  to: 'collect_data',
+}
 
 /**
  * The composition a business gets when it has not customised one.
@@ -122,9 +178,17 @@ const PRESET_INFO_ONLY = ['idle', 'greeting', 'informing', 'listado_servicios']
  * one that turns it off stops carrying nodes it cannot satisfy.
  */
 export function presetFor(settings: BusinessSettings | null): FlowComposition {
+  // A selling business with no fields configured has nothing to capture, so the
+  // closing half of its flow would be dropped by the requirements filter below
+  // and it would be left informing and then stopping — which is what it does
+  // today. Falling back explicitly says so instead of arriving there by
+  // subtraction.
+  const sells = settings?.flowType === 'sales'
+  const canClose = sells && requirementMet('collect_fields_configured', settings)
+
   const nodes = ((): string[] => {
     if (!settings) return PRESET_INFO_ONLY
-    if (settings.flowType === 'sales') return PRESET_INFO_ONLY
+    if (sells) return canClose ? PRESET_SALES : PRESET_INFO_ONLY
     return settings.requiresDeposit ? PRESET_APPOINTMENTS_DEPOSIT : PRESET_APPOINTMENTS
   })()
 
@@ -137,7 +201,7 @@ export function presetFor(settings: BusinessSettings | null): FlowComposition {
       const bp = NODE_BY_ID.get(id)
       return bp ? (bp.requires ?? []).every((r) => requirementMet(r, settings)) : false
     }),
-    overrides: {},
+    overrides: canClose ? { listado_servicios: { branches: [SALES_ENTRY_BRANCH] } } : {},
   }
 }
 
@@ -187,18 +251,31 @@ export function compileFlow(composition: FlowComposition): FlowDefinition {
     }
 
     const override = composition.overrides[id]
+    const extra = override?.extraInstructions?.trim()
+    // Same rule as a blueprint's fixed jump: a route to a step the owner did not
+    // include is dropped rather than an error, so removing a step never breaks
+    // the ones pointing at it.
+    const branches = (override?.branches ?? []).filter(
+      (branch) => present.has(branch.to) && branch.to !== id && branch.when.trim() !== '',
+    )
     flow[id] = {
-      tools: bp.tools,
+      // The routing tool is granted BY having a route, never by the owner
+      // picking it: a step with nothing to route to would offer the model a
+      // tool whose every argument the executor must reject.
+      tools: branches.length > 0 ? [...bp.tools, ROUTE_TOOL] : bp.tools,
       node: {
         // Objective and steps are the motor and are never the owner's: what
         // moves is the wording that steers the model, not the contract the code
-        // relies on.
+        // relies on. What they write instead goes in extraInstructions, which
+        // is added to the steps rather than replacing them.
         objective: bp.node.objective,
         steps: bp.node.steps,
         edgeCases: override?.edgeCases ?? bp.node.edgeCases,
         example: override?.example ?? bp.node.example,
+        ...(extra ? { extraInstructions: extra } : {}),
       },
       transitions,
+      branches,
       ...(bp.entryGuard ? { entryGuard: bp.entryGuard } : {}),
     }
   })
@@ -222,6 +299,7 @@ const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   'save_customer_data',
   'confirm_summary',
   'correct_field',
+  'advance_flow',
 ])
 
 export interface FlowProblem {
@@ -273,6 +351,20 @@ export function validateFlow(
         problems.push({ node: id, reason: `usa una herramienta inexistente (${tool})` })
       }
     }
+    // Two routes sharing an id are indistinguishable to the model AND to
+    // getNextState, which resolves by id and would always pick the first. A
+    // silent "your second route never fires" is worse than a refusal at save
+    // time, which is the whole reason this validator exists.
+    const branchIds = new Set<string>()
+    for (const branch of composition.overrides[id]?.branches ?? []) {
+      if (branchIds.has(branch.id)) {
+        problems.push({ node: id, reason: `tiene dos rutas con el mismo id ("${branch.id}")` })
+      }
+      branchIds.add(branch.id)
+      if (branch.to === id) {
+        problems.push({ node: id, reason: `tiene una ruta ("${branch.id}") que apunta a sí mismo` })
+      }
+    }
   }
 
   const flow = compileFlow(composition)
@@ -285,6 +377,10 @@ export function validateFlow(
     const live = Object.keys(config.transitions).filter(
       (t) => EMITTED_TRIGGERS.has(t) || t === IDLE_TRIGGER,
     )
+    // A route counts as a way forward. Without this, a step whose only exit the
+    // owner wrote would be refused as a dead end — which is exactly the step
+    // this whole mechanism exists to make possible.
+    if (config.branches.length > 0) live.push(ROUTE_TRIGGER)
     for (const trigger of Object.keys(config.transitions)) {
       if (!EMITTED_TRIGGERS.has(trigger) && trigger !== IDLE_TRIGGER) {
         problems.push({ node: id, reason: `nadie emite el trigger "${trigger}"` })
@@ -305,7 +401,11 @@ export function validateFlow(
     const current = queue.shift() as string
     const config = flow[current]
     if (!config) continue
-    for (const target of Object.values(config.transitions)) {
+    const targets = [
+      ...Object.values(config.transitions),
+      ...config.branches.map((branch) => branch.to),
+    ]
+    for (const target of targets) {
       if (!reached.has(target)) {
         reached.add(target)
         queue.push(target)
@@ -377,7 +477,15 @@ export function getNextState(
   trigger: string,
   evidence?: TransitionEvidence,
 ): string {
-  const nextState = getStateConfig(flow, currentState).transitions[trigger] ?? currentState
+  const here = getStateConfig(flow, currentState)
+  // An owner's route resolves by branch id rather than by trigger name: they all
+  // arrive under one trigger, and the branch is what says which one was taken.
+  // A branch nobody declared reads as "no transition", the same answer an
+  // unknown trigger gets, so a model that invents one simply stays put.
+  const nextState =
+    trigger === ROUTE_TRIGGER
+      ? (here.branches.find((branch) => branch.id === evidence?.branch)?.to ?? currentState)
+      : (here.transitions[trigger] ?? currentState)
   if (nextState === currentState) return currentState
 
   // A refused transition stays put, which is the same answer as "this state
@@ -418,5 +526,5 @@ export function getStateConfig(flow: FlowDefinition, currentState: string): Stat
   // A composition without idle cannot get past validateFlow, so this is the
   // shape of "somebody hand-edited the jsonb": answer with a node that offers
   // nothing rather than throw inside a conversation.
-  return { tools: [], node: EMPTY_NODE, transitions: {} }
+  return { tools: [], node: EMPTY_NODE, transitions: {}, branches: [] }
 }

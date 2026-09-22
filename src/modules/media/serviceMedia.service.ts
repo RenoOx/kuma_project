@@ -5,10 +5,16 @@ import type { ServiceMedia } from '@/db/schema/index.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, isErr, ok, type Result } from '@/shared/result.js'
 import * as mediaService from './media.service.js'
+import type { MediaOwnerKind } from './media.types.js'
 import * as repo from './serviceMedia.repo.js'
 
 /**
- * The CRUD of a service's files, with the bucket and the table kept in step.
+ * The CRUD of a service's or a conversation step's files, with the bucket and
+ * the table kept in step.
+ *
+ * Both owners share one table and one code path. What tells them apart is
+ * `ownerKind`, which is required everywhere it matters - a service id and a node
+ * id are both nanoids, so an unscoped query would cross them.
  *
  * Two stores have to agree here and only one of them has transactions. The rule
  * that keeps them consistent is: **the flaky side goes inside the transaction.**
@@ -27,13 +33,16 @@ import * as repo from './serviceMedia.repo.js'
 
 export interface ServiceMediaInput {
   businessId: string
-  serviceId: string
+  /** 'service' for a catalogue item, 'node' for a step of the conversation. */
+  ownerKind: MediaOwnerKind
+  /** The nanoid of the service, or the id of the conversation node. */
+  ownerId: string
   filename: string | null
   buffer: Buffer
 }
 
 /**
- * Stores one file for a service.
+ * Stores one file for a service or for a conversation step.
  *
  * The row id is minted before the upload and becomes the object's filename, so
  * the two point at each other by construction rather than by convention.
@@ -42,23 +51,31 @@ export async function addMedia(input: ServiceMediaInput): Promise<Result<Service
   const mediaId = nanoid()
 
   const uploaded = await mediaService.uploadMedia(
-    {
-      kind: 'service_media',
-      businessId: input.businessId,
-      serviceId: input.serviceId,
-      mediaId,
-    },
+    input.ownerKind === 'node'
+      ? {
+          kind: 'node_media',
+          businessId: input.businessId,
+          nodeId: input.ownerId,
+          mediaId,
+        }
+      : {
+          kind: 'service_media',
+          businessId: input.businessId,
+          serviceId: input.ownerId,
+          mediaId,
+        },
     input.buffer,
   )
   if (isErr(uploaded)) return uploaded
 
-  const existing = await repo.listByService(input.businessId, input.serviceId)
+  const existing = await repo.listByOwner(input.businessId, input.ownerKind, input.ownerId)
 
   try {
     const row = await repo.insert({
       id: mediaId,
       businessId: input.businessId,
-      serviceId: input.serviceId,
+      ownerKind: input.ownerKind,
+      serviceId: input.ownerId,
       s3Key: uploaded.data.key,
       type: uploaded.data.type,
       filename: input.filename,
@@ -85,7 +102,11 @@ export async function addMedia(input: ServiceMediaInput): Promise<Result<Service
         code: 'service_media_insert_failed',
         message: cause instanceof Error ? cause.message : 'unknown error',
         userMessage: 'No pudimos guardar el archivo. Intentá de nuevo.',
-        logContext: { businessId: input.businessId, serviceId: input.serviceId },
+        logContext: {
+          businessId: input.businessId,
+          ownerKind: input.ownerKind,
+          ownerId: input.ownerId,
+        },
         cause,
       }),
     )
@@ -125,14 +146,15 @@ export async function removeOne(
   }
 }
 
-/** Everything one service owns. Same all-or-nothing rule as removeOne. */
-export async function removeForService(
+/** Everything one owner owns. Same all-or-nothing rule as removeOne. */
+export async function removeForOwner(
   businessId: string,
-  serviceId: string,
+  ownerKind: MediaOwnerKind,
+  ownerId: string,
 ): Promise<Result<number>> {
   try {
     return await db.transaction(async (tx) => {
-      const rows = await repo.removeByService(businessId, serviceId, tx)
+      const rows = await repo.removeByOwner(businessId, ownerKind, ownerId, tx)
       for (const row of rows) {
         const dropped = await mediaService.removeMedia(businessId, row.s3Key)
         if (isErr(dropped)) throw dropped.error
@@ -140,54 +162,70 @@ export async function removeForService(
       return ok(rows.length)
     })
   } catch (cause) {
-    return err(asFailure(cause, { businessId, serviceId }))
+    return err(asFailure(cause, { businessId, ownerKind, ownerId }))
   }
 }
 
 /**
- * Deletes the files of services that no longer exist.
+ * Deletes the files of owners that no longer exist.
  *
- * Called whenever the services list is saved. Services are stored as a replaced
- * array inside the settings jsonb, so nothing ever announces "this one was
- * deleted" — it just stops being in the list. Without this sweep, removing a
- * service from the panel would leave its photos in the bucket and its rows in
- * the table forever, referenced by nothing and visible to no one.
+ * Called whenever the owning list is saved. Neither services nor conversation
+ * steps are rows: both live inside the settings jsonb as a replaced array, so
+ * nothing ever announces "this one was deleted" - it just stops being in the
+ * list. Without this sweep, removing one from the panel would leave its files in
+ * the bucket and its rows in the table forever, referenced by nothing.
+ *
+ * SCOPED BY `ownerKind`. Saving the services list must not reach a step's files,
+ * and saving the flow must not reach a service's: the two lists know nothing
+ * about each other, so a sweep that saw both would read every row of the other
+ * kind as an orphan and delete it.
  *
  * Never fails its caller: a settings save that succeeded must not be reported as
  * an error because a cleanup could not finish. A sweep that fails is retried by
  * the next save, since it works from the current list rather than from an event.
  */
-export async function purgeOrphans(businessId: string, keepServiceIds: string[]): Promise<number> {
+export async function purgeOrphans(
+  businessId: string,
+  ownerKind: MediaOwnerKind,
+  keepIds: string[],
+): Promise<number> {
   try {
     return await db.transaction(async (tx) => {
-      const rows = await repo.removeOrphans(businessId, keepServiceIds, tx)
+      const rows = await repo.removeOrphans(businessId, ownerKind, keepIds, tx)
       for (const row of rows) {
         const dropped = await mediaService.removeMedia(businessId, row.s3Key)
         if (isErr(dropped)) throw dropped.error
       }
       if (rows.length > 0) {
         logger.info(
-          { businessId, removed: rows.length },
-          'purged media of services that no longer exist',
+          { businessId, ownerKind, removed: rows.length },
+          'purged media of owners that no longer exist',
         )
       }
       return rows.length
     })
   } catch (cause) {
     logger.warn(
-      { businessId, err: cause },
-      'could not purge orphaned service media; the next services save will retry',
+      { businessId, ownerKind, err: cause },
+      'could not purge orphaned media; the next save will retry',
     )
     return 0
   }
 }
 
-export function listForService(businessId: string, serviceId: string): Promise<ServiceMedia[]> {
-  return repo.listByService(businessId, serviceId)
+export function listForOwner(
+  businessId: string,
+  ownerKind: MediaOwnerKind,
+  ownerId: string,
+): Promise<ServiceMedia[]> {
+  return repo.listByOwner(businessId, ownerKind, ownerId)
 }
 
-export function listForBusiness(businessId: string): Promise<ServiceMedia[]> {
-  return repo.listByBusiness(businessId)
+export function listForBusiness(
+  businessId: string,
+  ownerKind: MediaOwnerKind | null = null,
+): Promise<ServiceMedia[]> {
+  return repo.listByBusiness(businessId, ownerKind)
 }
 
 /**
@@ -199,20 +237,27 @@ export function listForBusiness(businessId: string): Promise<ServiceMedia[]> {
  */
 export async function reorder(
   businessId: string,
-  serviceId: string,
+  ownerKind: MediaOwnerKind,
+  ownerId: string,
   orderedIds: string[],
 ): Promise<Result<ServiceMedia[]>> {
   try {
     return await db.transaction(async (tx) => {
-      const current = await repo.listByService(businessId, serviceId, tx)
+      const current = await repo.listByOwner(businessId, ownerKind, ownerId, tx)
       const known = new Set(current.map((r) => r.id))
       if (orderedIds.length !== current.length || orderedIds.some((id) => !known.has(id))) {
         return err(
           new AppError({
             code: 'service_media_reorder_mismatch',
-            message: 'reorder payload does not match the stored media of this service',
+            message: 'reorder payload does not match the stored media of this owner',
             userMessage: 'La lista cambió mientras la ordenabas. Recargá y probá de nuevo.',
-            logContext: { businessId, serviceId, sent: orderedIds.length, stored: current.length },
+            logContext: {
+              businessId,
+              ownerKind,
+              ownerId,
+              sent: orderedIds.length,
+              stored: current.length,
+            },
           }),
         )
       }
@@ -220,10 +265,10 @@ export async function reorder(
       for (const [index, id] of orderedIds.entries()) {
         await repo.setDisplayOrder(businessId, id, index, tx)
       }
-      return ok(await repo.listByService(businessId, serviceId, tx))
+      return ok(await repo.listByOwner(businessId, ownerKind, ownerId, tx))
     })
   } catch (cause) {
-    return err(asFailure(cause, { businessId, serviceId }))
+    return err(asFailure(cause, { businessId, ownerKind, ownerId }))
   }
 }
 

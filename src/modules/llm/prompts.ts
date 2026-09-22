@@ -1721,7 +1721,10 @@ export function buildSystemPrompt(
  * Returns '' for a node with no objective (idle), so the caller appends nothing
  * rather than pushing an empty header into the prompt.
  */
-export function renderNodeBlock(node: ConversationNode): string {
+export function renderNodeBlock(
+  node: ConversationNode,
+  branches: ReadonlyArray<{ id: string; when: string }> = [],
+): string {
   if (!node.objective) return ''
 
   const lines = ['# Paso actual de la conversación', `OBJETIVO: ${node.objective}`]
@@ -1736,6 +1739,24 @@ export function renderNodeBlock(node: ConversationNode): string {
   if (node.edgeCases.length > 0) {
     lines.push('', 'CASOS ESPECIALES:')
     for (const edge of node.edgeCases) lines.push(`- ${edge}`)
+  }
+
+  // Last instruction before the tone sample, and labelled as the owner's rather
+  // than as a rule of the system. This block sits at the very end of the prompt,
+  // which is where an instruction weighs most — so it has to be clear it adds to
+  // the steps above and does not license overriding them.
+  if (node.extraInstructions) {
+    lines.push('', 'INDICACIONES DEL NEGOCIO PARA ESTE PASO:', node.extraInstructions)
+  }
+
+  // The routes the owner drew out of this step, with the id the tool expects.
+  // They go here rather than in the tool's own description because the tool
+  // definition is static and shared by every business, while these are this
+  // business's, in this step. The executor refuses any id that is not on this
+  // list, so what the model reads here is exactly what it may answer with.
+  if (branches.length > 0) {
+    lines.push('', 'RUTAS (avanzá con advance_flow SOLO si se cumple una de estas condiciones):')
+    for (const branch of branches) lines.push(`- id "${branch.id}": ${branch.when}`)
   }
 
   if (node.example) {

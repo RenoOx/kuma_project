@@ -263,3 +263,53 @@ body {
     gap: 0.5rem;
   }
 }
+
+/* ── React Flow (el diagrama de la conversación) ─────────────────────────────
+   Mismo criterio que .emma-calendar: la librería trae su hoja de estilos y acá
+   se la reapunta a los tokens de Emma, en vez de declarar colores sueltos en el
+   componente. Los nodos son custom y se pintan con Tailwind, así que lo que se
+   sobrescribe es el lienzo y el cromo. */
+.react-flow {
+  --xy-background-color: var(--color-emma-bg);
+  --xy-edge-stroke: var(--color-emma-text-muted);
+  --xy-edge-stroke-selected: var(--color-emma-accent);
+  --xy-handle-background-color: var(--color-emma-border);
+  --xy-handle-border-color: var(--color-emma-border);
+  --xy-selection-background-color: color-mix(in srgb, var(--color-emma-accent) 8%, transparent);
+  --xy-selection-border: 1px dashed var(--color-emma-accent);
+}
+
+/* El nodo custom ya dibuja su propio borde y fondo. Sin esto, el contenedor de
+   React Flow suma los suyos y se ven dos bordes concéntricos. */
+.react-flow__node {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  font-size: inherit;
+  color: inherit;
+}
+
+.react-flow__node.selected > div {
+  outline: 2px solid var(--color-emma-accent);
+  outline-offset: 1px;
+}
+
+/* Los handles existen para que las aristas tengan dónde aterrizar, no para
+   conectar: nodesConnectable está apagado. Pintarlos como puertos activos sería
+   una invitación a arrastrar una flecha que el compilador no acepta. */
+.react-flow__handle {
+  width: 6px;
+  height: 6px;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+
+.react-flow__attribution a {
+  color: var(--color-emma-text-muted);
+}

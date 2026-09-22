@@ -141,6 +141,13 @@
       "when": 1790017760451,
       "tag": "0019_wealthy_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790101572337,
+      "tag": "0020_sweet_mantis",
+      "breakpoints": true
     }
   ]
 }

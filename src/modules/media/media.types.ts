@@ -1,7 +1,10 @@
 import type { MediaType } from './media.validate.js'
 
 /** What a stored object is, which decides the key layout under the tenant prefix. */
-export type MediaKind = 'service_media' | 'payment_proof'
+export type MediaKind = 'service_media' | 'node_media' | 'payment_proof'
+
+/** Which of the two owners a `service_media` row hangs from. */
+export type MediaOwnerKind = 'service' | 'node'
 
 /**
  * Where an upload should land.
@@ -25,6 +28,18 @@ export type MediaTarget =
        * after the fact — by index, by timestamp — is how you end up with files
        * nobody can prove are unreferenced and nobody dares delete.
        */
+      mediaId: string
+    }
+  | {
+      /**
+       * A file attached to a STEP of the conversation flow rather than to a
+       * service — the material a business sends on entering a node, whatever
+       * the customer asked about.
+       */
+      kind: 'node_media'
+      businessId: string
+      nodeId: string
+      /** Same pre-minted row id as service_media, for the same reason. */
       mediaId: string
     }
   | {

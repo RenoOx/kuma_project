@@ -13,6 +13,7 @@ import {
   assistantFunctionOf,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
+import { presetFor } from '@/modules/conversation/stateMachine.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 
@@ -448,6 +449,41 @@ export function serviceExists(business: Business, serviceId: string): Result<voi
         resource: 'service',
         userMessage: 'No encontramos ese servicio.',
         logContext: { businessId: business.id, serviceId },
+      }),
+    )
+  }
+  return ok(undefined)
+}
+
+/**
+ * Confirms a conversation step is part of this business's flow, before a file is
+ * hung off it.
+ *
+ * The same tenant check `serviceExists` is, for the other owner. It resolves
+ * against the RUNNING composition rather than against the catalogue: a step the
+ * owner removed is one Emma never enters, so a file uploaded to it would be an
+ * orphan the moment it landed.
+ */
+export function flowNodeExists(business: Business, nodeId: string): Result<void> {
+  const parsed = businessSettingsSchema.safeParse(business.settings)
+  if (!parsed.success) {
+    return err(
+      new ValidationError({
+        code: 'invalid_settings',
+        message: 'stored settings do not validate, cannot resolve a conversation node',
+        userMessage: 'La configuracion del negocio esta incompleta.',
+        logContext: { businessId: business.id, nodeId },
+      }),
+    )
+  }
+
+  const composition = parsed.data.conversationFlow ?? presetFor(parsed.data)
+  if (!composition.nodes.includes(nodeId)) {
+    return err(
+      new NotFoundError({
+        resource: 'conversation_node',
+        userMessage: 'Ese paso no forma parte de tu conversacion.',
+        logContext: { businessId: business.id, nodeId },
       }),
     )
   }

@@ -27,6 +27,7 @@ import {
   type Tag,
   tags as tagsTable,
 } from '@/db/schema/index.js'
+import { collectedDataOf } from '@/modules/customer/customer.service.js'
 import { toPanelDisplay } from '@/modules/message/messageDisplay.js'
 import * as tagRepo from '@/modules/tag/tag.repo.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
@@ -813,6 +814,13 @@ function bookedUnderName(businessId: string, term: string, exec: Executor = db) 
 
 export interface CustomerDetail {
   customer: Customer
+  /**
+   * What the collect-data step gathered, keyed by the field name the owner
+   * wrote. Projected out of `customers.metadata` rather than served raw: the
+   * blob is ours to reshape and the panel should not be reading around inside
+   * it.
+   */
+  collectedData: Record<string, string>
   /** Names this number has booked under, newest booking first. */
   appointmentNames: string[]
   appointments: Array<{
@@ -862,6 +870,7 @@ export async function getCustomerDetail(
 
   return {
     customer,
+    collectedData: collectedDataOf(customer),
     // Derived from the rows already in hand — `appts` is this customer's whole
     // history, newest first, which is exactly what the labels need.
     appointmentNames: dedupeDisplayNames(appts.map((a) => a.customerName)),

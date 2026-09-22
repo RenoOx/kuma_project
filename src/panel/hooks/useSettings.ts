@@ -92,6 +92,14 @@ export function useSaveSettings() {
       if (save.section === 'schedule' || save.section === 'specialDays') {
         void queryClient.invalidateQueries({ queryKey: ['me', session.businessId] })
       }
+      // Identity carries assistantFunction, which IS flowType — and /me derives
+      // booksAppointments from it. Without this the shell keeps showing Agenda,
+      // the booking card and Google Calendar to a business that just switched to
+      // selling, because useMe is staleTime: Infinity and nothing would refetch
+      // it until a reload.
+      if (save.section === 'identity') {
+        void queryClient.invalidateQueries({ queryKey: ['me', session.businessId] })
+      }
       // The catalogue carries `current` and each node's `available`, both of
       // which the server derives from the settings that just moved.
       void queryClient.invalidateQueries({

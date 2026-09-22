@@ -257,6 +257,26 @@ export function statsWindow(period: StatsPeriod, now: Date = new Date()): StatsW
 }
 
 /** Niche drives the panel's copy (Pacientes vs Clientes). */
+/**
+ * Whether this business books anything, for the shell to decide what to show.
+ *
+ * Served from /me rather than read off the settings by each screen: the sidebar
+ * needs it to decide whether Agenda exists at all, and the sidebar renders on
+ * every page — asking for the whole settings document there would make every
+ * screen pay for one field.
+ *
+ * Mirrors assistantFunctionOf, and 'agenda' is the fallback for a business whose
+ * settings do not parse: hiding a screen because a field is missing would look
+ * like the product lost a feature.
+ */
+export function booksAppointments(business: Business): boolean {
+  const settings = business.settings
+  if (settings && typeof settings === 'object' && 'flowType' in settings) {
+    return (settings as { flowType?: unknown }).flowType !== 'sales'
+  }
+  return true
+}
+
 export function nicheOf(business: Business): string {
   const settings = business.settings
   if (settings && typeof settings === 'object' && 'niche' in settings) {

@@ -19,6 +19,7 @@ import {
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import * as messageService from '@/modules/message/message.service.js'
+import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -231,6 +232,11 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     businessId: params.businessId,
     conversationId: params.conversationId,
     customerId: conversation.customerId,
+    // From the flow compiled once at the top of this turn, so the executor
+    // judges advance_flow against the same routes the prompt just showed the
+    // model. Resolving them again here could disagree if the owner saved
+    // mid-turn.
+    branches: stateConfig.branches,
   }
 
   // 6. Anything this customer still has open. The proposal text is already in
@@ -270,7 +276,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // customer reply instead of quietly sending no files.
   let servicesWithMedia: ReadonlySet<string> = new Set()
   try {
-    const mediaRows = await serviceMediaService.listForBusiness(params.businessId)
+    const mediaRows = await serviceMediaService.listForBusiness(params.businessId, 'service')
     servicesWithMedia = new Set(mediaRows.map((row) => row.serviceId))
   } catch (cause) {
     log.error({ err: cause }, 'could not read service media; replying without file markers')
@@ -288,7 +294,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // first for the prompt cache, and the final position is where an instruction
   // weighs most. A node with no objective ('idle') renders to nothing at all,
   // not even the header.
-  const nodeBlock = renderNodeBlock(stateConfig.node)
+  const nodeBlock = renderNodeBlock(stateConfig.node, stateConfig.branches)
   const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
@@ -396,6 +402,22 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         },
         'llm produced final reply',
       )
+
+      // Last, so the turn cap in queueAttachments is spent on what the customer
+      // actually asked for first. A step's material is context the owner chose;
+      // a service's photo is an answer to a question just asked, and if only one
+      // slot is left that is the one that should use it.
+      if (effectiveState !== currentState) {
+        queueAttachments(
+          attachments,
+          await nodeAttachments({
+            businessId: params.businessId,
+            conversationId: params.conversationId,
+            nodeId: effectiveState,
+            log,
+          }),
+        )
+      }
 
       return ok({
         content: assistantContent,
@@ -538,4 +560,42 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // alguien" would be noise at the worst moment.
     attachments: [],
   })
+}
+
+/**
+ * The files the owner hung on a STEP of the flow, rather than on a service.
+ *
+ * Queued only when the conversation ENTERED the step on this turn. While it sits
+ * in a step nothing is resent: a customer who asks three questions inside
+ * `listado_servicios` would otherwise receive the same brochure three times.
+ *
+ * Keyed as `node:<id>` in the repeat window so it shares the per-conversation
+ * budget with service media without ever colliding with a service's nanoid.
+ * Both are the same promise to the customer — "you already got this" — and the
+ * window is what makes it one promise instead of two.
+ */
+async function nodeAttachments(params: {
+  businessId: string
+  conversationId: string
+  nodeId: string
+  log: Pick<typeof logger, 'debug'>
+}): Promise<ToolAttachment[]> {
+  const windowKey = `node:${params.nodeId}`
+  if (!canSendServiceMedia(params.conversationId, windowKey)) return []
+
+  const rows = await serviceMediaService.listForOwner(params.businessId, 'node', params.nodeId)
+  if (rows.length === 0) return []
+
+  params.log.debug({ nodeId: params.nodeId, files: rows.length }, 'queueing media of a flow step')
+
+  return rows.map((row) => ({
+    s3Key: row.s3Key,
+    // No caption: a step's material is not about one product, and a caption
+    // repeating the step's name would read as a label on the customer's screen.
+    caption: '',
+    serviceId: windowKey,
+    type: row.type as ToolAttachment['type'],
+    mimetype: row.mimetype,
+    filename: row.filename ?? `archivo.${row.type}`,
+  }))
 }

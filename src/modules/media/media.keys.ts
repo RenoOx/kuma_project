@@ -61,6 +61,25 @@ export function serviceMediaPrefix(businessId: string, serviceId: string): Resul
   return ok(`${businessId}/services/${serviceId}/`)
 }
 
+/**
+ * `{businessId}/nodes/{nodeId}/{mediaId}.{ext}`
+ *
+ * A prefix of its own rather than reusing `services/`: a node id and a service
+ * id are both nanoids and could collide, and "delete everything this step owns"
+ * has to be a prefix that cannot sweep a service's folder with it.
+ */
+export function buildNodeMediaKey(
+  businessId: string,
+  nodeId: string,
+  mediaId: string,
+  ext: string,
+): Result<string> {
+  if (!isSafeId(businessId)) return err(rejectId('businessId', businessId))
+  if (!isSafeId(nodeId)) return err(rejectId('nodeId', nodeId))
+  if (!isSafeId(mediaId)) return err(rejectId('mediaId', mediaId))
+  return ok(`${businessId}/nodes/${nodeId}/${mediaId}.${ext}`)
+}
+
 /** `{businessId}/payments/{conversationId}_{timestamp}.{ext}` */
 export function buildPaymentProofKey(
   businessId: string,
@@ -76,6 +95,9 @@ export function buildPaymentProofKey(
 export function buildKey(target: MediaTarget, ext: string): Result<string> {
   if (target.kind === 'service_media') {
     return buildServiceMediaKey(target.businessId, target.serviceId, target.mediaId, ext)
+  }
+  if (target.kind === 'node_media') {
+    return buildNodeMediaKey(target.businessId, target.nodeId, target.mediaId, ext)
   }
   return buildPaymentProofKey(
     target.businessId,

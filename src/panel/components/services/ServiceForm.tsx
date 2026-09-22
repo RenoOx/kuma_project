@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { PanelService } from '../../api/types.js'
+import { MediaField } from '../media/MediaField.js'
 import { Button } from '../ui/button.js'
 import {
   Dialog,
@@ -13,7 +14,6 @@ import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Switch } from '../ui/switch.js'
 import { Textarea } from '../ui/textarea.js'
-import { ServiceMediaField } from './ServiceMediaField.js'
 
 const EMPTY: PanelService = {
   name: '',
@@ -248,7 +248,11 @@ export function ServiceForm({
 
           {/* Last, and with its own persistence: everything above is a draft
               until Guardar, while the photo is written the moment it is picked. */}
-          <ServiceMediaField serviceId={base.id} />
+          <MediaField
+            owner={base.id === undefined ? undefined : { kind: 'service', id: base.id }}
+            label="Material del servicio"
+            unsavedHint="Guardá el servicio primero y volvé a abrirlo para subirle archivos."
+          />
 
           {error && <p className="text-destructive text-sm">{error}</p>}
         </div>

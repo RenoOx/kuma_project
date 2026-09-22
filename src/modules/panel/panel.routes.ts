@@ -502,6 +502,7 @@ panelRoutes.get('/api/panel/:businessId/me', (c) => {
     id: business.id,
     name: business.name,
     niche: panelService.nicheOf(business),
+    booksAppointments: panelService.booksAppointments(business),
     ownerName: business.ownerName,
     timezone: business.timezone,
     operatingHours: panelService.operatingHoursOf(business),

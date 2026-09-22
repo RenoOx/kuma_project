@@ -217,9 +217,33 @@ export const kumaTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'advance_flow',
+      // The routes themselves are NOT listed here. They are per business and per
+      // step, and this array is static and shared by everyone; the step's own
+      // block in the system prompt carries the ids and what each one means. The
+      // executor is what refuses an id that step does not declare.
+      description:
+        'Avanza la conversación por una de las rutas que este paso define. Usala SOLO cuando se cumpla la condición de una ruta, y pasá el id exacto que figura en RUTAS del paso actual. Si ninguna condición se cumple, no la llames: seguí conversando.',
+      parameters: {
+        type: 'object',
+        properties: {
+          branch: {
+            type: 'string',
+            description: 'El id de la ruta, copiado tal cual de RUTAS en el paso actual.',
+          },
+        },
+        required: ['branch'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const KUMA_TOOL_NAMES = [
+  'advance_flow', // la ruta que escribió el dueño → route_selected
   'check_availability', //revisar horarios
   'book_appointment', // reserrvar
   'confirm_pending_appointment', //confirmar cita pendeinte

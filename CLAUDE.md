@@ -42,7 +42,8 @@ El tipo de flujo se define en `business.settings.flowType`.
 - Format/lint: Biome (no Prettier, no ESLint separado)
 - Package manager: npm
 - Panel: React 19 + Vite + Tailwind v4 + Radix (paquete único `radix-ui`) +
-  TanStack Query + FullCalendar
+  TanStack Query + FullCalendar + `@xyflow/react` y `@dagrejs/dagre` (el
+  diagrama de la conversación, ambos MIT y cargados en diferido)
 
 ## Qué NO viaja en un PR
 
@@ -785,7 +786,6 @@ implementado.
 - Integraciones con CRM, POS, ERP
 - Multi-idioma (solo español de Perú)
 - App móvil / notificaciones push
-- Canvas visual para diseño de flujos
 - Multicanal (Instagram, Facebook, TikTok)
 - Login con usuario/contraseña, roles, multi-usuario en el panel
 - Responder con imágenes, archivos o audios desde el panel
@@ -806,16 +806,18 @@ Heredados de los planes ya cerrados:
   avisa de los choques al enviar, pero no sugiere horarios libres.
 - **Contraste del texto muted** (ver Tema visual).
 - `clientRegistry` es un Map en memoria: multi-instancia lo rompe.
-- **El flujo de venta necesita un ladrillo más para cerrar** (ver "Presets"):
-  informa y muestra el catálogo, pero no captura los datos al final.
-- **El panel todavía no se adapta al modo venta.** Un negocio `sales` sigue
-  viendo Agenda, días especiales, duración del turno, anticipación mínima,
-  recordatorios y Google Calendar, que no tienen nada que hacer ahí. El prompt sí
-  se adapta; la pantalla no. Falta mapear card por card.
-- **Composición y reorden del panel**: el dueño edita CASOS ESPECIALES y EJEMPLO
-  de cada nodo, y el orden. OBJETIVO, PASOS, tools y transiciones son del código.
-- **Prod está dos migraciones atrás**: `0019` (`service_media`) y `0017`
-  (`tags`) siguen sin aplicarse ahí. Dev está al día (20/20 al 2026-09-21).
+- **Los tests del motor de flujos no existen todavía.** Ramas condicionales,
+  `advance_flow`, los overrides nuevos y las keys de multimedia por nodo se
+  verificaron con scripts descartables, no con vitest. Falta la red automática,
+  y sobre todo el snapshot de regresión de los presets de agenda — hoy lo único
+  que protege a la clínica y a la barbería es correr esa comparación a mano.
+- **Nodos custom**: el dueño compone desde un catálogo cerrado de 11. Crear un
+  paso propio desde cero no existe.
+- **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
+  la composición ni forma de preparar un cambio sin que salga en vivo.
+- **Prod está tres migraciones atrás**: `0020` (`owner_kind` en `service_media`),
+  `0019` (`service_media`) y `0017` (`tags`) siguen sin aplicarse ahí. Dev está
+  al día hasta la 19; **la 0020 tampoco corrió en dev todavía**.
 - `npm run backfill:service-ids` no corrió en ninguna de las dos.
 - **Multimedia sin probar contra WhatsApp real.** El envío de PDF, audio y video
   compila y tiene tests de validación, pero ningún archivo salió todavía por
