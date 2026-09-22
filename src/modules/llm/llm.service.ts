@@ -22,6 +22,7 @@ import * as messageService from '@/modules/message/message.service.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
+import { queueAttachments } from './attachmentQueue.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
@@ -455,14 +456,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         error: toolResult.error,
       })
 
-      // Deduplicated by key: the in-memory send registry is only written once the
-      // handler has actually sent, so a model that asks for the same photo twice
-      // across two iterations of this loop would otherwise queue it twice.
-      for (const attachment of toolResult.attachments ?? []) {
-        if (!attachments.some((queued) => queued.s3Key === attachment.s3Key)) {
-          attachments.push(attachment)
-        }
-      }
+      // Deduplicated and capped across the WHOLE turn, not per tool call — see
+      // attachmentQueue, which is where both rules and the reason for them live.
+      queueAttachments(attachments, toolResult.attachments ?? [])
 
       // Folded over the turn's own variable rather than re-read from the row:
       // when the model calls two tools in one iteration, the second has to be
