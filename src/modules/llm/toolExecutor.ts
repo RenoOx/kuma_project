@@ -6,7 +6,11 @@ import {
   activeServices,
   type DepositPaymentMethod,
   findKnownService,
+  findServicesByCategory,
   formatPaymentMethods,
+  formatServicePrice,
+  type Service,
+  serviceCategories,
 } from '@/modules/business/business.settings.js'
 import { ROUTE_TRIGGER } from '@/modules/conversation/nodeCatalog.js'
 import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
@@ -48,6 +52,16 @@ export interface ToolAttachment {
 }
 
 export interface ToolExecutionResult {
+  /**
+   * Raises this turn's attachment ceiling, for a tool whose attachments are
+   * cards rather than extras.
+   *
+   * Declared by the tool that produced them instead of inferred from its name
+   * in llm.service: the reason the catalogue may send four is a property of what
+   * it sends — one captioned image per service, one message each — and that is
+   * knowledge this layer has and the loop does not.
+   */
+  maxAttachments?: number
   // Always a string: OpenAI requires tool messages to have string content.
   // For successful calls this is JSON-stringified data; for failures it's a
   // small JSON object with an error code + instruction the LLM can read.
@@ -75,8 +89,11 @@ export interface ToolExecutionResult {
   attachments?: ToolAttachment[]
 }
 
+// Both optional: no argument means the whole catalogue, which is what the old
+// `topic` string amounted to anyway.
 const showServicesArgs = z.object({
-  topic: z.string(),
+  category: z.string().min(1).max(40).optional(),
+  services: z.array(z.string().min(1)).max(12).optional(),
 })
 
 const saveCustomerDataArgs = z.object({
@@ -195,11 +212,99 @@ function depositRequiredInstruction(
   ].join(' ')
 }
 
+// The tool now hands back the services themselves, so the instruction stops
+// being "write whatever you remember" and becomes "write about THIS list". That
+// is the whole point of the change: a rule asking the model to show part of a
+// catalogue it can see in full is a suggestion, and it was being ignored.
 const SHOW_SERVICES_INSTRUCTION =
-  'Anotado. Escribí tu respuesta sobre los servicios como siempre: agrupá por categoría si son muchos, no listes todo de golpe y no menciones esta herramienta.'
+  'Escribí UNA intro corta (una o dos líneas) y nada más. Los servicios de details.services son los únicos que podés nombrar en este turno — no agregues otros aunque los tengas en el catálogo. Los que traen ficha se están enviando solos con su foto, precio y detalle: NO los repitas en tu texto. De los que no traen ficha, poné una línea cada uno con nombre y precio. Cerrá invitando a elegir uno.'
+
+const NO_SERVICES_IN_CATEGORY_INSTRUCTION =
+  'Esa categoría existe pero no tiene servicios activos ahora. Decíselo con naturalidad y ofrecé las otras categorías que sí tienen.'
 
 const UNKNOWN_SERVICE_INSTRUCTION =
   'Ese servicio no coincide con ninguno configurado (los tienes en details.availableServices). NO digas que no existe ni inventes precio/duración. Si alguno de los disponibles se parece conceptualmente a lo que pidió el cliente, preguntale si se refiere a ese usando su nombre exacto. Si ninguno se parece, hacé una pregunta abierta para entender qué busca. No vuelvas a llamar esta herramienta hasta que el cliente confirme el nombre exacto del servicio.'
+
+// ── Service cards ────────────────────────────────────────────────────────────
+
+/** Cards one turn may carry. See the comment on buildServiceCards. */
+export const MAX_SERVICE_CARDS_PER_TURN = 4
+
+/** Keeps a caption inside what WhatsApp shows without a "read more" fold. */
+const MAX_CAPTION_CHARS = 400
+
+/**
+ * One card per service: its first file, captioned with its own details.
+ *
+ * A WhatsApp image carries a caption, so a card is ONE outbound message and not
+ * two — which is the only reason "a block per course" is affordable at all. The
+ * model writes a short intro and these carry the detail, instead of one wall of
+ * text the customer scrolls past.
+ *
+ * **Capped at four, and the cap is about the queue, not about bans.** sendQueue
+ * already enforces 25/minute and 200/hour per business with a 1–2.5s gap, and
+ * that is what keeps the number safe. What a per-turn ceiling protects is
+ * LATENCY: the lane is shared, so four cards are roughly eight seconds during
+ * which another customer's reply waits. Beyond four the listing also stops
+ * fitting on a phone screen, which is the same answer from the other direction.
+ *
+ * One file per service, never all of them: this is a catalogue, and a service
+ * with a photo AND a price sheet would otherwise spend the whole turn by itself.
+ * The rest stay reachable through send_service_media when the customer picks one.
+ */
+async function buildServiceCards(
+  context: ToolContext,
+  services: Service[],
+): Promise<ToolAttachment[]> {
+  const cards: ToolAttachment[] = []
+
+  for (const service of services) {
+    if (cards.length >= MAX_SERVICE_CARDS_PER_TURN) break
+    // No id means no files and nothing to record the send against.
+    if (!service.id) continue
+    // The same repeat window a direct send goes through: a customer who asks
+    // twice in five minutes gets the text, not the photos again.
+    if (!canSendServiceMedia(context.conversationId, service.id)) continue
+
+    const media = await serviceMediaService.listForOwner(context.businessId, 'service', service.id)
+    const first = media[0]
+    if (!first) continue
+    // Audio carries no caption in WhatsApp, so a card made of one would arrive
+    // with its price and detail nowhere. It stays available through
+    // send_service_media, where the model writes the detail itself.
+    if (first.type === 'audio') continue
+
+    cards.push({
+      s3Key: first.s3Key,
+      caption: buildCardCaption(service),
+      serviceId: service.id,
+      type: first.type as ToolAttachment['type'],
+      mimetype: first.mimetype,
+      filename: first.filename ?? `${service.name}.${first.type}`,
+    })
+  }
+
+  return cards
+}
+
+/**
+ * What the customer reads under the photo.
+ *
+ * Name, price, then the description — in that order, because the first two are
+ * what someone comparing courses scans for. Truncated at a word boundary rather
+ * than mid-word: WhatsApp folds a long caption behind "read more" anyway, and a
+ * sentence cut at a letter reads like a bug.
+ */
+function buildCardCaption(service: Service): string {
+  const head = `*${service.name}* — ${formatServicePrice(service)}`
+  const body = service.description?.trim()
+  if (!body) return head
+
+  const room = MAX_CAPTION_CHARS - head.length - 2
+  const trimmed =
+    body.length <= room ? body : `${body.slice(0, body.lastIndexOf(' ', room) + 1 || room).trim()}…`
+  return `${head}\n${trimmed}`
+}
 
 // ── send_service_media ───────────────────────────────────────────────────────
 //
@@ -799,12 +904,80 @@ export async function executeTool(
       const parsed = showServicesArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
 
+      const settingsResult = await businessService.getSettings(context.businessId)
+      if (!settingsResult.ok) {
+        // Unconfigured is not an error here: the prompt already tells the model
+        // how to answer a business with no catalogue, and the transition still
+        // has to happen or the conversation parks.
+        return {
+          result: JSON.stringify({
+            status: 'not_configured',
+            instruction:
+              'Este negocio todavía no tiene servicios cargados. Respondé con honestidad y NO inventes servicios ni precios.',
+          }),
+          trigger: 'services_listed',
+        }
+      }
+      const settings = settingsResult.data
+
+      const { category, services: named } = parsed.data
+
+      let selected = activeServices(settings)
+      if (category) {
+        const found = findServicesByCategory(settings, category)
+        if (found === null) {
+          // Same shape as send_service_media's unknown_service: hand back the
+          // real list so the model picks again in this same turn instead of
+          // guessing twice or telling the customer it does not exist.
+          return {
+            result: JSON.stringify({
+              error: 'unknown_category',
+              availableCategories: serviceCategories(settings),
+              instruction:
+                'Esa categoría no existe en el catálogo. Elegí una de details.availableCategories y volvé a llamar la herramienta en este mismo turno. Si ninguna corresponde, llamala sin category.',
+            }),
+            error: 'unknown_category',
+          }
+        }
+        selected = found
+      }
+      if (named && named.length > 0) {
+        const matched = named
+          .map((n) => findKnownService(settings, n))
+          .filter((s): s is NonNullable<typeof s> => s !== null)
+        // Only narrows when something matched: a mistyped name must not turn
+        // into an empty catalogue.
+        if (matched.length > 0) selected = matched
+      }
+
+      if (selected.length === 0) {
+        return {
+          result: JSON.stringify({
+            status: 'empty_category',
+            category,
+            availableCategories: serviceCategories(settings),
+            instruction: NO_SERVICES_IN_CATEGORY_INSTRUCTION,
+          }),
+          trigger: 'services_listed',
+        }
+      }
+
+      const cards = await buildServiceCards(context, selected)
       return {
         result: JSON.stringify({
-          status: 'noted',
-          topic: parsed.data.topic,
+          status: 'listed',
+          ...(category ? { category } : {}),
+          services: selected.map((s) => ({
+            nombre: s.name,
+            precio: formatServicePrice(s),
+            descripcion: s.description ?? null,
+            ficha: cards.some((c) => c.serviceId === s.id),
+          })),
           instruction: SHOW_SERVICES_INSTRUCTION,
         }),
+        ...(cards.length > 0
+          ? { attachments: cards, maxAttachments: MAX_SERVICE_CARDS_PER_TURN }
+          : {}),
         trigger: 'services_listed',
       }
     }

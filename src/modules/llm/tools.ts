@@ -139,17 +139,23 @@ export const kumaTools: ChatCompletionTool[] = [
     function: {
       name: 'show_services',
       description:
-        'Avisa al sistema que le estás presentando servicios del catálogo al cliente. Llamala cuando el cliente pregunta qué hacen, qué ofrecen, por los precios, o por un servicio en particular — en el mismo turno en que se los contás. No imprime nada: vos escribís la respuesta como siempre.',
+        'Presenta servicios del catálogo. Llamala cuando el cliente pregunta qué hacen, qué ofrecen, por los precios, o por un servicio en particular — en el mismo turno en que se los contás. Te devuelve los servicios que corresponden y envía sola las fotos de los que tengan material: vos escribí una intro corta y NO repitas lo que ya va en las fichas.',
       parameters: {
         type: 'object',
         properties: {
-          topic: {
+          category: {
             type: 'string',
             description:
-              'Qué le estás mostrando: una categoría ("cabello"), un servicio puntual ("limpieza dental") o "todos" si pidió el catálogo entero.',
+              'Mostrá solo esta categoría del catálogo, copiada tal cual figura ahí. Omitila para mostrar todo.',
+          },
+          services: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Mostrá solo estos servicios, por su nombre exacto. Usala cuando el cliente nombró uno o dos concretos.',
           },
         },
-        required: ['topic'],
+        required: [],
         additionalProperties: false,
       },
     },

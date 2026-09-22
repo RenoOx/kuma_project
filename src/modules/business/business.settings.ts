@@ -588,8 +588,65 @@ export function activeServices(settings: BusinessSettings): Service[] {
   return settings.services.filter((s) => s.active)
 }
 
+/**
+ * Lowercased, trimmed, and with the accents removed.
+ *
+ * The accents are the part that matters. A model asked to name "Operación y
+ * mantenimiento de equipos" writes it back without the tilde often enough that
+ * an exact match turns a configured service into an unknown one — and the
+ * customer gets "no encontré ese servicio" for a course that exists.
+ *
+ * Folding can only ever make a match MORE permissive, never less. Two services
+ * that differ only in their accents would now collide, which is a catalogue
+ * nobody could tell apart in a chat either.
+ */
+function foldForMatch(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim()
+}
+
 function normalizeServiceName(s: string): string {
-  return s.toLowerCase().trim()
+  return foldForMatch(s)
+}
+
+/**
+ * Every category the owner actually used, in catalogue order.
+ *
+ * Derived rather than stored: a category exists exactly as long as a service
+ * carries it, so there is nothing to keep in sync and no orphan to sweep. Same
+ * reasoning as collectDataFields — the owner names their own.
+ */
+export function serviceCategories(settings: BusinessSettings): string[] {
+  const seen = new Map<string, string>()
+  for (const s of activeServices(settings)) {
+    const category = s.category?.trim()
+    if (!category) continue
+    // First spelling wins, so "Curso Básico" and "curso basico" collapse into
+    // the one the owner typed first instead of becoming two groups.
+    if (!seen.has(foldForMatch(category))) seen.set(foldForMatch(category), category)
+  }
+  return [...seen.values()]
+}
+
+/**
+ * The active services under one category, for show_services.
+ *
+ * Returns null — not an empty array — when the category does not exist at all.
+ * The two are different answers: "this group is empty right now" is something
+ * to tell the customer, and "you made that name up" is something to tell the
+ * model, with the real list attached so it can pick again.
+ */
+export function findServicesByCategory(
+  settings: BusinessSettings,
+  category: string,
+): Service[] | null {
+  const wanted = foldForMatch(category)
+  const known = serviceCategories(settings).some((c) => foldForMatch(c) === wanted)
+  if (!known) return null
+  return activeServices(settings).filter((s) => foldForMatch(s.category ?? '') === wanted)
 }
 
 /**

@@ -451,6 +451,38 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 /** Services with no category of their own, listed last and never hidden. */
 const UNCATEGORISED = 'Otros'
 
+/**
+ * How much of a description the catalogue carries.
+ *
+ * The catalogue is an INDEX: what the model needs to know which services exist
+ * and pick between them. The full text belongs to show_services, which returns
+ * it for the handful it was asked about, and to the card caption the customer
+ * actually reads.
+ *
+ * Before this, a business with six-line descriptions had all of them in every
+ * prompt of every turn — and the model, told to send "nombre, descripción y
+ * precio de cada uno", reproduced the lot as one wall of text.
+ */
+const CATALOGUE_DESCRIPTION_CHARS = 120
+
+function summarise(description: string): string {
+  // Flattened, not cut at the first line. A description written as bullets
+  // usually opens with a lead-in — "Este curso contá:" — so taking line one
+  // produced an index entry that said nothing about the service. Joining the
+  // lines keeps the first real fact, which is what the model needs to choose.
+  const text = description
+    .split('\n')
+    .map((line) => line.replace(/^\s*[-*·•]\s*/, '').trim())
+    .filter((line) => line !== '')
+    .join(' · ')
+
+  if (text.length <= CATALOGUE_DESCRIPTION_CHARS) return text
+  // At a word boundary when there is one close enough; a sentence cut
+  // mid-syllable reads like a bug rather than like an abbreviation.
+  const cut = text.lastIndexOf(' ', CATALOGUE_DESCRIPTION_CHARS)
+  return `${text.slice(0, cut > 40 ? cut : CATALOGUE_DESCRIPTION_CHARS).trim()}…`
+}
+
 function renderServices(
   services: BusinessSettings['services'],
   withMedia: ReadonlySet<string>,
@@ -478,7 +510,7 @@ function renderServices(
     // Its own indented line rather than appended to the first one: the price
     // and the marker have to stay adjacent to the name for the rules below to
     // be readable, and a description is a sentence, not a field.
-    const description = s.description ? `\n  ${s.description}` : ''
+    const description = s.description ? `\n  ${summarise(s.description)}` : ''
     // The marker is the model's only way to know which services it may call
     // send_service_media for. No key ever appears here: the tool resolves a
     // name back to storage, and a key in the prompt would be both useless to
