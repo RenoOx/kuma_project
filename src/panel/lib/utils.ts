@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import type { PanelService } from '../api/types.js'
 
 /** Tailwind-aware class merge. The standard shadcn helper. */
 export function cn(...inputs: ClassValue[]): string {
@@ -169,4 +170,23 @@ export function formatServicePrice(service: {
   if (priceMax === null) return `desde S/ ${priceMin}`
   if (priceMin === priceMax) return `S/ ${priceMin}`
   return `S/ ${priceMin} a S/ ${priceMax}`
+}
+
+/**
+ * A service that says it is free while its own text quotes a price.
+ *
+ * Not "price is zero": a free talk is a real thing a business offers, and
+ * warning about it would train the owner to ignore the warning. What is detected
+ * is the CONTRADICTION — the field says nothing was charged and the description
+ * says otherwise — because that combination is always a mistake.
+ *
+ * It is the exact shape of a bug that reached a customer: a course at S/ 100
+ * with both price fields left at 0 and "Precio: S/100" typed into the
+ * description. Emma read the field, not the text, and said "sin costo".
+ */
+export function pricedInTheDescription(service: PanelService): boolean {
+  if (service.requiresEvaluation) return false
+  const free = (service.priceMin ?? 0) === 0 && (service.priceMax ?? 0) === 0
+  if (!free) return false
+  return /s\/|precio|costo|\bsoles\b/i.test(service.description ?? '')
 }

@@ -483,6 +483,20 @@ function summarise(description: string): string {
   return `${text.slice(0, cut > 40 ? cut : CATALOGUE_DESCRIPTION_CHARS).trim()}…`
 }
 
+/**
+ * Warns the model that what follows is abbreviated.
+ *
+ * Without it the catalogue looks complete, and a model that does not know it is
+ * missing something completes it from context instead of asking. That is not a
+ * hypothetical: a course priced at S/ 100 was described to a customer as "es
+ * gratuito", composed out of a 120-character summary.
+ *
+ * Emitted only when something was actually shortened, so a business with one-line
+ * descriptions does not carry a caveat about nothing.
+ */
+const CATALOGUE_IS_ABBREVIATED =
+  'Las descripciones de abajo están ABREVIADAS. Cuando le des el detalle de un servicio, pedí el texto completo con la herramienta y reproducilo tal cual: nunca lo completes de memoria ni lo resumas vos.'
+
 function renderServices(
   services: BusinessSettings['services'],
   withMedia: ReadonlySet<string>,
@@ -520,12 +534,17 @@ function renderServices(
     return `- ${s.name}${category}${duration} — ${formatServicePrice(priced)}${media}${description}${reference}`
   }
 
+  const abbreviated = services.some(
+    (s) => s.description !== undefined && summarise(s.description) !== s.description,
+  )
+  const caveat = abbreviated ? `${CATALOGUE_IS_ABBREVIATED}\n` : ''
+
   // Grouped ONLY when the owner drew a real distinction — two or more different
   // categories. With one category, or none, the list stays exactly as flat as it
   // was before this field existed, so a business that never touched it sees its
   // prompt unchanged to the character.
   const categories = [...new Set(services.map((s) => s.category?.trim()).filter(Boolean))]
-  if (categories.length < 2) return services.map((s) => line(s, true)).join('\n')
+  if (categories.length < 2) return caveat + services.map((s) => line(s, true)).join('\n')
 
   // Insertion order of the catalogue, not alphabetical: the owner arranged the
   // list and that arrangement is a decision. Uncategorised goes last rather than
@@ -539,10 +558,13 @@ function renderServices(
     groups.get(key)?.push(s)
   }
 
-  return [...groups]
-    .filter(([, items]) => items.length > 0)
-    .map(([category, items]) => `### ${category}\n${items.map((s) => line(s, false)).join('\n')}`)
-    .join('\n')
+  return (
+    caveat +
+    [...groups]
+      .filter(([, items]) => items.length > 0)
+      .map(([category, items]) => `### ${category}\n${items.map((s) => line(s, false)).join('\n')}`)
+      .join('\n')
+  )
 }
 
 /**

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { PanelService } from '../../api/types.js'
+import { pricedInTheDescription } from '../../lib/utils.js'
 import { MediaField } from '../media/MediaField.js'
 import { Button } from '../ui/button.js'
 import {
@@ -285,6 +286,19 @@ export function ServiceForm({
             label="Material del servicio"
             unsavedHint="Guardá el servicio primero y volvé a abrirlo para subirle archivos."
           />
+
+          {pricedInTheDescription({
+            ...base,
+            description: description.trim() || undefined,
+            priceMin: toNumber(priceMin),
+            priceMax: toNumber(priceMax),
+            requiresEvaluation: schedulesAppointments && requiresEvaluation,
+          }) && (
+            <p className="rounded-md bg-q-needs-info/10 text-q-needs-info p-2.5 text-xs">
+              Este servicio figura como <strong>sin costo</strong> y Emma lo va a decir así. Tu
+              descripción menciona un precio: cargalo en Precio mínimo para que lo diga bien.
+            </p>
+          )}
 
           {error && <p className="text-destructive text-sm">{error}</p>}
         </div>
