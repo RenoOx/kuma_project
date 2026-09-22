@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { PanelService } from '../../api/types.js'
 import { useKeyedDraft } from '../../hooks/useKeyedDraft.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
-import { cn, formatServicePrice } from '../../lib/utils.js'
+import { cn, formatServicePrice, pricedInTheDescription } from '../../lib/utils.js'
 import { SettingsCard } from '../config/SettingsCard.js'
 import { Button } from '../ui/button.js'
 import { Switch } from '../ui/switch.js'
@@ -137,6 +137,9 @@ function ServiceRow({
           {schedulesAppointments &&
             `${service.durationMinutes === null ? 'Sin duración fija' : `${service.durationMinutes} min`} · `}
           {formatServicePrice(service)}
+          {pricedInTheDescription(service) && (
+            <span className="text-q-needs-info"> · revisá el precio</span>
+          )}
           {/* A flag, not a thumbnail. Showing the photo here would mean signing a
               URL per service on every page load; the preview lives in the edit
               dialog, where the owner actually asked to see it. */}

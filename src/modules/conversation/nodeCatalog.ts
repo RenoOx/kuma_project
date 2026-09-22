@@ -123,6 +123,17 @@ const MEDIA_STEP =
   'Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.'
 
 /**
+ * Both nodes that put services in front of a customer have to ASK for them.
+ *
+ * It lived only in listado_servicios, and that node is reached BY calling
+ * show_services — the instruction sat behind the door it was meant to open. The
+ * first listing of a conversation happens in `informing`, which had the tool and
+ * no reason to use it, so no cards went out and the filter was never enforced.
+ */
+const SHOW_SERVICES_STEP =
+  'Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.'
+
+/**
  * Every trigger something in this codebase actually emits, with the emitter.
  *
  * Hand-maintained on purpose: there is no way to introspect "does any code path
@@ -226,6 +237,7 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
         'Leé lo que el cliente pide.',
         '¿Busca un servicio puntual, información general, o quiere agendar directo?',
         'Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.',
+        SHOW_SERVICES_STEP,
         // The global rule covers recommending, but it lives in the body and this
         // node's objective pulls the other way ("ANTES de enviarle todo el
         // catálogo"). A recommendation IS the detail of one service, and the
@@ -255,7 +267,7 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
     node: {
       objective: 'Mostrar los servicios relevantes con su material asociado.',
       steps: [
-        'Llamá show_services con la categoría o los servicios que corresponden a lo que pidió el cliente. Ella te devuelve cuáles son y manda sola la ficha de cada uno.',
+        SHOW_SERVICES_STEP,
         // Was "Enviá nombre, descripción y precio de cada uno", which is what
         // produced the wall of text: with six-line descriptions the model did
         // exactly as told. The detail now travels in the card caption, where the

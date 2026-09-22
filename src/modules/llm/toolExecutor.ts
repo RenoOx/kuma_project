@@ -230,8 +230,16 @@ const UNKNOWN_SERVICE_INSTRUCTION =
 /** Cards one turn may carry. See the comment on buildServiceCards. */
 export const MAX_SERVICE_CARDS_PER_TURN = 4
 
-/** Keeps a caption inside what WhatsApp shows without a "read more" fold. */
-const MAX_CAPTION_CHARS = 400
+/**
+ * Room for the whole description, plus the heading.
+ *
+ * The schema caps `description` at 600, so with the name and the price this
+ * never actually truncates. That is the point: the caption is the one place the
+ * owner's text reaches the customer WITHOUT passing through the model, so
+ * cutting it would be re-introducing by a side door the summarising this exists
+ * to prevent. The limit stays as a guard for a future longer field.
+ */
+const MAX_CAPTION_CHARS = 900
 
 /**
  * One card per service: its first file, captioned with its own details.
@@ -314,7 +322,7 @@ function buildCardCaption(service: Service): string {
 // a second later on its own.
 
 const NO_SERVICE_MEDIA_INSTRUCTION =
-  'Ese servicio no tiene material cargado, así que NO se envió nada. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste un archivo ni que se lo vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
+  'Ese servicio no tiene material cargado, así que NO se envió nada. Contale el servicio usando descripcion TAL CUAL viene: es el texto que escribió el negocio, reproducilo completo y sin resumir ni reescribir. NO le digas que le mandaste un archivo ni que se lo vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
 
 // Categorical, and it has to be: the old version banned three phrases in the
 // first person ("te adjunto", "te lo mando", "mirá el archivo") and the model
@@ -807,7 +815,12 @@ export async function executeTool(
       )
       if (media.length === 0) {
         return {
-          result: JSON.stringify({ error: 'no_media', instruction: NO_SERVICE_MEDIA_INSTRUCTION }),
+          result: JSON.stringify({
+            error: 'no_media',
+            precio: formatServicePrice(service),
+            descripcion: service.description ?? null,
+            instruction: NO_SERVICE_MEDIA_INSTRUCTION,
+          }),
           error: 'no_media',
         }
       }
@@ -825,16 +838,27 @@ export async function executeTool(
         result: JSON.stringify({
           status: 'media_sent',
           service: service.name,
+          // The business's own text, in full. Without this the model had only
+          // the abbreviated catalogue index to work from, so it filled the gap
+          // instead of asking — which is how "S/ 100" became "es gratuito".
+          precio: formatServicePrice(service),
+          descripcion: service.description ?? null,
           sent: selected.length,
           instruction: SERVICE_MEDIA_SENT_INSTRUCTION,
         }),
-        attachments: selected.map((row) => ({
+        attachments: selected.map((row, index) => ({
           s3Key: row.s3Key,
-          // The service name alone, and only where WhatsApp renders a caption.
-          // Emma's own text already carries the price and the pitch, and
-          // repeating them under the file reads like two people answering the
-          // same question.
-          caption: service.name,
+          // The owner's own words, on the first file only.
+          //
+          // It used to be the bare service name, on the theory that Emma's text
+          // already carried the price and the pitch. It did not: she carried her
+          // SUMMARY of them, and a customer was told a S/ 100 course was free.
+          // The caption is built here, from the stored fields, so it is the one
+          // path where what the owner wrote reaches the customer unrewritten.
+          //
+          // First file only — repeating the whole description under each of
+          // three photos is the same text three times.
+          caption: index === 0 ? buildCardCaption(service) : service.name,
           serviceId: service.id as string,
           type: row.type as ToolAttachment['type'],
           mimetype: row.mimetype,
