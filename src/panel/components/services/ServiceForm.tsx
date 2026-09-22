@@ -113,11 +113,17 @@ export function ServiceForm({
       durationMinutes: toNumber(duration),
       priceMin: toNumber(priceMin),
       priceMax: toNumber(priceMax),
-      requiresEvaluation,
+      // Forced off for a business with no agenda, whatever a previous save left
+      // stored: "requiere evaluación previa" means "we price it after seeing the
+      // case, come in for a consultation", and a consultation is an appointment.
+      // Saving from this form is what clears it on a business that switched.
+      requiresEvaluation: schedulesAppointments && requiresEvaluation,
       // The link only means anything for an evaluation-first service, so it is
       // dropped when the switch is off — but it stays in the field above while
       // the dialog is open, so toggling back does not make the owner retype it.
-      ...(requiresEvaluation && trimmedRef ? { referenceUrl: trimmedRef } : {}),
+      ...(schedulesAppointments && requiresEvaluation && trimmedRef
+        ? { referenceUrl: trimmedRef }
+        : {}),
     })
   }
 
@@ -175,19 +181,25 @@ export function ServiceForm({
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-            <div className="flex flex-col gap-0.5">
-              <Label htmlFor="svc-eval">Requiere evaluación previa</Label>
-              <span className="text-muted-foreground text-xs">
-                Emma no da un precio cerrado; dice que hay que verlo antes.
-              </span>
+          {/* Gone for a business with no agenda, like the duration above. The
+              switch means "no cerramos precio hasta verlo, vení a una consulta"
+              — and the consultation it sends the customer to is an appointment
+              this business does not take. */}
+          {schedulesAppointments && (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="svc-eval">Requiere evaluación previa</Label>
+                <span className="text-muted-foreground text-xs">
+                  Emma no da un precio cerrado; dice que hay que verlo antes.
+                </span>
+              </div>
+              <Switch
+                id="svc-eval"
+                checked={requiresEvaluation}
+                onCheckedChange={setRequiresEvaluation}
+              />
             </div>
-            <Switch
-              id="svc-eval"
-              checked={requiresEvaluation}
-              onCheckedChange={setRequiresEvaluation}
-            />
-          </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
@@ -217,7 +229,7 @@ export function ServiceForm({
             </div>
           </div>
 
-          {requiresEvaluation && (
+          {schedulesAppointments && requiresEvaluation && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="svc-ref">Link de referencia</Label>
               <Input

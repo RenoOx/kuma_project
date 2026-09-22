@@ -145,6 +145,23 @@ describe('the diagnosis path survives in every state', () => {
     expect(prompt).not.toContain('consulta de evaluación')
     expect(prompt).not.toContain('consulta de diagnóstico')
   })
+
+  it('does not print the evaluation flag for a business with no agenda, even if stored', () => {
+    // The fixture's second service carries requiresEvaluation. The panel no
+    // longer offers that switch to a selling business, but one that switched
+    // flows keeps whatever it saved before — and printing "requiere evaluación
+    // previa" with the rules that explain it gated off leaves the model to
+    // invent a pricing policy.
+    const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings({ flowType: 'sales' }))
+    expect(prompt).not.toContain('requiere evaluación previa')
+    // The floor it had survives as an ordinary open-ended price.
+    expect(prompt).toContain('- Alisado — desde S/ 200')
+  })
+
+  it('still prints it for a business that books', () => {
+    const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
+    expect(prompt).toContain('desde S/ 200 (requiere evaluación previa)')
+  })
 })
 
 describe('a business that sells is never told how to book', () => {
