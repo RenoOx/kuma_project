@@ -24,7 +24,7 @@ import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
-import { queueAttachments } from './attachmentQueue.js'
+import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
@@ -322,6 +322,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   let totalTokensOutput = 0
   const executedTools: ExecutedToolCall[] = []
   const attachments: ToolAttachment[] = []
+  // Starts at the default and only ever goes up, so a turn that listed the
+  // catalogue and then sent one service's extra photo keeps the wider ceiling
+  // it already committed to rather than cutting itself off mid-reply.
+  let attachmentBudget = MAX_ATTACHMENTS_PER_TURN
   let escalated = false
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
@@ -433,6 +437,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
             nodeId: effectiveState,
             log,
           }),
+          attachmentBudget,
         )
       }
 
@@ -497,7 +502,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
       // Deduplicated and capped across the WHOLE turn, not per tool call — see
       // attachmentQueue, which is where both rules and the reason for them live.
-      queueAttachments(attachments, toolResult.attachments ?? [])
+      attachmentBudget = Math.max(attachmentBudget, toolResult.maxAttachments ?? 0)
+      queueAttachments(attachments, toolResult.attachments ?? [], attachmentBudget)
 
       // Folded over the turn's own variable rather than re-read from the row:
       // when the model calls two tools in one iteration, the second has to be

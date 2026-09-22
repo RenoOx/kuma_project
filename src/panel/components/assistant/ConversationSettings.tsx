@@ -8,7 +8,7 @@ import type {
   ConversationNodeOverride,
 } from '../../api/types.js'
 import { useIsDesktop } from '../../hooks/useMediaQuery.js'
-import { useSectionSave } from '../../hooks/useSettings.js'
+import { useSectionSave, useSettings } from '../../hooks/useSettings.js'
 import { SettingsCard } from '../config/SettingsCard.js'
 import { MediaField } from '../media/MediaField.js'
 import { Badge } from '../ui/badge.js'
@@ -49,6 +49,19 @@ export function ConversationSettings({
   const [open, setOpen] = useState<string | null>(null)
   const [view, setView] = useState<'list' | 'diagram'>('list')
   const { save, saving, saved, error } = useSectionSave()
+  // The categories the owner actually created in Servicios. Shown on the step
+  // that lists them so a rule gets written against names that exist: the first
+  // attempt at this said "Basicos" and "tecnicos" while the catalogue held
+  // "Curso Básico" and "Curso Avanzado", and Emma had nothing to match.
+  const settings = useSettings()
+  const categories = [
+    ...new Set(
+      (settings.data?.settings?.services ?? [])
+        .filter((service) => service.active)
+        .map((service) => service.category?.trim())
+        .filter((category): category is string => !!category),
+    ),
+  ]
   // A 360px canvas is a worse list. The toggle is not offered below md, and the
   // view falls back rather than rendering a diagram nobody can use.
   const isDesktop = useIsDesktop()
@@ -183,6 +196,9 @@ export function ConversationSettings({
               onRemove={() => remove(id)}
               override={draft.overrides[id] ?? {}}
               onOverride={(patch) => setOverride(id, patch)}
+              // Only where they mean something: on the step that shows the
+              // catalogue. Everywhere else they would be one more thing to read.
+              categories={id === 'listado_servicios' ? categories : []}
               // Every other step of the flow, so a route has somewhere to go.
               // Built from the draft rather than from the catalogue: a route to
               // a step the owner has not added is one the compiler would drop.
@@ -240,6 +256,7 @@ function NodeRow({
   override,
   onOverride,
   targets,
+  categories,
   collapsed = false,
 }: {
   node: ConversationNodeOption
@@ -254,6 +271,8 @@ function NodeRow({
   override: ConversationNodeOverride
   onOverride: (patch: ConversationNodeOverride) => void
   targets: Array<{ id: string; label: string }>
+  /** Categories from Servicios, shown as a reference on the listing step. */
+  categories: string[]
 }): React.JSX.Element | null {
   // One textarea, one line per case. The owner writes a list the way they think
   // of it; the array is an implementation detail of the wire format.
@@ -349,6 +368,18 @@ function NodeRow({
             <span className="text-muted-foreground text-xs">
               Se suman a los pasos de arriba, no los reemplazan. Acá va lo propio de tu negocio.
             </span>
+            {categories.length > 0 && (
+              <p className="text-muted-foreground text-xs">
+                Categorías en tu catálogo:{' '}
+                {categories.map((category, index) => (
+                  <span key={category}>
+                    {index > 0 && ', '}
+                    <span className="text-emma-text font-medium">{category}</span>
+                  </span>
+                ))}
+                . Escribilas igual acá para que Emma las reconozca.
+              </p>
+            )}
             <Textarea
               id={`extra-${node.id}`}
               value={override.extraInstructions ?? ''}

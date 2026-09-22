@@ -255,8 +255,12 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
     node: {
       objective: 'Mostrar los servicios relevantes con su material asociado.',
       steps: [
-        'Filtrá los servicios según lo que pidió el cliente.',
-        'Enviá nombre, descripción y precio de cada uno.',
+        'Llamá show_services con la categoría o los servicios que corresponden a lo que pidió el cliente. Ella te devuelve cuáles son y manda sola la ficha de cada uno.',
+        // Was "Enviá nombre, descripción y precio de cada uno", which is what
+        // produced the wall of text: with six-line descriptions the model did
+        // exactly as told. The detail now travels in the card caption, where the
+        // customer reads it under the photo instead of scrolling past it.
+        'Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.',
         // Replaces "Si el servicio tiene material cargado, enviálo", which read
         // as applying to every row of a list the model had just been told to
         // send whole — the one case where the material must NOT go.
