@@ -112,6 +112,17 @@ const ADVANCE_FLOW = 'advance_flow'
 const to = (node: string): ExitTarget => ({ node })
 
 /**
+ * Shared by the two nodes that put services in front of a customer.
+ *
+ * The distinction it draws — catalogue versus detail — is the one CLAUDE.md
+ * already documents and the prompt body already states. What was missing was
+ * having it in the node block, which is the last thing the model reads and
+ * therefore the thing it follows when the two disagree.
+ */
+const MEDIA_STEP =
+  'Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.'
+
+/**
  * Every trigger something in this codebase actually emits, with the emitter.
  *
  * Hand-maintained on purpose: there is no way to introspect "does any code path
@@ -215,6 +226,11 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
         'Leé lo que el cliente pide.',
         '¿Busca un servicio puntual, información general, o quiere agendar directo?',
         'Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.',
+        // The global rule covers recommending, but it lives in the body and this
+        // node's objective pulls the other way ("ANTES de enviarle todo el
+        // catálogo"). A recommendation IS the detail of one service, and the
+        // block the model reads last has to say so.
+        MEDIA_STEP,
       ],
       edgeCases: [
         'Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.',
@@ -241,7 +257,10 @@ export const NODE_CATALOG: ReadonlyArray<NodeBlueprint> = [
       steps: [
         'Filtrá los servicios según lo que pidió el cliente.',
         'Enviá nombre, descripción y precio de cada uno.',
-        'Si el servicio tiene material cargado, enviálo.',
+        // Replaces "Si el servicio tiene material cargado, enviálo", which read
+        // as applying to every row of a list the model had just been told to
+        // send whole — the one case where the material must NOT go.
+        MEDIA_STEP,
         'Preguntá si quiere avanzar o saber más de alguno.',
       ],
       edgeCases: [

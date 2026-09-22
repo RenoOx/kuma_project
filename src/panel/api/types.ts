@@ -311,6 +311,13 @@ export interface PanelService {
   name: string
   /** What it is, in the owner's words. Absent until they write one. */
   description?: string
+  /**
+   * How the owner groups their catalogue: "Nivel inicial", "Uñas".
+   *
+   * Emma reads it next to the name, and once two services carry different ones
+   * she lists the catalogue grouped instead of flat.
+   */
+  category?: string
   /** Null when the service has no fixed length; the slot grid decides. */
   durationMinutes: number | null
   priceMin: number | null

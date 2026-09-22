@@ -99,6 +99,23 @@ const serviceSchema = z
       .max(600)
       .transform((v) => (v.length === 0 ? undefined : v))
       .optional(),
+    // How the owner groups their own catalogue: "Nivel inicial", "Uñas",
+    // "Certificaciones". Free text and not an enum for the same reason
+    // collectDataFields is: every business names its own, and a closed list
+    // would fit the first niche and fight all the others.
+    //
+    // Short on purpose. It is a label the model reads next to the name, not a
+    // second description — and it is the key a catalogue groups by, so a
+    // sentence here would produce one group per service.
+    //
+    // Same '' -> undefined transform as description: a business that leaves it
+    // blank renders exactly as it did before this field existed.
+    category: z
+      .string()
+      .trim()
+      .max(40)
+      .transform((v) => (v.length === 0 ? undefined : v))
+      .optional(),
     durationMinutes: z
       .number()
       .int()
