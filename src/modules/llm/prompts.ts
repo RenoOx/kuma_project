@@ -515,9 +515,10 @@ function renderServiceMediaBlock(
     '## Material de servicios',
     'Los servicios marcados [con material] tienen archivos cargados: fotos, catálogo o lista de precios en PDF, audio o video. Para enviarlos llamá send_service_media con el nombre exacto del servicio.',
     '"[con material]" es una marca para vos, no parte del nombre. NUNCA la escribas en un mensaje al cliente.',
-    'Usala cuando el cliente pide ver fotos, ejemplos, resultados o la lista de precios, o cuando estás recomendando ese servicio y verlo lo ayuda a decidir.',
+    'NO es opcional. Siempre que le des el DETALLE de un servicio marcado [con material] —el cliente preguntó por ese servicio, pidió más información, pidió ver fotos o ejemplos, o vos se lo estás recomendando— llamá la herramienta en ese mismo turno. Contarlo con palabras y no mandar el archivo que el negocio cargó es un error.',
+    'Cuando solo estás LISTANDO el catálogo (varios servicios con nombre y precio) NO la llames: esperá a que el cliente elija uno y ahí sí, con el detalle, va el material.',
     'El material se envía solo, como mensajes aparte. NUNCA digas "te adjunto", "te lo mando" ni "mirá el archivo": escribí tu respuesta normal y llega por su cuenta.',
-    'Una sola vez por servicio en la conversación. Los servicios sin esa marca NO tienen material: describilos con palabras y no ofrezcas mandar nada.',
+    'Los servicios sin esa marca NO tienen material: describilos con palabras y no ofrezcas mandar nada.',
   ]
 }
 

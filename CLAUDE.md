@@ -532,11 +532,31 @@ apuntan por construcción.
 tipo a `sendImage` / `sendDocument` / `sendAudio` / `sendVideo`. Todos pasan por
 `enqueueSend` y `humanDelay`, y todos sobre **Buffer**, no URL firmada.
 
-**Tope de 2 adjuntos por turno** (`MAX_ATTACHMENTS_PER_TURN` en `toolExecutor`).
-No es cosmético: cada adjunto es un mensaje saliente, y un cliente preguntando
-por tres servicios podría disparar doce envíos. Ya hubo un incidente de
-rate-limit de WhatsApp el 2026-07-01. El `display_order` del dueño decide
-cuáles entran.
+**Mandar el material NO es opcional.** Si el cliente pide el detalle de un
+servicio marcado `[con material]`, la tool va en ese mismo turno. Era "usar
+cuando ayude a mostrarlo" y el resultado era una lotería. **La excepción es
+listar**: catálogo → nombre y precio; detalle de UNO → texto y material.
+
+**Tope de 2 adjuntos por turno** (`MAX_ATTACHMENTS_PER_TURN` en
+`llm/attachmentQueue.ts`). No es cosmético: cada adjunto es un mensaje saliente y
+un número rate-limiteado tumba al negocio entero, no solo las fotos — ya pasó el
+2026-07-01. El `display_order` del dueño decide cuáles entran.
+
+Vivía en `toolExecutor`, aplicado sobre la lista de UN servicio, lo cual acota un
+servicio y no un turno: el modelo puede llamar la tool una vez por servicio, así
+que tres servicios con dos archivos daban seis envíos bajo una constante que
+prometía dos. Ahora se aplica en `queueAttachments`, que es el único lugar donde
+el turno entero es visible.
+
+**Ventana de repetición: 2 envíos por servicio cada 15 minutos**
+(`whatsapp/sentServiceImages.ts`), deslizante y por conversación. Era 1 envío con
+memoria de 6 horas, que en un chat de minutos no es "no repitas" sino "nunca
+más": un cliente preguntó por el mismo curso 71 minutos después de recibir su
+foto y no recibió nada. Cuando la ventana bloquea, Emma **lo dice** — antes se
+callaba, y "ya te la mandé" era indistinguible de "esto no tiene foto".
+
+El mapa es en memoria: con dos instancias cada una lleva la suya, misma deuda que
+`clientRegistry`.
 
 ## Panel del dueño
 

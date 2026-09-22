@@ -12,7 +12,7 @@ import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
-import { wasServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
+import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
 
@@ -193,24 +193,19 @@ const UNKNOWN_SERVICE_INSTRUCTION =
 // something the customer cannot see happening and reads as a bug when it lands
 // a second later on its own.
 
-/**
- * How many files one turn may send, however many a service has.
- *
- * Every attachment is its own outbound WhatsApp message. Without a ceiling, a
- * customer browsing three services could trigger a dozen sends in a single turn
- * — and a rate-limited number takes the whole business offline, not just the
- * photos.
- */
-const MAX_ATTACHMENTS_PER_TURN = 2
-
 const NO_SERVICE_MEDIA_INSTRUCTION =
   'Ese servicio no tiene material cargado, así que NO se envió nada. Describíselo con palabras y seguí la conversación con naturalidad. NO le digas que le mandaste un archivo ni que se lo vas a mandar, y no vuelvas a llamar esta herramienta para ese servicio.'
 
 const SERVICE_MEDIA_SENT_INSTRUCTION =
   'El material se está enviando solo por WhatsApp. Escribí tu respuesta normal sobre el servicio. NO digas "te adjunto", "te lo mando" ni "mirá el archivo": para el cliente simplemente llega.'
 
+// Says it out loud, and that is the change: the old version suggested referring
+// to the file ("referite a lo que ya tiene más arriba"), the model skipped it,
+// and the customer got a reply indistinguishable from "this service has no
+// photo". Two different silences, and only this one is a problem — a customer
+// who cannot see the file needs to know it was sent, not to guess.
 const MEDIA_ALREADY_SENT_INSTRUCTION =
-  'Ya le enviaste el material de ese servicio en esta conversación, así que no se mandó de nuevo. Si volvió a preguntar, referite a lo que ya tiene más arriba. NO vuelvas a llamar esta herramienta para ese servicio.'
+  'Ya le mandaste el material de ese servicio hace un momento, así que no se volvió a enviar. DECÍSELO en tu respuesta: que se lo enviaste recién y preguntale si le llegó, para que no quede pensando que no existe. Después seguí con lo que te preguntó.'
 
 // ── Presentación de la disponibilidad ────────────────────────────────────────
 //
@@ -662,7 +657,7 @@ export async function executeTool(
         }
       }
 
-      if (wasServiceImageSent(context.conversationId, service.id)) {
+      if (!canSendServiceMedia(context.conversationId, service.id)) {
         return {
           result: JSON.stringify({
             status: 'already_sent',
@@ -679,12 +674,14 @@ export async function executeTool(
         }
       }
 
-      // Capped, and the cap is not cosmetic. Every attachment is its own
-      // outbound WhatsApp message: a customer asking about three services with
-      // four files each would fire twelve sends in one turn, which is how an
-      // account gets rate-limited — something this project has already lived
-      // through once. The owner's display_order decides which ones make the cut.
-      const selected = media.slice(0, MAX_ATTACHMENTS_PER_TURN)
+      // Offered whole, in the owner's display_order. The turn's ceiling lives in
+      // attachmentQueue, which is the only place the whole turn is visible —
+      // cutting here would bound ONE service's files and call it a turn.
+      //
+      // So `sent` is what this service offers, not necessarily what goes out.
+      // The model is told never to narrate the transport, so the difference
+      // cannot reach the customer as a promise that was not kept.
+      const selected = media
 
       return {
         result: JSON.stringify({

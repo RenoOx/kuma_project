@@ -78,7 +78,7 @@ export const kumaTools: ChatCompletionTool[] = [
     function: {
       name: 'send_service_media',
       description:
-        'Envía por WhatsApp el material de un servicio del catálogo: fotos, catálogo o lista de precios en PDF, audio o video. Usar cuando el cliente pide ver fotos, ejemplos, resultados, "cómo queda", la lista de precios, o cuando estás recomendando un servicio y ayuda mostrarlo. Solo funciona con servicios marcados [con material] en el catálogo. Llamala UNA sola vez por servicio: el material se manda solo, vos seguí escribiendo tu respuesta normal sin decir "te lo adjunto".',
+        'Envía por WhatsApp el material de un servicio del catálogo: fotos, catálogo o lista de precios en PDF, audio o video. OBLIGATORIA: siempre que le des el detalle de UN servicio marcado [con material] —porque el cliente preguntó por ese servicio, pidió más información, pidió ver fotos o ejemplos, o porque vos se lo estás recomendando— llamala en ESE MISMO turno. No es opcional ni depende de si te parece que ayuda: si el servicio tiene material, va. Excepción: cuando solo estás LISTANDO el catálogo (varios servicios con su nombre y precio) no la llames; esperá a que el cliente elija uno. Solo funciona con servicios marcados [con material]. El material se manda solo: vos seguí escribiendo tu respuesta normal sin decir "te lo adjunto".',
       parameters: {
         type: 'object',
         properties: {
