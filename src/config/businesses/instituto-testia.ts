@@ -1,8 +1,9 @@
 import { defineBusinessConfig } from './define.js'
 
 // Instituto TestIA (dev): el ensayo de Instituto Tecmin. Negocio de prueba (+999),
-// se prueba con "Probar Emma". Este archivo manda sobre lo que diga el panel en la
-// tarjeta Conversación; los cursos, el saludo y los datos a pedir siguen en la base
+// se prueba con "Probar Emma". Este archivo manda sobre la base en el flujo, el
+// saludo, los datos a pedir y los mensajes fijos. Los cursos y sus precios siguen
+// en la base, editables desde el panel
 // (npm run business:show:dev -- 10jPkBrN_wkFkCkJYKPYF para ver todo junto).
 //
 // La IA solo lee la intención del alumno. Los montos se dicen tal cual: nunca se
@@ -24,6 +25,14 @@ export default defineBusinessConfig({
   businessId: '10jPkBrN_wkFkCkJYKPYF',
   name: 'Instituto TestIA (dev)',
   flowType: 'sales',
+
+  // Lo primero que dice Emma, tal cual. Hace la pregunta de la bifurcación, así
+  // que en el primer mensaje no se agrega otra invitación (ver greetingAsks).
+  greeting:
+    '¡Hola! ¿Cómo estás? Para apoyarte necesito saber si tienes experiencia en maquinaria pesada.',
+
+  // Lo que Emma pide y guarda en collect_data, en este orden.
+  collectData: ['nombre completo', 'curso o certificación elegida'],
 
   flow: [
     { node: 'idle' },

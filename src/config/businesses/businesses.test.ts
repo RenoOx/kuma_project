@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { compositionFor } from '@/modules/conversation/flowSource.js'
+import { compositionFor, withFileSettings } from '@/modules/conversation/flowSource.js'
 import { presetFor, validateFlow } from '@/modules/conversation/stateMachine.js'
 import plantilla from './_plantilla.js'
 import { type BusinessConfig, defineBusinessConfig } from './define.js'
@@ -83,6 +83,54 @@ describe('business config files', () => {
       flow: [{ node: 'idle' }, { node: 'greeting' }, { node: 'show_availability' }],
     })
   })
+})
+
+describe('withFileSettings', () => {
+  const file = defineBusinessConfig({
+    businessId: 'biz-a',
+    name: 'A',
+    flowType: 'sales',
+    greeting: '¡Hola! ¿Tienes experiencia?',
+    tone: 'formal',
+    instructions: 'Solo de A',
+    collectData: ['nombre completo'],
+    flow: [{ node: 'idle' }, { node: 'greeting' }, { node: 'informing' }],
+  })
+  const configs = new Map([[file.businessId, file]])
+
+  it('puts the file of a business over its database settings', () => {
+    const base = settingsFor('sales', { assistant: { name: 'Sofía' } })
+    const { settings, fromFile } = withFileSettings('biz-a', base, configs)
+    expect(settings.messages.greeting).toBe('¡Hola! ¿Tienes experiencia?')
+    expect(settings.assistant.tone).toBe('formal')
+    expect(settings.assistant.customInstructions).toBe('Solo de A')
+    expect(settings.collectDataFields).toEqual(['nombre completo'])
+    // Lo que el archivo no dice queda como en la base.
+    expect(settings.assistant.name).toBe('Sofía')
+    expect(fromFile).toEqual(['greeting', 'tone', 'instructions', 'collectData'])
+  })
+
+  it('never applies one business the file of another', () => {
+    const base = settingsFor('sales')
+    const { settings, fromFile } = withFileSettings('biz-b', base, configs)
+    expect(settings).toBe(base)
+    expect(fromFile).toEqual([])
+  })
+
+  it('skips the file when its flow type disagrees with the database', () => {
+    const base = settingsFor('appointments')
+    expect(withFileSettings('biz-a', base, configs).settings).toBe(base)
+  })
+
+  // El archivo no pasa por el schema al cargarse: esto frena un saludo de más de
+  // 600 caracteres o una lista de datos vacía antes del merge.
+  for (const config of ALL_FILES) {
+    it(`${config.name} still yields valid settings`, () => {
+      const single = new Map([[config.businessId, config]])
+      const { settings } = withFileSettings(config.businessId, settingsFor(config.flowType), single)
+      expect(businessSettingsSchema.safeParse(settings).success).toBe(true)
+    })
+  }
 })
 
 describe('compositionFor', () => {

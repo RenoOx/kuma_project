@@ -6,7 +6,11 @@ import {
   type BusinessSettings,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
-import { compositionFor, fileConfigFor } from '@/modules/conversation/flowSource.js'
+import {
+  compositionFor,
+  fileConfigFor,
+  withFileSettings,
+} from '@/modules/conversation/flowSource.js'
 import { blueprintFor } from '@/modules/conversation/nodeCatalog.js'
 import { compileFlow, getStateConfig } from '@/modules/conversation/stateMachine.js'
 import { buildSystemPrompt, renderNodeBlock } from '@/modules/llm/prompts.js'
@@ -33,11 +37,17 @@ function out(line = ''): void {
   process.stdout.write(`${line}\n`)
 }
 
+// Igual que businessService.getSettings: con lo del archivo encima, para que lo
+// que se muestra sea lo que corre.
 function parseSettings(business: Business): BusinessSettings | null {
   const parsed = businessSettingsSchema.safeParse(business.settings)
-  if (parsed.success) return parsed.data
-  out(`⚠ settings inválidos: ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}`)
-  return null
+  if (!parsed.success) {
+    out(`⚠ settings inválidos: ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}`)
+    return null
+  }
+  const { settings, fromFile } = withFileSettings(business.id, parsed.data)
+  if (fromFile.length > 0) out(`Del archivo (mandan sobre la base): ${fromFile.join(', ')}`)
+  return settings
 }
 
 function showSummary(business: Business): void {
@@ -80,6 +90,7 @@ function showBusiness(business: Business, promptState: string | null): void {
 
   const flowType = settings?.flowType ?? 'appointments'
   const flow = compileFlow(resolved.composition, flowType)
+  const fileMessages = fileConfigFor(business.id)?.fixedMessages ?? {}
   for (const id of nodes) {
     // Como lo corre este tipo de flujo: con el ejemplo y las tools extendidas.
     const blueprint = blueprintFor(id, flowType)
@@ -111,6 +122,10 @@ function showBusiness(business: Business, promptState: string | null): void {
       ].filter(Boolean)
       out(`  foto:      ${what.join(' · ')}`)
     }
+    for (const id of state?.fixedMessages ?? []) {
+      const known = fileMessages[id] !== undefined
+      out(`  fijo:      ${id}${known ? '' : '  ⚠ no está en fixedMessages del archivo'}`)
+    }
     out(`  tools:     ${(state?.tools ?? []).join(', ') || '—'}`)
   }
 
@@ -119,7 +134,11 @@ function showBusiness(business: Business, promptState: string | null): void {
     out(`════ Prompt en el estado "${promptState}" (KB vacía: se elige mensaje a mensaje) ════`)
     const config = getStateConfig(flow, promptState)
     const body = buildSystemPrompt(business, [], settings)
-    const node = renderNodeBlock(config.node, config.branches)
+    const fixed = (config.fixedMessages ?? []).flatMap((id) => {
+      const message = fileMessages[id]
+      return message ? [{ id, when: message.when ?? '' }] : []
+    })
+    const node = renderNodeBlock(config.node, config.branches, fixed)
     out(node ? `${body}\n\n${node}` : body)
   }
 }

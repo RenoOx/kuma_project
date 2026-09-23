@@ -1,4 +1,5 @@
 import type { Business, NewBusiness } from '@/db/schema/index.js'
+import { withFileSettings } from '@/modules/conversation/flowSource.js'
 import { generatePanelToken } from '@/modules/panel/panelToken.js'
 import { AppError, ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -112,7 +113,11 @@ export async function getSettings(businessId: string): Promise<Result<BusinessSe
     if (!business) {
       return err(new NotFoundError({ resource: 'business', logContext: { businessId } }))
     }
-    return parseBusinessSettings(businessId, business.settings)
+    const parsed = parseBusinessSettings(businessId, business.settings)
+    if (!parsed.ok) return parsed
+    // Todo lo que corre en vivo lee por acá, así que acá es donde el archivo del
+    // negocio (src/config/businesses/) pone su saludo, tono, etc. por encima.
+    return ok(withFileSettings(businessId, parsed.data).settings)
   } catch (cause) {
     return err(
       new AppError({

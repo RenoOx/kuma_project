@@ -45,6 +45,55 @@ export function fileConfigFor(
   return configs.get(businessId)
 }
 
+/** Qué campos de los settings puso el archivo, para mostrarlo (business:show, panel). */
+export type FileSettingsField = 'greeting' | 'tone' | 'instructions' | 'collectData'
+
+export interface SettingsWithFile {
+  settings: BusinessSettings
+  /** Los campos que vinieron del archivo; vacío si no hay archivo o no aplica. */
+  fromFile: FileSettingsField[]
+}
+
+/**
+ * Los settings de la base con lo que el archivo del negocio pone encima: saludo,
+ * tono, instrucciones generales y datos a pedir.
+ *
+ * Misma condición que el flujo: solo si el flowType del archivo coincide con el
+ * de la base. Un archivo escrito para un instituto no le cambia el saludo a un
+ * negocio que en la base es de agenda. Lo que no dice el archivo queda como está
+ * en la base. Nunca se escribe en la base: se aplica en cada lectura.
+ */
+export function withFileSettings(
+  businessId: string,
+  settings: BusinessSettings,
+  configs: ReadonlyMap<string, BusinessConfig> = CONFIG_BY_ID,
+): SettingsWithFile {
+  const file = configs.get(businessId)
+  if (!file || file.flowType !== settings.flowType) return { settings, fromFile: [] }
+
+  const { greeting, tone, instructions, collectData } = file.settings
+  const fromFile: FileSettingsField[] = []
+  if (greeting !== undefined) fromFile.push('greeting')
+  if (tone !== undefined) fromFile.push('tone')
+  if (instructions !== undefined) fromFile.push('instructions')
+  if (collectData !== undefined) fromFile.push('collectData')
+  if (fromFile.length === 0) return { settings, fromFile }
+
+  return {
+    settings: {
+      ...settings,
+      ...(collectData !== undefined ? { collectDataFields: collectData } : {}),
+      messages: { ...settings.messages, ...(greeting !== undefined ? { greeting } : {}) },
+      assistant: {
+        ...settings.assistant,
+        ...(tone !== undefined ? { tone } : {}),
+        ...(instructions !== undefined ? { customInstructions: instructions } : {}),
+      },
+    },
+    fromFile,
+  }
+}
+
 export function compositionFor(
   businessId: string,
   settings: BusinessSettings | null,
