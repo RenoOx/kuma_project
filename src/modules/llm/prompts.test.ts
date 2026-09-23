@@ -217,11 +217,20 @@ describe('a business that sells is never told how to book', () => {
 })
 
 describe('what a service is, in words', () => {
-  it('puts the description in the catalogue line', () => {
-    // Without it a service is name, price and duration — so "contame más" could
-    // only be answered with the price the customer already had. It used to live
-    // in the KB under `servicios`, a category now filtered out of every read
-    // that feeds this prompt.
+  it('keeps the description OUT of the catalogue index', () => {
+    // This used to assert the opposite, and the reason it gave was true at the
+    // time: the catalogue line was the only place Emma could read a description,
+    // so without it "contame más" could only be answered with the price the
+    // customer already had.
+    //
+    // That premise is gone. show_services and send_service_media both return the
+    // description in full now, so the detail has a home that the index does not
+    // have to be. Leaving it here as well was actively harmful: with a summary
+    // in hand the model wrote the detail from memory instead of asking, and what
+    // reached a customer was its paraphrase — facts dropped, and once a S/ 100
+    // course announced as free.
+    //
+    // The index is an index. The detail comes from the tools, verbatim.
     const prompt = buildSystemPrompt(
       fakeBusiness(),
       [],
@@ -237,7 +246,31 @@ describe('what a service is, in words', () => {
         ],
       }),
     )
-    expect(prompt).toContain('Incluye lavado y peinado.')
+    expect(prompt).not.toContain('Incluye lavado y peinado.')
+    // And the line stays readable: the model still knows what exists and what it
+    // costs, which is what it needs to pick one and ask about it.
+    expect(prompt).toContain('- Corte — S/ 25')
+  })
+
+  it('names the services that have files on their own line, never inside one', () => {
+    // "[con material]" used to sit glued to the name and the price. A model
+    // copying that line copied the marker with it, and it reached a customer
+    // twice — the second time after a rule had been written forbidding exactly
+    // that. A ban on copying something that lives inside the thing being copied
+    // is a ban that fails, so the marker moved out of the line.
+    const prompt = buildSystemPrompt(
+      fakeBusiness(),
+      [],
+      fakeSettings({
+        services: [{ name: 'Corte', id: 'svc1', priceMin: 25, priceMax: 25, active: true }],
+      }),
+      [],
+      null,
+      new Set(['svc1']),
+    )
+    expect(prompt).toContain('- Corte — S/ 25')
+    expect(prompt).not.toContain('- Corte — S/ 25 [con material]')
+    expect(prompt).toContain('Tienen material cargado: Corte')
   })
 
   it('leaves no empty line for a service that has none', () => {

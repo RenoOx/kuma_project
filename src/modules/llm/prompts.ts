@@ -452,50 +452,33 @@ function renderLocationBlock(address: string | null, googleMapsUrl: string | nul
 const UNCATEGORISED = 'Otros'
 
 /**
- * How much of a description the catalogue carries.
+ * Says what this list is, and what it is not.
  *
- * The catalogue is an INDEX: what the model needs to know which services exist
- * and pick between them. The full text belongs to show_services, which returns
- * it for the handful it was asked about, and to the card caption the customer
- * actually reads.
+ * It is an index: enough to know what exists, recognise a name and quote a
+ * price. It deliberately carries no descriptions, so there is nothing here to
+ * compose a detail out of — asking for it is the only way, and what comes back
+ * is the owner's own text.
  *
- * Before this, a business with six-line descriptions had all of them in every
- * prompt of every turn — and the model, told to send "nombre, descripción y
- * precio de cada uno", reproduced the lot as one wall of text.
+ * The earlier version of this line warned that descriptions were "abbreviated".
+ * That was weaker: a model told a text is shortened still has a shortened text,
+ * and it filled the gaps rather than asking.
  */
-const CATALOGUE_DESCRIPTION_CHARS = 120
-
-function summarise(description: string): string {
-  // Flattened, not cut at the first line. A description written as bullets
-  // usually opens with a lead-in — "Este curso contá:" — so taking line one
-  // produced an index entry that said nothing about the service. Joining the
-  // lines keeps the first real fact, which is what the model needs to choose.
-  const text = description
-    .split('\n')
-    .map((line) => line.replace(/^\s*[-*·•]\s*/, '').trim())
-    .filter((line) => line !== '')
-    .join(' · ')
-
-  if (text.length <= CATALOGUE_DESCRIPTION_CHARS) return text
-  // At a word boundary when there is one close enough; a sentence cut
-  // mid-syllable reads like a bug rather than like an abbreviation.
-  const cut = text.lastIndexOf(' ', CATALOGUE_DESCRIPTION_CHARS)
-  return `${text.slice(0, cut > 40 ? cut : CATALOGUE_DESCRIPTION_CHARS).trim()}…`
-}
+const CATALOGUE_IS_AN_INDEX =
+  'Esta lista es un índice: nombre, categoría y precio. NO tiene las descripciones. Para contarle a un cliente de qué se trata un servicio, pedí el texto con la herramienta y reproducilo TAL CUAL lo escribió el negocio — no lo escribas de memoria ni lo resumas vos.'
 
 /**
- * Warns the model that what follows is abbreviated.
+ * Which services have files, as its own line.
  *
- * Without it the catalogue looks complete, and a model that does not know it is
- * missing something completes it from context instead of asking. That is not a
- * hypothetical: a course priced at S/ 100 was described to a customer as "es
- * gratuito", composed out of a 120-character summary.
- *
- * Emitted only when something was actually shortened, so a business with one-line
- * descriptions does not carry a caveat about nothing.
+ * Separate from the catalogue on purpose. See the comment on the service line.
  */
-const CATALOGUE_IS_ABBREVIATED =
-  'Las descripciones de abajo están ABREVIADAS. Cuando le des el detalle de un servicio, pedí el texto completo con la herramienta y reproducilo tal cual: nunca lo completes de memoria ni lo resumas vos.'
+function renderMediaRoster(
+  services: BusinessSettings['services'],
+  withMedia: ReadonlySet<string>,
+): string {
+  const named = services.filter((s) => s.id && withMedia.has(s.id)).map((s) => s.name)
+  if (named.length === 0) return ''
+  return `\nTienen material cargado: ${named.join(', ')}. Para enviarlo usá send_service_media con el nombre exacto.`
+}
 
 function renderServices(
   services: BusinessSettings['services'],
@@ -521,30 +504,39 @@ function renderServices(
     // leaving the model to improvise a price policy.
     const priced = books ? s : { ...s, requiresEvaluation: false }
     const reference = books && s.referenceUrl ? `\n  Link de referencia: ${s.referenceUrl}` : ''
-    // Its own indented line rather than appended to the first one: the price
-    // and the marker have to stay adjacent to the name for the rules below to
-    // be readable, and a description is a sentence, not a field.
-    const description = s.description ? `\n  ${summarise(s.description)}` : ''
-    // The marker is the model's only way to know which services it may call
-    // send_service_media for. No key ever appears here: the tool resolves a
-    // name back to storage, and a key in the prompt would be both useless to
-    // the model and one more thing that could leak.
-    const media = s.id && withMedia.has(s.id) ? ' [con material]' : ''
+    // NO description and NO marker on this line, and both absences are the
+    // point.
+    //
+    // The description used to ride here as a summary. With it in hand the model
+    // wrote the detail of a service from memory instead of asking for it, and
+    // what reached the customer was its paraphrase — missing facts, and once an
+    // invented price. Take it away and there is nothing to compose from: the
+    // detail has to come from show_services or send_service_media, both of
+    // which return the owner's text in full.
+    //
+    // The marker used to be glued to the name and the price. A model copying
+    // that line copied "[con material]" with it, and it reached a customer
+    // twice — on 2026-09-21 and again after a rule was written to forbid it. A
+    // ban on copying something that sits inside the thing being copied is a ban
+    // that fails. It now lives on its own line below, where there is nothing to
+    // copy it into.
     const category = inline && s.category ? ` (${s.category})` : ''
-    return `- ${s.name}${category}${duration} — ${formatServicePrice(priced)}${media}${description}${reference}`
+    return `- ${s.name}${category}${duration} — ${formatServicePrice(priced)}${reference}`
   }
 
-  const abbreviated = services.some(
-    (s) => s.description !== undefined && summarise(s.description) !== s.description,
-  )
-  const caveat = abbreviated ? `${CATALOGUE_IS_ABBREVIATED}\n` : ''
+  // Unconditional now: the index is always an index, whatever the descriptions
+  // happen to be, so the rule about where the detail comes from always holds.
+  const caveat = `${CATALOGUE_IS_AN_INDEX}\n`
+  const roster = renderMediaRoster(services, withMedia)
 
   // Grouped ONLY when the owner drew a real distinction — two or more different
   // categories. With one category, or none, the list stays exactly as flat as it
   // was before this field existed, so a business that never touched it sees its
   // prompt unchanged to the character.
   const categories = [...new Set(services.map((s) => s.category?.trim()).filter(Boolean))]
-  if (categories.length < 2) return caveat + services.map((s) => line(s, true)).join('\n')
+  if (categories.length < 2) {
+    return caveat + services.map((s) => line(s, true)).join('\n') + roster
+  }
 
   // Insertion order of the catalogue, not alphabetical: the owner arranged the
   // list and that arrangement is a decision. Uncategorised goes last rather than
@@ -563,7 +555,8 @@ function renderServices(
     [...groups]
       .filter(([, items]) => items.length > 0)
       .map(([category, items]) => `### ${category}\n${items.map((s) => line(s, false)).join('\n')}`)
-      .join('\n')
+      .join('\n') +
+    roster
   )
 }
 
