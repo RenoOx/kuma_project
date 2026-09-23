@@ -1,0 +1,3246 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`compiled preset flows > appointments/barberia 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/barberia/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "await_payment",
+      "await_payment_verification",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "await_payment": {
+      "branches": [],
+      "entryGuard": "booking_intent",
+      "node": {
+        "edgeCases": [
+          "Cliente que no tiene ese método: ofrecé las alternativas configuradas.",
+          "Cliente que pregunta si puede pagar presencial: respondé según la configuración.",
+          "Cliente que manda una imagen que no es comprobante: pedile que reenvíe la correcta.",
+          "Cliente que dice "ya pagué" pero no manda nada: pedile la captura con amabilidad. Sin captura no avanzás.",
+          "Cliente que cambia de horario o de servicio acá: volvé a agendar con los datos nuevos antes de seguir con el pago.",
+        ],
+        "example": "Para confirmar tu cita necesitás un adelanto de S/ 50. Podés pagar por Yape al 987654321. Mandame la captura cuando lo hagas.",
+        "objective": "Presentar las opciones de pago y esperar el comprobante.",
+        "steps": [
+          "Decile el monto y listá los métodos configurados con sus datos.",
+          "Este es el primer momento de la conversación en que podés nombrar dinero.",
+          "Pedí la captura del comprobante directamente, sin preguntar si quiere mandarla. ✅ "Mandame la captura cuando pagues 😊" ❌ "¿Te gustaría que te pida la captura?"",
+          "NO le digas que la cita quedó agendada ni que la solicitud fue enviada: todavía no hay nada agendado.",
+        ],
+      },
+      "tools": [
+        "request_image",
+        "book_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "payment_capture_received": "await_payment_verification",
+        "payment_received": "await_payment_verification",
+      },
+    },
+    "await_payment_verification": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que pregunta cuánto falta: repetí que está en verificación, sin prometer un horario.",
+          "Cliente que manda otra captura: agradecé, no abras un segundo pedido.",
+        ],
+        "example": "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo.",
+        "objective": "Sostener la espera mientras el dueño revisa el comprobante.",
+        "steps": [
+          "Confirmá que recibiste el comprobante.",
+          "Decile que está en verificación y que le confirmás en un momento.",
+          "NO confirmes la cita, NO hables de horarios y NO pidas otra captura.",
+        ],
+      },
+      "tools": [
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "payment_approved": "confirmed",
+        "payment_rejected": "await_payment",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "deposit_required": "await_payment",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/barberia/hybrid 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/dental 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/dental/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "await_payment",
+      "await_payment_verification",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "await_payment": {
+      "branches": [],
+      "entryGuard": "booking_intent",
+      "node": {
+        "edgeCases": [
+          "Cliente que no tiene ese método: ofrecé las alternativas configuradas.",
+          "Cliente que pregunta si puede pagar presencial: respondé según la configuración.",
+          "Cliente que manda una imagen que no es comprobante: pedile que reenvíe la correcta.",
+          "Cliente que dice "ya pagué" pero no manda nada: pedile la captura con amabilidad. Sin captura no avanzás.",
+          "Cliente que cambia de horario o de servicio acá: volvé a agendar con los datos nuevos antes de seguir con el pago.",
+        ],
+        "example": "Para confirmar tu cita necesitás un adelanto de S/ 50. Podés pagar por Yape al 987654321. Mandame la captura cuando lo hagas.",
+        "objective": "Presentar las opciones de pago y esperar el comprobante.",
+        "steps": [
+          "Decile el monto y listá los métodos configurados con sus datos.",
+          "Este es el primer momento de la conversación en que podés nombrar dinero.",
+          "Pedí la captura del comprobante directamente, sin preguntar si quiere mandarla. ✅ "Mandame la captura cuando pagues 😊" ❌ "¿Te gustaría que te pida la captura?"",
+          "NO le digas que la cita quedó agendada ni que la solicitud fue enviada: todavía no hay nada agendado.",
+        ],
+      },
+      "tools": [
+        "request_image",
+        "book_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "payment_capture_received": "await_payment_verification",
+        "payment_received": "await_payment_verification",
+      },
+    },
+    "await_payment_verification": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que pregunta cuánto falta: repetí que está en verificación, sin prometer un horario.",
+          "Cliente que manda otra captura: agradecé, no abras un segundo pedido.",
+        ],
+        "example": "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo.",
+        "objective": "Sostener la espera mientras el dueño revisa el comprobante.",
+        "steps": [
+          "Confirmá que recibiste el comprobante.",
+          "Decile que está en verificación y que le confirmás en un momento.",
+          "NO confirmes la cita, NO hables de horarios y NO pidas otra captura.",
+        ],
+      },
+      "tools": [
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "payment_approved": "confirmed",
+        "payment_rejected": "await_payment",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "deposit_required": "await_payment",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/dental/requires-approval 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/estetica 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/estetica/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "await_payment",
+      "await_payment_verification",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "await_payment": {
+      "branches": [],
+      "entryGuard": "booking_intent",
+      "node": {
+        "edgeCases": [
+          "Cliente que no tiene ese método: ofrecé las alternativas configuradas.",
+          "Cliente que pregunta si puede pagar presencial: respondé según la configuración.",
+          "Cliente que manda una imagen que no es comprobante: pedile que reenvíe la correcta.",
+          "Cliente que dice "ya pagué" pero no manda nada: pedile la captura con amabilidad. Sin captura no avanzás.",
+          "Cliente que cambia de horario o de servicio acá: volvé a agendar con los datos nuevos antes de seguir con el pago.",
+        ],
+        "example": "Para confirmar tu cita necesitás un adelanto de S/ 50. Podés pagar por Yape al 987654321. Mandame la captura cuando lo hagas.",
+        "objective": "Presentar las opciones de pago y esperar el comprobante.",
+        "steps": [
+          "Decile el monto y listá los métodos configurados con sus datos.",
+          "Este es el primer momento de la conversación en que podés nombrar dinero.",
+          "Pedí la captura del comprobante directamente, sin preguntar si quiere mandarla. ✅ "Mandame la captura cuando pagues 😊" ❌ "¿Te gustaría que te pida la captura?"",
+          "NO le digas que la cita quedó agendada ni que la solicitud fue enviada: todavía no hay nada agendado.",
+        ],
+      },
+      "tools": [
+        "request_image",
+        "book_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "payment_capture_received": "await_payment_verification",
+        "payment_received": "await_payment_verification",
+      },
+    },
+    "await_payment_verification": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que pregunta cuánto falta: repetí que está en verificación, sin prometer un horario.",
+          "Cliente que manda otra captura: agradecé, no abras un segundo pedido.",
+        ],
+        "example": "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo.",
+        "objective": "Sostener la espera mientras el dueño revisa el comprobante.",
+        "steps": [
+          "Confirmá que recibiste el comprobante.",
+          "Decile que está en verificación y que le confirmás en un momento.",
+          "NO confirmes la cita, NO hables de horarios y NO pidas otra captura.",
+        ],
+      },
+      "tools": [
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "payment_approved": "confirmed",
+        "payment_rejected": "await_payment",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "deposit_required": "await_payment",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/general 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/general/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "await_payment",
+      "await_payment_verification",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "await_payment": {
+      "branches": [],
+      "entryGuard": "booking_intent",
+      "node": {
+        "edgeCases": [
+          "Cliente que no tiene ese método: ofrecé las alternativas configuradas.",
+          "Cliente que pregunta si puede pagar presencial: respondé según la configuración.",
+          "Cliente que manda una imagen que no es comprobante: pedile que reenvíe la correcta.",
+          "Cliente que dice "ya pagué" pero no manda nada: pedile la captura con amabilidad. Sin captura no avanzás.",
+          "Cliente que cambia de horario o de servicio acá: volvé a agendar con los datos nuevos antes de seguir con el pago.",
+        ],
+        "example": "Para confirmar tu cita necesitás un adelanto de S/ 50. Podés pagar por Yape al 987654321. Mandame la captura cuando lo hagas.",
+        "objective": "Presentar las opciones de pago y esperar el comprobante.",
+        "steps": [
+          "Decile el monto y listá los métodos configurados con sus datos.",
+          "Este es el primer momento de la conversación en que podés nombrar dinero.",
+          "Pedí la captura del comprobante directamente, sin preguntar si quiere mandarla. ✅ "Mandame la captura cuando pagues 😊" ❌ "¿Te gustaría que te pida la captura?"",
+          "NO le digas que la cita quedó agendada ni que la solicitud fue enviada: todavía no hay nada agendado.",
+        ],
+      },
+      "tools": [
+        "request_image",
+        "book_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "payment_capture_received": "await_payment_verification",
+        "payment_received": "await_payment_verification",
+      },
+    },
+    "await_payment_verification": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que pregunta cuánto falta: repetí que está en verificación, sin prometer un horario.",
+          "Cliente que manda otra captura: agradecé, no abras un segundo pedido.",
+        ],
+        "example": "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo.",
+        "objective": "Sostener la espera mientras el dueño revisa el comprobante.",
+        "steps": [
+          "Confirmá que recibiste el comprobante.",
+          "Decile que está en verificación y que le confirmás en un momento.",
+          "NO confirmes la cita, NO hables de horarios y NO pidas otra captura.",
+        ],
+      },
+      "tools": [
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "payment_approved": "confirmed",
+        "payment_rejected": "await_payment",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "deposit_required": "await_payment",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/salud 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > appointments/salud/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "show_availability",
+      "await_payment",
+      "await_payment_verification",
+      "confirmed",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "await_payment": {
+      "branches": [],
+      "entryGuard": "booking_intent",
+      "node": {
+        "edgeCases": [
+          "Cliente que no tiene ese método: ofrecé las alternativas configuradas.",
+          "Cliente que pregunta si puede pagar presencial: respondé según la configuración.",
+          "Cliente que manda una imagen que no es comprobante: pedile que reenvíe la correcta.",
+          "Cliente que dice "ya pagué" pero no manda nada: pedile la captura con amabilidad. Sin captura no avanzás.",
+          "Cliente que cambia de horario o de servicio acá: volvé a agendar con los datos nuevos antes de seguir con el pago.",
+        ],
+        "example": "Para confirmar tu cita necesitás un adelanto de S/ 50. Podés pagar por Yape al 987654321. Mandame la captura cuando lo hagas.",
+        "objective": "Presentar las opciones de pago y esperar el comprobante.",
+        "steps": [
+          "Decile el monto y listá los métodos configurados con sus datos.",
+          "Este es el primer momento de la conversación en que podés nombrar dinero.",
+          "Pedí la captura del comprobante directamente, sin preguntar si quiere mandarla. ✅ "Mandame la captura cuando pagues 😊" ❌ "¿Te gustaría que te pida la captura?"",
+          "NO le digas que la cita quedó agendada ni que la solicitud fue enviada: todavía no hay nada agendado.",
+        ],
+      },
+      "tools": [
+        "request_image",
+        "book_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "payment_capture_received": "await_payment_verification",
+        "payment_received": "await_payment_verification",
+      },
+    },
+    "await_payment_verification": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que pregunta cuánto falta: repetí que está en verificación, sin prometer un horario.",
+          "Cliente que manda otra captura: agradecé, no abras un segundo pedido.",
+        ],
+        "example": "¡Recibí tu comprobante! El encargado lo está verificando y te confirmo apenas esté listo.",
+        "objective": "Sostener la espera mientras el dueño revisa el comprobante.",
+        "steps": [
+          "Confirmá que recibiste el comprobante.",
+          "Decile que está en verificación y que le confirmás en un momento.",
+          "NO confirmes la cita, NO hables de horarios y NO pidas otra captura.",
+        ],
+      },
+      "tools": [
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "payment_approved": "confirmed",
+        "payment_rejected": "await_payment",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "asks_availability": "show_availability",
+        "inactive_24h": "idle",
+      },
+    },
+    "show_availability": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere un horario ocupado: ofrecé los más cercanos.",
+          "Cliente que pide un servicio que requiere evaluación: guialo a una consulta de diagnóstico y seguí el flujo normal desde ahí.",
+          "Cliente que no se decide: ofrecé dos o tres opciones concretas, no la agenda entera.",
+          "Si un tramo tiene un solo horario, decilo como hora puntual y no como rango.",
+          "Si no hay ningún horario libre ese día, decilo y ofrecé otra fecha.",
+          "Si el cliente cambia de horario o de servicio después de haber agendado, volvé a agendar con los datos nuevos: si no, queda registrado el horario viejo.",
+        ],
+        "example": "Para el jueves tengo 10:00am, 11:30am y 4:00pm. ¿Cuál te queda mejor?",
+        "objective": "Mostrar horarios libres y cerrar la reserva.",
+        "steps": [
+          "Si no dijo el día o el servicio, preguntá eso primero y recién después consultá disponibilidad.",
+          "SIEMPRE consultá la disponibilidad real del día pedido. Nunca respondas solo con el horario general de apertura ("abrimos de 9 a 8").",
+          "Ubicá cuál de los tres casos es, en este orden:",
+          "ATAJO — dio una hora exacta ("a las 10", "puede ser 3pm"): no listes nada. Si esa hora está libre, confirmá y pedí el nombre. Si no, ofrecé las dos más cercanas. ✅ "Sí, las 10:00am está libre 😊 ¿A nombre de quién agendo la cita?" ❌ mostrarle todos los tramos: ya te dijo las 10.",
+          "ELIGIÓ UN TRAMO o dio una preferencia ("en la mañana", "después de las 3"): listá TODOS los horarios exactos de ese tramo, sin recortar. ✅ "En la mañana tengo: 8:00am, 8:30am, 9:00am, 9:30am, 10:00am, 10:30am, 11:00am, 11:30am y 12:00pm. ¿Cuál prefieres?"",
+          "PREGUNTÓ POR EL DÍA sin hora ni preferencia: solo acá presentás los TRAMOS y preguntás cuál le acomoda. ✅ "Para mañana tengo de *8:00am a 12:30pm* y de *2:00pm a 5:00pm*. ¿Qué horario te acomoda mejor?"",
+          "Recién cuando ya eligió horario, preguntá el nombre: "¿A nombre de quién agendo la cita?". NUNCA antes, NUNCA el de WhatsApp, NUNCA inventado.",
+          "Con servicio + horario + nombre, agendá. Si el negocio pide adelanto, la herramienta te va a rechazar pidiéndolo: eso es lo esperado y deja registrado el horario elegido.",
+        ],
+      },
+      "tools": [
+        "check_availability",
+        "book_appointment",
+        "show_services",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "request_image",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "deposit_required": "await_payment",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > sales/fields 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "collect_data",
+      "confirmacion",
+      "correccion_datos",
+      "confirmed",
+    ],
+    "overrides": {
+      "listado_servicios": {
+        "branches": [
+          {
+            "id": "ruta-cierre",
+            "to": "collect_data",
+            "when": "El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.",
+          },
+        ],
+      },
+    },
+  },
+  "flow": {
+    "collect_data": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que da varios datos en un mensaje: tomá los que puedas y pedí solo lo que falte.",
+          "Dato con formato inválido: pedilo de nuevo con amabilidad, explicando qué falta.",
+        ],
+        "example": "¡Perfecto! ¿A nombre de quién lo registro?",
+        "objective": "Recoger la información que el negocio necesita del cliente.",
+        "steps": [
+          "Pedí cada campo configurado, uno a la vez y nunca todos de golpe.",
+          "Validá el formato donde aplique (correo, teléfono, fecha).",
+          "Cuando los tengas todos, guardalos.",
+        ],
+      },
+      "tools": [
+        "save_customer_data",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "data_complete": "confirmacion",
+        "inactive_24h": "idle",
+      },
+    },
+    "confirmacion": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que confirma con variaciones ("sí", "ok", "dale", "perfecto"): tomalo como afirmativo.",
+          "Cliente que dice que no sin aclarar qué: preguntá qué dato hay que corregir.",
+        ],
+        "example": "Te queda así:
+Servicio: Limpieza dental
+Fecha: jueves 25 de septiembre
+Hora: 3:00pm
+Nombre: Juan Pérez
+
+¿Está todo correcto?",
+        "objective": "Verificar que todo es correcto antes de cerrar.",
+        "steps": [
+          "Mostrá el resumen completo: servicio, fecha, hora, datos y monto si aplica.",
+          "Preguntá si está todo bien.",
+        ],
+      },
+      "tools": [
+        "confirm_summary",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "correction_requested": "correccion_datos",
+        "inactive_24h": "idle",
+        "summary_confirmed": "confirmed",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "correccion_datos": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere cambiar varios datos: uno a la vez.",
+        ],
+        "example": "¿Qué dato querés cambiar? (nombre, fecha, hora…)",
+        "objective": "Permitir corregir un dato sin recapturar todo.",
+        "steps": [
+          "Preguntá QUÉ dato quiere cambiar. No pidas todos de nuevo.",
+          "Recibí el dato corregido y guardalo.",
+          "Volvé al resumen.",
+        ],
+      },
+      "tools": [
+        "correct_field",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "field_corrected": "confirmacion",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [
+        {
+          "id": "ruta-cierre",
+          "to": "collect_data",
+          "when": "El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.",
+        },
+      ],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+        "advance_flow",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > sales/fields/deposit 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+      "collect_data",
+      "confirmacion",
+      "correccion_datos",
+      "confirmed",
+    ],
+    "overrides": {
+      "listado_servicios": {
+        "branches": [
+          {
+            "id": "ruta-cierre",
+            "to": "collect_data",
+            "when": "El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.",
+          },
+        ],
+      },
+    },
+  },
+  "flow": {
+    "collect_data": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que da varios datos en un mensaje: tomá los que puedas y pedí solo lo que falte.",
+          "Dato con formato inválido: pedilo de nuevo con amabilidad, explicando qué falta.",
+        ],
+        "example": "¡Perfecto! ¿A nombre de quién lo registro?",
+        "objective": "Recoger la información que el negocio necesita del cliente.",
+        "steps": [
+          "Pedí cada campo configurado, uno a la vez y nunca todos de golpe.",
+          "Validá el formato donde aplique (correo, teléfono, fecha).",
+          "Cuando los tengas todos, guardalos.",
+        ],
+      },
+      "tools": [
+        "save_customer_data",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "data_complete": "confirmacion",
+        "inactive_24h": "idle",
+      },
+    },
+    "confirmacion": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que confirma con variaciones ("sí", "ok", "dale", "perfecto"): tomalo como afirmativo.",
+          "Cliente que dice que no sin aclarar qué: preguntá qué dato hay que corregir.",
+        ],
+        "example": "Te queda así:
+Servicio: Limpieza dental
+Fecha: jueves 25 de septiembre
+Hora: 3:00pm
+Nombre: Juan Pérez
+
+¿Está todo correcto?",
+        "objective": "Verificar que todo es correcto antes de cerrar.",
+        "steps": [
+          "Mostrá el resumen completo: servicio, fecha, hora, datos y monto si aplica.",
+          "Preguntá si está todo bien.",
+        ],
+      },
+      "tools": [
+        "confirm_summary",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "correction_requested": "correccion_datos",
+        "inactive_24h": "idle",
+        "summary_confirmed": "confirmed",
+      },
+    },
+    "confirmed": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
+          "Cliente que no responde: no le escribas de nuevo.",
+        ],
+        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "objective": "Cerrar la conversación con el cliente tranquilo.",
+        "steps": [
+          "Confirmá lo acordado.",
+          "Despedite con calidez y sin prometer de más.",
+        ],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+        "inactive_24h": "idle",
+      },
+    },
+    "correccion_datos": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que quiere cambiar varios datos: uno a la vez.",
+        ],
+        "example": "¿Qué dato querés cambiar? (nombre, fecha, hora…)",
+        "objective": "Permitir corregir un dato sin recapturar todo.",
+        "steps": [
+          "Preguntá QUÉ dato quiere cambiar. No pidas todos de nuevo.",
+          "Recibí el dato corregido y guardalo.",
+          "Volvé al resumen.",
+        ],
+      },
+      "tools": [
+        "correct_field",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "field_corrected": "confirmacion",
+        "inactive_24h": "idle",
+      },
+    },
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [
+        {
+          "id": "ruta-cierre",
+          "to": "collect_data",
+          "when": "El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.",
+        },
+      ],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+        "advance_flow",
+      ],
+      "transitions": {
+        "appointment_booked": "confirmed",
+        "inactive_24h": "idle",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > sales/no-fields 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+      "listado_servicios",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+        "services_listed": "listado_servicios",
+      },
+    },
+    "listado_servicios": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Servicio sin material: mandá solo texto.",
+          "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
+          "Varios servicios: uno por uno, no todo junto.",
+        ],
+        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "objective": "Mostrar los servicios relevantes con su material asociado.",
+        "steps": [
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Tu texto es solo una intro corta. No repitas lo que ya va en las fichas.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+          "Preguntá si quiere avanzar o saber más de alguno.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "send_service_media",
+        "check_availability",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+      },
+    },
+  },
+}
+`;
+
+exports[`compiled preset flows > unconfigured 1`] = `
+{
+  "composition": {
+    "nodes": [
+      "idle",
+      "greeting",
+      "informing",
+    ],
+    "overrides": {},
+  },
+  "flow": {
+    "greeting": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que regresa (ya conversó antes): reconocelo si podés.",
+          "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
+          "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
+        ],
+        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "objective": "Dar la bienvenida e identificar la intención del cliente.",
+        "steps": [
+          "Saludá usando el nombre del asistente y del negocio.",
+          "Preguntá en qué podés ayudar.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "informing",
+        "inactive_24h": "idle",
+      },
+    },
+    "idle": {
+      "branches": [],
+      "node": {
+        "edgeCases": [],
+        "example": "",
+        "objective": "",
+        "steps": [],
+      },
+      "tools": [
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "customer_message": "greeting",
+      },
+    },
+    "informing": {
+      "branches": [],
+      "node": {
+        "edgeCases": [
+          "Cliente que dice "quiero una cita" directo: no le listes el catálogo, andá al grano.",
+          "Cliente que pregunta precios sin decir de qué: pedile que elija primero.",
+          "Cliente que pregunta algo fuera del alcance: respondé si podés, derivá si no.",
+        ],
+        "example": "¡Claro! ¿Buscás algo en particular o te cuento sobre nuestros servicios?",
+        "objective": "Entender qué busca el cliente ANTES de enviarle todo el catálogo.",
+        "steps": [
+          "Leé lo que el cliente pide.",
+          "¿Busca un servicio puntual, información general, o quiere agendar directo?",
+          "Si está claro, mostrale los servicios que corresponden. Si es vago, hacé una pregunta de clarificación.",
+          "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
+          "Si nombrás UN servicio con su detalle —porque lo pidió o porque se lo estás recomendando— y ese servicio está marcado [con material], mandá el material en este mismo turno. Listar el catálogo no cuenta: ahí van solo nombre y precio.",
+        ],
+      },
+      "tools": [
+        "show_services",
+        "check_availability",
+        "send_service_media",
+        "confirm_pending_appointment",
+        "escalate_to_human",
+      ],
+      "transitions": {
+        "inactive_24h": "idle",
+      },
+    },
+  },
+}
+`;
