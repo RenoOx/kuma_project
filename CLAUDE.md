@@ -12,10 +12,27 @@ de servicios. Cada `business_id` tiene su knowledge base, su número de
 WhatsApp, sus clientes y configuración. Un solo deploy atiende N negocios.
 
 Soporta dos tipos de flujo según el negocio:
+
 - **appointments**: clínicas dentales, centros estéticos, consultorios (agendar citas)
 - **sales**: certificaciones, cursos, ventas por campañas (informar, cobrar, recolectar datos)
 
 El tipo de flujo se define en `business.settings.flowType`.
+
+## Cómo comunicarte conmigo
+
+- Usa lenguaje simple. Si necesitas un término técnico, explícalo entre
+  paréntesis la primera vez. Ejemplo: "el override (la personalización
+  que cada negocio puede hacer sobre un nodo base)"
+- Cuando propongas un cambio, explica el POR QUÉ antes del QUÉ
+- Muéstrame antes/después cuando cambies algo
+- Si hay un concepto que necesito entender para tomar una decisión,
+  explícamelo con un ejemplo concreto de MI proyecto, no en abstracto
+- No asumas que entendí algo solo porque dije OK a un plan. Si el paso
+  siguiente depende de haberlo entendido, verifica con un ejemplo rápido
+- Cuando reportes qué hiciste, dime qué impacto tiene para el negocio,
+  no solo qué archivos tocaste
+- Si me equivoco o digo algo que contradice el código, corrígeme directo
+  y muéstrame por qué
 
 ## Identidad del producto
 
@@ -106,12 +123,16 @@ insert into _env_marker values ('🟢 DEV — mi-base — safe to break');
 ```bash
 npm run dev              # dev server con tsx watch (:3000)
 npm run dev:panel        # vite dev server del panel (:5173, proxy /api → :3000)
+# Probar a Emma en local sin WhatsApp (ver "Simulador"): en .env
+#   WHATSAPP_BOOT_ENABLED=false  SIMULATOR_ENABLED=true   → npm run dev + dev:panel
 npm run build:panel      # build del panel a dist/panel
 npm test                 # vitest run
 npm run test:watch       # vitest watch
 npm run db:generate      # drizzle-kit generate
 npm run db:migrate       # tsx src/db/migrate.ts
 npm run db:studio:dev    # drizzle-kit studio contra la base de dev
+npm run business:show:dev -- <id> [--prompt <estado>]   # qué flujo corre un negocio y por qué (solo lectura)
+npm run business:show:dev -- --all                      # resumen de todos: fuente del flujo y lo que se saltó
 npm run lint             # biome check --write
 npm run typecheck        # tsc --noEmit  +  tsc --noEmit -p src/panel/tsconfig.json
 npm run check            # lint + typecheck + test (ejecutar antes de commit)
@@ -142,8 +163,11 @@ tipos en el panel no aparece si solo corrés el primer `tsc`; por eso
 7. **Async/await** siempre. Nada de `.then()` encadenado.
 8. **Funciones puras** donde se pueda. Side effects aislados.
 9. **Secrets:** solo vía `env`. Nunca hardcoded. Nunca logueados.
-10. **Comentarios en código: inglés.** Explican POR QUÉ, no qué. Commit
-    messages: inglés, imperativo presente (`add appointment slot validator`).
+10. **Comentarios en código: español** (desde el 2026-09-23). Explican POR QUÉ,
+    no qué. Los comentarios existentes en inglés no se traducen de paso: solo se
+    escribe en español lo nuevo o lo que se reescribe. Nombres de código (variables,
+    funciones, tipos, archivos) siguen en inglés. Commit messages: inglés,
+    imperativo presente (`add appointment slot validator`).
 11. **Transacciones:** los services abren `db.transaction` y pasan `tx` al
     repo. Los repos reciben `(exec: Executor = db)` como último parámetro
     opcional. Los services nunca ejecutan queries directamente sobre `db`
@@ -199,15 +223,31 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
   presentes en TODOS los estados — si se atan a `listado_servicios`, un cliente
   que abre con "¿cuánto cuesta X?" se queda sin la consulta de diagnóstico
 
-  **La capa 1 se ramifica por `schedulesAppointments(settings)`**, vía la
-  variable `books` de `buildStaticBody`. Un negocio de venta no recibe la
+  **La capa 1 se ramifica por `schedulesAppointments(settings)`**: `buildStaticBody`
+  elige `APPOINTMENTS_PROMPT` (`prompts.appointments.ts`) o `SALES_PROMPT`
+  (`prompts.sales.ts`), los dos del contrato `FlowPrompt` (`prompts.flow.ts`).
+  Cada campo del contrato es un lugar donde clínica e instituto reciben cosas
+  distintas; que sea una interface obliga a que un bloque nuevo para uno no
+  compile hasta que el otro diga qué recibe ahí (aunque sea `[]`). Los dos
+  archivos no se importan entre sí ni importan `prompts.ts` — lo verifica
+  `prompts.snapshot.test.ts`. Un negocio de venta no recibe la
   mecánica de reserva (razonamiento de fechas, el orden servicio→horario→nombre,
   el nombre obligatorio, confirmación de citas pendientes, frescura de
   disponibilidad), ni los bloques de evaluación previa, ni las invitaciones de
   agenda: son instrucciones para tools que `llm.service` nunca le ofrece, y el
   modelo las intentaba igual. Medido: 229 → 178 líneas. El prompt de un negocio
-  de agenda **no cambió** al hacerlo, y eso se verifica con el diff de 5 nichos ×
-  con/sin adelanto.
+  de agenda **no cambió** al hacerlo, y eso lo verifican hoy los snapshots de
+  `prompts.snapshot.test.ts` (5 nichos × con/sin adelanto, híbrido, aprobación,
+  venta con/sin campos y sin config).
+
+  **Adelanto, aprobación e híbrido también pasan por el contrato**
+  (`depositBlock`, `depositRules`, `hybridBlock`, `approvalBlock`). Un negocio de
+  venta con adelanto recibe un bloque informativo ("para separar el cupo" y
+  "# Cómo dar los datos de pago"): cuándo dar el monto y qué decir si manda el
+  comprobante, sin `book_appointment` ni `request_image`. El título
+  "## Adelanto para reservar" se mantiene en los dos porque la regla general 4 lo
+  busca por ese nombre. Instituto Tecmin (prod) tiene adelanto: antes recibía la
+  orden de cobro de la agenda en cada mensaje.
 
   **Lo que se ramifica pero no desaparece**: `unrecognizedServiceBlock` y "no
   repreguntes" tienen versión de venta. El catálogo cerrado importa MÁS ahí — un
@@ -218,6 +258,7 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
   lo prohíbe es la 3 de `# Reglas generales`, incondicional a propósito: ese
   negocio no tenía adelanto ni bloque clínico, así que cualquier lugar gateado se
   la habría perdido
+
 - **Gate de depósito**: `toolExecutor` rechaza `book_appointment` si
   `requiresDeposit=true` y no hay evidencia de pago reciente. El rechazo
   congela el contexto de pago en la expectativa de imagen
@@ -229,17 +270,21 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
 
 ## Archivos críticos (leer antes de cambiar)
 
-| Archivo | Qué controla |
-|---------|-------------|
-| `src/modules/whatsapp/handler.ts` | Flujo principal, capas 1-3 |
-| `src/modules/llm/llm.service.ts` | Cerebro, loop de tools, carga de contexto |
-| `src/modules/llm/toolExecutor.ts` | Ejecución de herramientas + gates |
-| `src/modules/llm/tools.ts` | Definición de herramientas del LLM |
-| `src/modules/llm/prompts.ts` | System prompt (negocio + turno); `renderNodeBlock` |
-| `src/modules/business/business.settings.ts` | Config por negocio (Zod) |
-| `src/modules/conversation/nodeCatalog.ts` | El catálogo de nodos + `EMITTED_TRIGGERS` |
-| `src/modules/conversation/stateMachine.ts` | Compilador, validador y presets |
-| `src/modules/panel/settings.merge.ts` | Patch schemas + merge del panel |
+| Archivo                                     | Qué controla                                       |
+| ------------------------------------------- | -------------------------------------------------- |
+| `src/modules/whatsapp/handler.ts`           | Flujo principal, capas 1-3                         |
+| `src/modules/llm/llm.service.ts`            | Cerebro, loop de tools, carga de contexto          |
+| `src/modules/llm/toolExecutor.ts`           | Ejecución de herramientas + gates                  |
+| `src/modules/llm/tools.ts`                  | Definición de herramientas del LLM                 |
+| `src/modules/llm/prompts.ts`                | System prompt compartido; `renderNodeBlock`        |
+| `src/modules/llm/prompts.{appointments,sales}.ts` | Bloques de prompt de cada tipo de flujo      |
+| `src/modules/business/business.settings.ts` | Config por negocio (Zod)                           |
+| `src/modules/conversation/nodeCatalog.ts`   | Índice del catálogo, `nodesForFlow`, `EMITTED_TRIGGERS` |
+| `src/modules/conversation/nodes/*.nodes.ts` | Los nodos: core, agenda y venta, con sus presets   |
+| `src/modules/conversation/stateMachine.ts`  | Compilador, validador y `presetFor`                |
+| `src/modules/conversation/flowSource.ts`    | De dónde sale el flujo: archivo → base → preset    |
+| `src/config/businesses/`                    | Flujos de negocios administrados desde el repo     |
+| `src/modules/panel/settings.merge.ts`       | Patch schemas + merge del panel                    |
 
 ## Máquina de estados
 
@@ -259,13 +304,18 @@ El flujo NO lo decide el LLM — lo controla el código.
 
 Los dos flujos hardcodeados murieron. Hoy hay tres piezas:
 
-1. **Catálogo** (`src/modules/conversation/nodeCatalog.ts`) — 11 nodos cerrados.
-   Cada uno declara `objective`, `steps`, `edgeCases`, `example`, sus `tools`,
-   sus `exits` y qué config necesita (`requires`). También vive ahí
-   `EMITTED_TRIGGERS`: el registro a mano de qué trigger emite qué archivo.
-2. **Composición** — `settings.conversationFlow` (jsonb): qué nodos, en qué
-   orden, y los overrides del dueño. Ausente en casi todos los negocios; ahí
-   `presetFor(settings)` la deriva de `flowType` + `requiresDeposit`.
+1. **Catálogo** — 11 nodos cerrados, en tres archivos bajo
+   `src/modules/conversation/nodes/`: `core.nodes.ts` (idle, greeting,
+   informing, listado_servicios, confirmed), `appointments.nodes.ts`
+   (show_availability, await_payment, await_payment_verification) y
+   `sales.nodes.ts` (collect_data, confirmacion, correccion_datos). Cada uno
+   declara `objective`, `steps`, `edgeCases`, `example`, sus `tools`, sus
+   `exits` y qué config necesita (`requires`). `nodeCatalog.ts` los junta y
+   guarda `EMITTED_TRIGGERS`: el registro a mano de qué trigger emite qué archivo.
+2. **Composición** — de dónde sale la decide `flowSource.ts`: un archivo en
+   `src/config/businesses/` si hay y aplica; si no, `settings.conversationFlow`
+   (jsonb: qué nodos, en qué orden, y los overrides del dueño); si no,
+   `presetFor(settings)`, que la deriva de `flowType` + `requiresDeposit`.
 3. **Compilador y validador** (`stateMachine.ts`) — `compileFlow` deriva las
    transiciones del orden (`'next'`) más los saltos fijos del blueprint;
    `validateFlow` rechaza una composición que no pueda correr.
@@ -277,27 +327,57 @@ meses, con 6 triggers declarados que no emitía nadie.
 
 `validateFlow` es la promesa entera: **un flujo guardado es un flujo que corre.**
 Rechaza triggers sin emisor, nodos inalcanzables, nodos sin salida, `requires`
-insatisfechos, ids desconocidos o repetidos, e `idle` fuera del primer lugar.
+insatisfechos, ids desconocidos o repetidos, `idle` fuera del primer lugar, y
+**nodos del otro tipo de flujo** (un `collect_data` en una clínica): no basta con
+ocultarlo en el panel, un PATCH armado a mano lo metería igual.
+
+### Aislamiento entre tipos de flujo
+
+Un cambio para el instituto no puede tocar a la clínica sin que se vea:
+
+- `appointments.nodes.ts` y `sales.nodes.ts` no se importan entre sí; lo mismo
+  `prompts.appointments.ts` y `prompts.sales.ts`. Lo verifican los tests de
+  snapshot leyendo el código fuente.
+- `stateMachine.snapshot.test.ts` y `prompts.snapshot.test.ts` guardan el flujo
+  compilado y el prompt entero de cada forma de negocio. **Un snapshot que
+  cambió sin que lo buscaras es la señal**: no se regenera con `-u` sin mirar
+  el diff.
+- El endpoint del catálogo sirve `nodesForFlow(flowType)`: core + los propios.
+- Lo compartido sigue siendo compartido: tocar `core.nodes.ts` o `prompts.ts`
+  alcanza a los dos, y ahí los snapshots de ambos van a cambiar.
+
+**Los nodos core declaran solo lo común.** Lo de la agenda en ellos —
+`check_availability`, `confirm_pending_appointment`, las salidas
+`asks_availability`/`appointment_booked` y los ejemplos de clínica— lo agrega
+`APPOINTMENT_CORE_EXTENSIONS` (`appointments.nodes.ts`); lo de venta,
+`SALES_CORE_EXTENSIONS`. Las extensiones traen la lista de tools COMPLETA, no un
+agregado, porque el orden en que se ofrecen es parte de lo que recibe el modelo.
+Por eso `compileFlow(composition, flowType)` pide el tipo, y es obligatorio: un
+default `'appointments'` le daría la agenda a un instituto sin que nadie lo note.
+`NODE_BY_ID` tiene el core sin extender; lo que corre un negocio sale de
+`blueprintFor(id, flowType)` / `nodesForFlow(flowType)`.
+
+**Queda por nicho, no por flujo**: una barbería sigue viendo "Clínica Dental
+Sonrisa" en el ejemplo de `greeting` (viene de la extensión de agenda). Y el paso
+de `informing` "¿…o quiere agendar directo?" y su caso "quiero una cita" siguen
+en core.
 
 ### Presets
+
+Cada lista vive junto a sus nodos; `presetFor` elige:
 
 ```
 Agenda sin adelanto  idle→greeting→informing→listado_servicios→show_availability→confirmed
 Agenda con adelanto  ...→show_availability→await_payment→await_payment_verification→confirmed
+Venta                idle→greeting→informing→listado_servicios→collect_data→confirmacion→correccion_datos→confirmed
 Solo informativo     idle→greeting→informing→listado_servicios
 ```
 
-**`flowType: 'sales'` recibe hoy el preset informativo**, y "Vende" **sí** se
-puede elegir en el panel: saluda, asesora y muestra el catálogo con su material.
-Eso corre y es lo que un instituto necesita para informar.
-
-Le falta el final: un trigger que lleve de `listado_servicios` a `collect_data`.
-Los tres nodos del cierre —`collect_data`, `confirmacion`, `correccion_datos`—
-ya están completos, con sus tools y sus emisores reales en `toolExecutor.ts`; lo
-único que no existe es la salida que entra en ellos. **No necesita el
-`FrozenBooking` que trababa este ladrillo**: "el cliente eligió el curso X" no
-tiene horario, así que no hay `scheduledAtISO` que inventar. Cobrar adentro sí
-sigue trabado, porque `await_payment` lleva `entryGuard: 'booking_intent'`.
+Venta necesita `collectDataFields`; sin campos cae a informativo. La entrada al
+cierre es la ruta `ruta-cierre` (`SALES_ENTRY_BRANCH`), que el preset ya trae
+en `listado_servicios`: "el cliente eligió el curso X" no tiene horario, así que
+no necesita el `FrozenBooking`. Cobrar adentro sí sigue trabado, porque
+`await_payment` lleva `entryGuard: 'booking_intent'`.
 
 El único que aplica transiciones sigue siendo `conversationService.applyTrigger`,
 que ahora recibe el flujo compilado (`FlowDefinition`) en vez de `flowType`.
@@ -337,6 +417,7 @@ inventar, NO escalar por consultas informativas; escalar solo si el cliente
 quiere agendar). Esto es feature, no bug.
 
 Campos clave:
+
 - `flowType`: "appointments" | "sales" — define qué flujo de estados aplica
 - `niche`: dental, barberia, estetica, salud, general — define la voz y los
   ejemplos del prompt
@@ -355,6 +436,7 @@ Campos clave:
   al KB: precio y horario tienen forma estructurada y esto no compite con ellos
 
 Helpers obligatorios — no leer los campos crudos:
+
 - `activeServices(settings)` en vez de `settings.services`
 - `resolveServiceDurationMinutes(service, settings)` en vez de
   `service.durationMinutes`
@@ -379,16 +461,16 @@ menos de 2 minutos.
 ## Roles y routing
 
 - Si `phone === business.ownerWhatsappNumber` → flujo `owner_assistant`
-  * System prompt casual, tutea, telegráfico
-  * Tools: `get_daily_summary`, `get_appointments`, `pause_bot`, `resume_bot`,
+  - System prompt casual, tutea, telegráfico
+  - Tools: `get_daily_summary`, `get_appointments`, `pause_bot`, `resume_bot`,
     aprobación de pagos y de citas pendientes
-  * Memoria corto plazo: 48h, cleanup cada hora
-  * `conversation.type='owner_thread'`, una por business, `customerId=null`
+  - Memoria corto plazo: 48h, cleanup cada hora
+  - `conversation.type='owner_thread'`, una por business, `customerId=null`
 
 - Si `phone !== ownerWhatsappNumber` → flujo `customer`
-  * System prompt vendedor cálido
-  * Tools filtradas por estado (ver stateMachine.ts)
-  * `conversation.type='customer'`
+  - System prompt vendedor cálido
+  - Tools filtradas por estado (ver stateMachine.ts)
+  - `conversation.type='customer'`
 
 Con `business.settings.botPaused.paused === true`: los clientes reciben mensaje
 canned + conversación escalada + evento `paused_blocked_message`. El dueño nunca
@@ -425,13 +507,14 @@ la reprogramación sola.
 src/
   app.ts              # Hono app + middleware setup
   config/             # env (zod-validated), logger, db client, redis client
+    businesses/       # flujos de negocios administrados desde el repo
   modules/
     whatsapp/         # Baileys, handlers, sendQueue, anti-ban, notifiers
     llm/              # cliente, prompts, tools, executor
     business/         # tenants, settings
     customer/         # clientes finales, memoria larga
     appointment/      # citas, slots, verificación de pago
-    conversation/     # estado, máquina de estados, memoria corta
+    conversation/     # estado, máquina de estados, memoria corta; nodes/ por tipo de flujo
     ownerAssistant/   # flujo del dueño por WhatsApp
     panel/            # backend del panel: auth, repo, service, rutas, static
     admin/            # superficie de Vamvu
@@ -574,21 +657,21 @@ El link ES la credencial. Se genera al registrar un negocio.
 ### Rutas
 
 `/` Inbox · `/dashboard` · `/citas` · `/contactos` · `/servicios` ·
-`/asistente` · `/configuracion`. Todas bajo `/:businessId/*`. Para navegar se usa `PanelLink`
+`/asistente` · `/configuracion` · `/probar` (solo con `SIMULATOR_ENABLED`). Todas bajo `/:businessId/*`. Para navegar se usa `PanelLink`
 de `lib/session.js`, que reinyecta businessId y token.
 
 ### Los ejes de una conversación
 
 No colapsar uno en otro — cada uno responde una pregunta distinta:
 
-| Campo | Pregunta | Quién escribe |
-|---|---|---|
-| `type` | ¿quién está del otro lado? | `conversation.service` |
-| `status` | ¿abierta, cerrada, escalada? | `conversation.service` |
-| `state` | ¿en qué paso del flujo? | SOLO vía `stateMachine.ts` |
-| etiquetas (`tags`) | ¿cómo lo clasifica el dueño? | el dueño, desde el panel |
-| `emma_enabled` | ¿Emma responde en este chat? | el dueño, desde el panel |
-| `human_takeover_at` | ¿el dueño tomó el control? | `panel.service` / worker |
+| Campo               | Pregunta                     | Quién escribe              |
+| ------------------- | ---------------------------- | -------------------------- |
+| `type`              | ¿quién está del otro lado?   | `conversation.service`     |
+| `status`            | ¿abierta, cerrada, escalada? | `conversation.service`     |
+| `state`             | ¿en qué paso del flujo?      | SOLO vía `stateMachine.ts` |
+| etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel   |
+| `emma_enabled`      | ¿Emma responde en este chat? | el dueño, desde el panel   |
+| `human_takeover_at` | ¿el dueño tomó el control?   | `panel.service` / worker   |
 
 **`qualification` está muerto.** La columna sigue en el schema marcada
 `@deprecated` (solo para que `drizzle-kit generate` no emita un DROP), pero el
@@ -676,18 +759,28 @@ varía es el vocabulario dentro de las pantallas: una clínica habla de
 "paciente" y una barbería de "cliente". Objeto de configuración indexado por
 niche, NO componentes separados por nicho.
 
+**El dueño no elige el nicho** (desde el 2026-09-23): el selector "Tipo de
+negocio" salió de Configuración. Lo define Vamvu al crear el negocio y sigue
+decidiendo la voz, los ejemplos del prompt, los límites clínicos (dental y salud)
+y el vocabulario del panel. `GeneralSettings` ya no lo manda y `patchable()` deja
+intacto lo guardado.
+
+**Función: solo "Agenda citas" y "Vende".** "Ambas" (`appointmentMode: 'hybrid'`,
+agenda + atiende sin cita) sigue en el backend y en el prompt, pero el panel solo
+la muestra si un negocio ya la tiene guardada.
+
 ## Superficies de configuración
 
 Hay tres del lado del dueño y una de Vamvu, y no se pisan:
 
 - **Panel del cliente** — lo usa el dueño, repartido en tres pantallas por lo
   que va a buscar:
-  * `/asistente` — quién es Emma y cómo conversa: Identidad, Mensajes, Flujo y
+  - `/asistente` — quién es Emma y cómo conversa: Identidad, Mensajes, Flujo y
     **Conversación** (los nodos). Cuatro cards, cuatro PATCH: `identity`,
     `messages`, `flow`, `conversation`
-  * `/servicios` — el catálogo y su dinero: servicios, precios, evaluación
+  - `/servicios` — el catálogo y su dinero: servicios, precios, evaluación
     previa, fotos, formas de pago y adelanto, base de conocimiento
-  * `/configuracion` — el negocio: datos, horarios, días especiales, reservas y
+  - `/configuracion` — el negocio: datos, horarios, días especiales, reservas y
     avisos, integraciones
 
   Escribe por sección, mergeando sobre lo guardado (`settings.merge.ts`). Son 10
@@ -695,6 +788,7 @@ Hay tres del lado del dueño y una de Vamvu, y no se pisan:
   que le sirve al panel el catálogo de nodos. El catálogo se sirve y NO se
   duplica en el SPA: es el contrato entre lo que el dueño compone y lo que Emma
   corre.
+
 - **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
   solo con lo que el panel no puede tocar: crear negocios, el número de
   WhatsApp del bot y el del dueño (con el rebind del socket), vinculación por
@@ -703,6 +797,72 @@ Hay tres del lado del dueño y una de Vamvu, y no se pisan:
 
 El QR y el desvincular NO se migran al panel: el token del panel viaja en una
 URL, y un mis-click detrás de eso saca a un negocio de WhatsApp.
+
+### Config por negocio en archivos
+
+Un negocio puede tener su conversación en `src/config/businesses/<nombre>.ts`:
+qué nodos, en qué orden, y los overrides de cada paso (`label`, `edgeCases`,
+`example`, `extraInstructions`, `routes`). `objective` y `steps` no: son el motor.
+**El archivo manda sobre la base**, con dos condiciones que decide
+`flowSource.compositionFor`:
+
+1. Su `flowType` tiene que coincidir con el de la base. `flowType` también decide
+   el prompt, el formulario de servicios y el CTA, y todo eso se lee de la base:
+   un archivo `sales` sobre una base `appointments` daría un instituto con prompt
+   de clínica.
+2. Tiene que validar contra la config ACTUAL. Si el dueño borra sus servicios,
+   `listado_servicios` deja de cumplir `requires`.
+
+Si falla alguna, el archivo **se salta**: corre lo guardado o el preset y queda
+un `logger.error` en cada turno. Un archivo roto no tumba el servidor ni a otros
+negocios. `business:show` dice cuál corre y por qué.
+
+Para ese negocio el panel muestra la card Conversación en solo lectura
+(`managedByFile` en el catálogo) y rechaza guardar el flujo y cambiar Vende/Agenda
+(`flow_managed_by_file`). El material por paso sigue editable: no vive en el
+archivo.
+
+Montar uno: copiar `_plantilla.ts`, llenarlo desde
+`npm run business:show:dev -- <id>` para que arranque idéntico a lo que corre, y
+agregar una línea en `index.ts` (lista explícita a propósito: así el typecheck y
+`businesses.test.ts` lo cubren). `defineBusinessConfig` infiere el `flowType` como
+literal, así que el editor rechaza un nodo del otro tipo. Cambiar el flujo de un
+negocio con archivo es commit + deploy.
+
+### Simulador ("Probar Emma")
+
+Página `/probar` del panel para conversar con Emma como si fueras un cliente, sin
+WhatsApp. Entra por `llmService.generateReply` (capas 4-5), NO por el handler: el
+handler es el que envía, así que ningún mensaje puede salir a un número real. Cada
+respuesta muestra el paso antes/después, las tools con sus argumentos y
+resultados, y los adjuntos (link firmado, no se envían).
+
+- Solo existe con `SIMULATOR_ENABLED=true` (default `false`). En prod queda
+  apagado: escribe cliente, conversación, mensajes y lo que hagan las tools (una
+  cita, datos capturados) en la base, y se vería en el Inbox.
+- El cliente de prueba usa teléfono `+999` + 9 dígitos (código no asignado) y se
+  llama "Prueba (simulador)". "Nueva conversación" = otro cliente.
+- No prueba las capas 1-3: agrupado de mensajes, pausa, control humano, horario
+  de atención, ni fotos (capturas de pago).
+- Para correrlo en local: `WHATSAPP_BOOT_ENABLED=false` (default `true`) levanta el
+  servidor sin ningún socket, así no gasta intentos de vinculación. Los workers
+  siguen corriendo; sin socket, lo que intenten enviar falla en el log. Con el
+  flag apagado, `restartWhatsappFor` también se niega ("Conectar" del admin,
+  cambio de número, resume): el admin local no puede abrir una segunda sesión de
+  un número que ya tiene Railway.
+
+### Negocios de prueba (+999)
+
+Un número de bot `+999` con 9 dígitos o más (`isSandboxNumber` en
+`shared/phone.ts`) marca un negocio de prueba: nunca tiene WhatsApp. El arranque
+lo salta, el admin lo muestra como "Negocio de prueba — sin WhatsApp" en vez de
+ofrecer el QR, y `restartWhatsappFor` lo rechaza ANTES de que el guard registre un
+intento. Se prueba con el simulador. `+999` no es un código de país asignado; se
+exigen 9 dígitos después porque un celular peruano cargado sin `+51` puede
+empezar con 999 y eso es un error de carga, no un negocio de prueba.
+
+No convertir un negocio real en uno de prueba cambiándole el número: la sesión
+vieja quedaría abierta (cerrarla es manejo de sesiones). Se crean nuevos.
 
 ### Los patch schemas del panel
 
@@ -717,12 +877,14 @@ hacer el campo opcional. Todo campo nuevo de un patch schema pasa por ahí.
 ## Autonomía esperada
 
 Modo autónomo táctico. Decide y ejecuta sin pedir permiso para:
+
 - Nombres de variables, archivos, funciones, tipos
 - Estructura de carpetas dentro de un módulo existente
 - Refactors de menos de 50 líneas que no cambian API pública
 - Migraciones aditivas (nuevas columnas opcionales, nuevas tablas)
 
 Pregunta ANTES de:
+
 - Agregar dependencia nueva (justifica por qué la stack actual no alcanza)
 - Cambiar schema destructivo (drop column, rename, change type)
 - Borrar archivos o funciones existentes
@@ -747,6 +909,7 @@ Pregunta ANTES de:
 
 Cuando te doy OK a un plan, ese OK cubre TODA la ejecución de ese plan.
 No pidas permiso archivo por archivo. Solo detente si:
+
 - Descubres algo que cambia sustancialmente el plan original
 - Vas a hacer una operación destructiva no contemplada
 - Encuentras un error de multi-tenancy o seguridad no anticipado
@@ -806,18 +969,26 @@ Heredados de los planes ya cerrados:
   avisa de los choques al enviar, pero no sugiere horarios libres.
 - **Contraste del texto muted** (ver Tema visual).
 - `clientRegistry` es un Map en memoria: multi-instancia lo rompe.
-- **Los tests del motor de flujos no existen todavía.** Ramas condicionales,
-  `advance_flow`, los overrides nuevos y las keys de multimedia por nodo se
-  verificaron con scripts descartables, no con vitest. Falta la red automática,
-  y sobre todo el snapshot de regresión de los presets de agenda — hoy lo único
-  que protege a la clínica y a la barbería es correr esa comparación a mano.
+- **Tests del motor de flujos, parciales.** `stateMachine.test.ts` cubre catálogo,
+  presets, compilador, validador y guard, y los snapshots fijan presets y prompts
+  de cada forma de negocio. Siguen sin test propio: `advance_flow` en el
+  executor y las keys de multimedia por nodo.
+- **Textos de agenda que quedan en core** (ver "Aislamiento entre tipos de
+  flujo"): el ejemplo de clínica que ve una barbería y el paso "agendar directo"
+  de `informing`.
+- **Material de nodos huérfano en negocios con archivo**: el barrido
+  `purgeOrphans(…, 'node', …)` solo corre al guardar el flujo desde el panel, que
+  para ellos está bloqueado. Si el archivo quita un paso, su material queda en S3.
 - **Nodos custom**: el dueño compone desde un catálogo cerrado de 11. Crear un
   paso propio desde cero no existe.
 - **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
   la composición ni forma de preparar un cambio sin que salga en vivo.
 - **Prod está tres migraciones atrás**: `0020` (`owner_kind` en `service_media`),
-  `0019` (`service_media`) y `0017` (`tags`) siguen sin aplicarse ahí. Dev está
-  al día hasta la 19; **la 0020 tampoco corrió en dev todavía**.
+  `0019` (`service_media`) y `0017` (`tags`) siguen sin aplicarse ahí. Dev está al
+  día (la 0020 corrió el 2026-09-23). **Mergear `dev` a `main` sin migrar prod
+  primero rompe cada mensaje**: `llm.service` lee el material por nodo
+  (`owner_kind`) en todos los turnos — en dev pasó exactamente eso antes de
+  migrar.
 - `npm run backfill:service-ids` no corrió en ninguna de las dos.
 - **Multimedia sin probar contra WhatsApp real.** El envío de PDF, audio y video
   compila y tiene tests de validación, pero ningún archivo salió todavía por
