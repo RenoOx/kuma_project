@@ -331,6 +331,29 @@ insatisfechos, ids desconocidos o repetidos, `idle` fuera del primer lugar, y
 **nodos del otro tipo de flujo** (un `collect_data` en una clínica): no basta con
 ocultarlo en el panel, un PATCH armado a mano lo metería igual.
 
+### Qué personaliza el dueño en cada paso
+
+Texto: `label`, `edgeCases`, `example`, `extraInstructions`, `routes` y **`cta`**
+(la invitación de cierre del paso, tal cual; reemplaza a la rotativa y va una vez
+por paso: `decideStepCallToAction` en `prompts.ts`).
+
+La única excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
+el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
+chat, y el mensaje al cliente. No toca el motor (tools, salidas, guards); decide
+el destino de una foto que el modelo igual nunca ve. Lo aplica
+`handleCustomerImage` en `handler.ts`:
+
+- Con `forward`, reenvía aunque el negocio no pida adelanto, con el aviso de
+  `buildStepImageCaption`: paso, cliente, hora y **Resumen = descripción del
+  servicio elegido, tal cual** (sin IA; `findChosenService` lo busca primero en
+  los datos capturados y si no, en el último mensaje de Emma que nombra UN solo
+  servicio).
+- Con `pause`, apaga a Emma con `conversationRepo.setEmmaEnabled` (el mismo
+  interruptor del Inbox). Si también pedía reenviar y el reenvío falló, NO pausa:
+  el dueño no se enteró y el cliente quedaría hablándole a nadie. Como el gate
+  "¿Emma apagada?" corre antes que el de fotos, las fotos siguientes ya no se
+  reenvían: solo la primera.
+
 ### Aislamiento entre tipos de flujo
 
 Un cambio para el instituto no puede tocar a la clínica sin que se vea:
@@ -670,7 +693,7 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 | `status`            | ¿abierta, cerrada, escalada? | `conversation.service`     |
 | `state`             | ¿en qué paso del flujo?      | SOLO vía `stateMachine.ts` |
 | etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel   |
-| `emma_enabled`      | ¿Emma responde en este chat? | el dueño, desde el panel   |
+| `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) |
 | `human_takeover_at` | ¿el dueño tomó el control?   | `panel.service` / worker   |
 
 **`qualification` está muerto.** La columna sigue en el schema marcada
