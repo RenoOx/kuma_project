@@ -306,7 +306,13 @@ export type CallToActionDecision =
   | { include: true; text: string; reason: 'welcome' | 'stalled' | 'step' }
   | {
       include: false
-      reason: 'just_answered' | 'booking_flow' | 'farewell' | 'booking_done' | 'step_already_said'
+      reason:
+        | 'just_answered'
+        | 'booking_flow'
+        | 'farewell'
+        | 'booking_done'
+        | 'step_already_said'
+        | 'greeting_asks'
     }
 
 /**
@@ -353,8 +359,16 @@ export function decideCallToAction(
   history: Message[],
   flavour: CtaFlavour = 'appointments',
   randomFn: () => number = Math.random,
+  // El saludo que escribió el dueño ya hace una pregunta: pegarle una
+  // invitación atrás deja dos preguntas y la segunda pisa a la suya
+  // ("¿tienes experiencia…? ¿Te ayudo con algo más?").
+  greetingAsks = false,
 ): CallToActionDecision {
   const assistantTurns = history.filter((m) => m.role === 'assistant' && m.content.trim() !== '')
+
+  if (assistantTurns.length === 0 && greetingAsks) {
+    return { include: false, reason: 'greeting_asks' }
+  }
 
   // Nothing said yet → this is the welcome message, which always invites.
   if (assistantTurns.length === 0) {
@@ -1402,9 +1416,11 @@ export function buildSystemPrompt(
   const greeting = configuredGreeting
     ? renderTemplate(configuredGreeting, { nombre_negocio: business.name })
     : pickGreeting(business.name)
+  // Cualquier pregunta alcanza: el saludo ya invita a responder.
+  const greetingAsks = configuredGreeting?.includes('?') ?? false
   const cta = stepCta
     ? decideStepCallToAction(history, stepCta)
-    : decideCallToAction(history, ctaFlavourFor(settings))
+    : decideCallToAction(history, ctaFlavourFor(settings), Math.random, greetingAsks)
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),

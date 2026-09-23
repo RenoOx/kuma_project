@@ -41,12 +41,22 @@ export const SALES_PROMPT: FlowPrompt = {
     '- REGLA GENERAL: nunca preguntes algo que el cliente ya respondió en este mensaje o en los últimos 2 mensajes.',
     '',
   ],
+  // Sin montos a propósito. Decía "adelanto de S/ 20" y "*S/ 450*", y un alumno
+  // que preguntó cuánto pagaba recibió "S/ 20 de adelanto y S/ 180 de saldo":
+  // el ejemplo, tomado como dato del negocio.
   priceVsDepositExample: [
-    '  ❌ "El curso cuesta S/ 20" cuando S/ 20 es el adelanto de matrícula y la lista dice *S/ 450*.',
-    '  ✅ "El curso cuesta *S/ 450*. Para separar tu cupo se pide un adelanto de S/ 20."',
+    '  ❌ Dar el adelanto o la matrícula como si fuera el precio del curso.',
+    '  ✅ Dar el precio del curso tal como figura en la lista y, por separado, el adelanto tal como figura en "Adelanto para reservar".',
   ],
   leadingPriceRules: [],
-  priceRulesClosing: [],
+  // La IA lee la intención del cliente; los montos los pone el negocio. Una
+  // cuenta mal hecha ("con el descuento queda en S/ 200") es un precio que el
+  // negocio nunca dio y que después tiene que honrar o desmentir.
+  priceRulesClosing: [
+    'NUNCA hagas cuentas con los montos: no sumes, no restes descuentos, no calcules totales, cuotas ni saldos, y no inventes un monto que no esté escrito.',
+    'Decí cada monto tal como figura y por separado. Si el cliente pide un total o "cuánto queda", decile los montos por separado; si insiste, derivalo a una persona del equipo.',
+    '',
+  ],
   // No consultation to offer and no agenda to put one in.
   evaluationBlocks: () => [],
   // A business that sells keeps the rule and loses the escape hatch. The whole
