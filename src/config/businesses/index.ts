@@ -8,4 +8,6 @@ import type { BusinessConfig } from './define.js'
 //
 // To add one: copy _plantilla.ts, fill it from `npm run business:show:dev -- <id>`
 // so it starts identical to what runs today, and import it below.
-export const BUSINESS_CONFIGS: ReadonlyArray<BusinessConfig> = []
+import institutoTestia from './instituto-testia.js'
+
+export const BUSINESS_CONFIGS: ReadonlyArray<BusinessConfig> = [institutoTestia]
