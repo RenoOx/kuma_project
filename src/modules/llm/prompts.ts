@@ -1453,6 +1453,9 @@ export function buildSystemPrompt(
 export function renderNodeBlock(
   node: ConversationNode,
   branches: ReadonlyArray<{ id: string; when: string }> = [],
+  // Los mensajes fijos del paso. Solo id y cuándo: el texto nunca pasa por el
+  // modelo, así no tiene nada que copiar, recortar ni "mejorar".
+  fixedMessages: ReadonlyArray<{ id: string; when: string }> = [],
 ): string {
   if (!node.objective) return ''
 
@@ -1486,6 +1489,16 @@ export function renderNodeBlock(
   if (branches.length > 0) {
     lines.push('', 'RUTAS (avanzá con advance_flow SOLO si se cumple una de estas condiciones):')
     for (const branch of branches) lines.push(`- id "${branch.id}": ${branch.when}`)
+  }
+
+  if (fixedMessages.length > 0) {
+    lines.push(
+      '',
+      'MENSAJES FIJOS (mandalos con send_fixed_message en lugar de escribir esa oferta con tus palabras; el texto lo pone el negocio, tal cual):',
+    )
+    for (const message of fixedMessages) {
+      lines.push(`- id "${message.id}"${message.when ? `: ${message.when}` : ''}`)
+    }
   }
 
   if (node.example) {

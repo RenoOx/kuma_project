@@ -31,6 +31,13 @@ export const CORRECT_FIELD = 'correct_field'
  */
 export const ADVANCE_FLOW = 'advance_flow'
 
+/**
+ * Manda un mensaje fijo del negocio tal cual. Como advance_flow, no lo declara
+ * ningún nodo: lo recibe un paso cuando el archivo del negocio le asigna mensajes
+ * fijos, así nunca se ofrece una herramienta sin nada que mandar.
+ */
+export const SEND_FIXED_MESSAGE = 'send_fixed_message'
+
 export const to = (node: string): ExitTarget => ({ node })
 
 /**

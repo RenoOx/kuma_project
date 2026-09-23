@@ -1,7 +1,7 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { activeServices } from '@/modules/business/business.settings.js'
 import { APPOINTMENT_CORE_EXTENSIONS, APPOINTMENT_NODES } from './nodes/appointments.nodes.js'
-import { ADVANCE_FLOW } from './nodes/building-blocks.js'
+import { ADVANCE_FLOW, SEND_FIXED_MESSAGE } from './nodes/building-blocks.js'
 import { CORE_ENTRY_NODES, CORE_EXIT_NODES, type CoreNodeId } from './nodes/core.nodes.js'
 import { SALES_CORE_EXTENSIONS, SALES_NODES } from './nodes/sales.nodes.js'
 import type { NodeBlueprint, NodeExtension, NodeRequirement } from './nodes/types.js'
@@ -75,6 +75,9 @@ export const ROUTE_TRIGGER = 'route_selected'
 
 /** The tool a step gets automatically once the owner gives it a route. */
 export const ROUTE_TOOL = ADVANCE_FLOW
+
+/** La herramienta que recibe un paso cuando el archivo del negocio le asigna mensajes fijos. */
+export const FIXED_MESSAGE_TOOL = SEND_FIXED_MESSAGE
 
 // Universal exit. Added by the compiler to every node, so no blueprint declares
 // it and no owner can remove it.

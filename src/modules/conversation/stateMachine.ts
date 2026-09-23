@@ -7,6 +7,7 @@ import {
   type ConversationNode,
   EMITTED_TRIGGERS,
   type ExitTarget,
+  FIXED_MESSAGE_TOOL,
   IDLE_TRIGGER,
   type ImageHandling,
   NODE_BY_ID,
@@ -81,6 +82,8 @@ export interface StateConfig {
   cta?: string
   /** Qué hacer si llega una foto en este paso; ausente = lo de siempre. */
   onImage?: ImageHandling
+  /** Los ids de mensajes fijos que Emma puede mandar en este paso. */
+  fixedMessages?: string[]
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -116,6 +119,11 @@ export interface NodeOverride {
   cta?: string
   /** Qué hacer si llega una foto en este paso. */
   onImage?: ImageHandling
+  /**
+   * Los mensajes fijos que Emma puede mandar en este paso, por id. Solo los
+   * declara el archivo del negocio, que es donde vive el texto.
+   */
+  fixedMessages?: string[]
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -218,6 +226,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
     const extra = override?.extraInstructions?.trim()
     const cta = override?.cta?.trim()
     const onImage = imageHandlingOf(override)
+    const fixedMessages = (override?.fixedMessages ?? []).filter((id) => id.trim() !== '')
     // Same rule as a blueprint's fixed jump: a route to a step the owner did not
     // include is dropped rather than an error, so removing a step never breaks
     // the ones pointing at it.
@@ -228,7 +237,12 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       // The routing tool is granted BY having a route, never by the owner
       // picking it: a step with nothing to route to would offer the model a
       // tool whose every argument the executor must reject.
-      tools: branches.length > 0 ? [...bp.tools, ROUTE_TOOL] : bp.tools,
+      tools: [
+        ...bp.tools,
+        ...(branches.length > 0 ? [ROUTE_TOOL] : []),
+        // Igual que la ruta: la herramienta viene con tener algo que mandar.
+        ...(fixedMessages.length > 0 ? [FIXED_MESSAGE_TOOL] : []),
+      ],
       node: {
         // Objective and steps are the motor and are never the owner's: what
         // moves is the wording that steers the model, not the contract the code
@@ -247,6 +261,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       // eso es lo que mantienen los snapshots de todos los negocios.
       ...(cta ? { cta } : {}),
       ...(onImage ? { onImage } : {}),
+      ...(fixedMessages.length > 0 ? { fixedMessages } : {}),
     }
   })
 
@@ -279,6 +294,7 @@ const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   'confirm_summary',
   'correct_field',
   'advance_flow',
+  'send_fixed_message',
 ])
 
 export interface FlowProblem {

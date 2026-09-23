@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { downloadMediaMessage, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
@@ -20,6 +22,7 @@ import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
+import { type FixedOutbound, isSafeImageName } from '@/modules/llm/fixedMessage.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import type { ToolAttachment } from '@/modules/llm/toolExecutor.js'
 import * as mediaService from '@/modules/media/media.service.js'
@@ -46,7 +49,12 @@ import {
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
-import { sendDirect, sendMediaToCustomer, sendWithPresence } from '@/modules/whatsapp/outbound.js'
+import {
+  sendDirect,
+  sendImageToCustomer,
+  sendMediaToCustomer,
+  sendWithPresence,
+} from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
 import * as presence from '@/modules/whatsapp/presence.js'
@@ -1333,6 +1341,19 @@ async function processMessage(
     }
   }
 
+  // Los mensajes fijos van ANTES de la respuesta: primero la oferta tal cual (y
+  // su imagen), después la pregunta de Emma para seguir.
+  if (llmResult.ok && llmResult.data.fixedMessages.length > 0) {
+    await sendFixedMessages({
+      businessId,
+      jid,
+      messages: llmResult.data.fixedMessages,
+      send,
+      readKey: raw.key,
+      log,
+    })
+  }
+
   log.info(
     { jid, replyLen: replyText.length, replyPreview: preview(replyText) },
     'about to send reply over whatsapp',
@@ -1354,6 +1375,62 @@ async function processMessage(
       attachments: llmResult.data.attachments,
       log,
     })
+  }
+}
+
+/**
+ * Manda los mensajes fijos del turno, tal cual, cada uno seguido de su imagen.
+ *
+ * No tira nunca: la respuesta de Emma sale después igual. Una imagen que falta o
+ * no se puede leer se registra y se saltea; el texto ya salió.
+ */
+async function sendFixedMessages(params: {
+  businessId: string
+  jid: string
+  messages: FixedOutbound[]
+  send: SendFn
+  readKey: WAMessageKey | null | undefined
+  log: HandlerLogger
+}): Promise<void> {
+  const { businessId, jid, messages, send, log } = params
+  for (const message of messages) {
+    try {
+      await sendWithPresence({
+        businessId,
+        jid,
+        text: message.text,
+        send,
+        ...(params.readKey ? { readKey: params.readKey } : {}),
+      })
+    } catch (err) {
+      log.error({ err, jid }, 'failed to send fixed message')
+      continue
+    }
+    if (!message.image) continue
+    const image = await readFixedImage(message.image, log)
+    if (!image) continue
+    try {
+      await sendImageToCustomer({ businessId, jid, image })
+    } catch (err) {
+      log.error({ err, jid, image: message.image }, 'failed to send fixed message image')
+    }
+  }
+}
+
+/**
+ * Lee una imagen de la carpeta images/ del repo. Solo un nombre de archivo
+ * validado: el valor viene del archivo del negocio y arma una ruta en disco.
+ */
+async function readFixedImage(name: string, log: HandlerLogger): Promise<Buffer | null> {
+  if (!isSafeImageName(name)) {
+    log.error({ image: name }, 'fixed message image name rejected')
+    return null
+  }
+  try {
+    return await readFile(path.join(process.cwd(), 'images', name))
+  } catch (err) {
+    log.error({ err, image: name }, 'fixed message image not found in images/')
+    return null
   }
 }
 

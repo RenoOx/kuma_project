@@ -50,6 +50,17 @@ describe('business config files', () => {
     })
   }
 
+  // Los ids ya se chequean al compilar (NoInfer), pero un archivo armado a mano
+  // con un cast los esquivaría: en vivo, un id sin mensaje se descarta callado.
+  for (const config of ALL_FILES) {
+    it(`${config.name} only names fixed messages it declares`, () => {
+      const named = Object.values(config.composition.overrides ?? {}).flatMap(
+        (override) => override.fixedMessages ?? [],
+      )
+      for (const id of named) expect(config.fixedMessages).toHaveProperty(id)
+    })
+  }
+
   it('turns the readable steps into the stored composition shape', () => {
     const config = defineBusinessConfig({
       businessId: 'biz-a',

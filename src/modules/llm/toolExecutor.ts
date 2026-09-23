@@ -20,6 +20,7 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
+import { type FixedOutbound, renderFixedMessage, type StepFixedMessage } from './fixedMessage.js'
 
 export interface ToolContext {
   businessId: string
@@ -35,6 +36,11 @@ export interface ToolContext {
    * which routes exist.
    */
   branches?: ReadonlyArray<{ id: string; when: string; to: string }>
+  /**
+   * Los mensajes fijos que el paso actual permite mandar, con su texto. Igual que
+   * las rutas: el ejecutor rechaza cualquier id que no esté acá.
+   */
+  fixedMessages?: ReadonlyArray<StepFixedMessage>
 }
 
 export interface ToolAttachment {
@@ -87,6 +93,8 @@ export interface ToolExecutionResult {
   // Deliberately NOT part of `result`: the model decides that a photo helps, and
   // never sees the key or the URL behind it.
   attachments?: ToolAttachment[]
+  /** Mensajes fijos ya completos: salen ANTES de la respuesta de Emma, tal cual. */
+  fixedMessages?: FixedOutbound[]
 }
 
 // Both optional: no argument means the whole catalogue, which is what the old
@@ -107,6 +115,24 @@ const confirmSummaryArgs = z.object({
 // The id is echoed back from the prompt, so it is bounded but not enumerated:
 // which ids are valid depends on the step, and only context.branches knows.
 const advanceFlowArgs = z.object({ branch: z.string().min(1).max(64) })
+
+const sendFixedMessageArgs = z.object({
+  message: z.string().min(1).max(64),
+  service: z.string().min(1).max(200),
+})
+
+// Para comparar el nombre que escribió el modelo con el de la lista sin que una
+// tilde o una mayúscula lo hagan fallar.
+function sameName(a: string, b: string): boolean {
+  const norm = (s: string) =>
+    s
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+  return norm(a) === norm(b)
+}
 
 const correctFieldArgs = z.object({
   field: z.string().min(1),
@@ -1092,6 +1118,71 @@ export async function executeTool(
         // The branch travels as evidence because every route shares one trigger:
         // the trigger says "the owner's routing fired", this says which one.
         evidence: { branch: chosen.id },
+      }
+    }
+
+    if (name === 'send_fixed_message') {
+      const parsed = sendFixedMessageArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      const available = context.fixedMessages ?? []
+      const message = available.find((m) => m.id === parsed.data.message)
+      if (!message) {
+        return {
+          result: JSON.stringify({
+            error: 'unknown_message',
+            available: available.map((m) => m.id),
+            instruction:
+              available.length === 0
+                ? 'Este paso no tiene mensajes fijos. No vuelvas a llamar esta herramienta acá.'
+                : 'Ese mensaje no existe en este paso. Usá uno de los ids de la lista.',
+          }),
+          error: 'unknown_message',
+        }
+      }
+
+      const settings = await businessService.getSettings(context.businessId)
+      const services = settings.ok ? activeServices(settings.data) : []
+      const service = services.find((s) => sameName(s.name, parsed.data.service))
+      if (!service) {
+        return {
+          result: JSON.stringify({
+            error: 'unknown_service',
+            available: services.map((s) => s.name),
+            instruction:
+              'Ese servicio no está en la lista. Elegí uno de los nombres exactos de la lista.',
+          }),
+          error: 'unknown_service',
+        }
+      }
+
+      const rendered = renderFixedMessage(message.text, service)
+      if (!rendered.ok) {
+        // Error de configuración, no del cliente: mejor derivar que improvisar
+        // una oferta con un monto que el negocio no fijó.
+        logger.error(
+          { businessId: context.businessId, message: message.id, reason: rendered.reason },
+          'fixed message could not be rendered',
+        )
+        return {
+          result: JSON.stringify({
+            error: 'fixed_message_unavailable',
+            instruction:
+              'No se pudo mandar ese mensaje. NO escribas la oferta ni des montos con tus palabras: decile al cliente que un asesor le confirma los detalles y escalá.',
+          }),
+          error: 'fixed_message_unavailable',
+        }
+      }
+
+      return {
+        result: JSON.stringify({
+          status: 'sent',
+          instruction:
+            'El mensaje ya le llega al cliente tal cual, antes de tu respuesta. NO lo repitas, no lo resumas y no vuelvas a dar el precio: respondé solo una pregunta corta para seguir.',
+        }),
+        fixedMessages: [
+          { text: rendered.text, ...(message.image ? { image: message.image } : {}) },
+        ],
       }
     }
 

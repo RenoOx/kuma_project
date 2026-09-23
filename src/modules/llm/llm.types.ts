@@ -1,3 +1,4 @@
+import type { FixedOutbound } from './fixedMessage.js'
 import type { ToolAttachment } from './toolExecutor.js'
 
 export interface LLMMessage {
@@ -36,4 +37,9 @@ export interface LLMResponse {
   // Media the handler sends after the text, in the order the tools produced it.
   // Empty on every turn that did not call send_service_media.
   attachments: ToolAttachment[]
+  /**
+   * Mensajes fijos del negocio, ya completos. Salen ANTES del texto de Emma:
+   * primero la oferta tal cual, después su pregunta para seguir.
+   */
+  fixedMessages: FixedOutbound[]
 }

@@ -656,8 +656,18 @@ export interface SimulatorAttachment {
   url: string | null
 }
 
+/** Un mensaje fijo del negocio, tal como lo recibe el cliente. */
+export interface SimulatorFixedMessage {
+  text: string
+  /** Data URL de la imagen, o null si no hay o no se pudo leer. */
+  image: string | null
+  imageName: string | null
+}
+
 /** Un turno: lo que respondió Emma y todo lo que pasó para llegar ahí. */
 export interface SimulatorTurn {
+  /** Salen antes de la respuesta de Emma, tal cual. */
+  fixedMessages: SimulatorFixedMessage[]
   reply: string
   stateBefore: string
   stateAfter: string

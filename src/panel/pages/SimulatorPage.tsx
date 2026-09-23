@@ -157,6 +157,31 @@ function EmmaTurn({
   return (
     <div className="flex flex-col items-end gap-1">
       <span className="text-muted-foreground px-1 text-[11px]">Emma</span>
+      {/* Los mensajes fijos salen primero, tal cual los escribió el negocio: se
+          marcan para distinguirlos de lo que redactó la IA. */}
+      {turn.fixedMessages.map((fixed, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: lista inmutable del turno
+        <div key={index} className="flex max-w-[85%] flex-col items-end gap-1 md:max-w-[70%]">
+          <div className="bg-emma-bubble-bot rounded-2xl rounded-br-sm px-3.5 py-2 text-sm whitespace-pre-wrap text-white ring-2 ring-offset-1 ring-emma-accent/40">
+            {fixed.text}
+          </div>
+          {fixed.imageName &&
+            (fixed.image ? (
+              <img
+                src={fixed.image}
+                alt={fixed.imageName}
+                className="max-h-64 rounded-lg border border-emma-border"
+              />
+            ) : (
+              <span className="text-muted-foreground text-[11px]">
+                Imagen {fixed.imageName} no encontrada en images/
+              </span>
+            ))}
+          <span className="text-muted-foreground text-[11px]">
+            Mensaje fijo · lo manda el código
+          </span>
+        </div>
+      ))}
       {turn.reply && (
         <div className="bg-emma-bubble-bot max-w-[85%] rounded-2xl rounded-br-sm px-3.5 py-2 text-sm whitespace-pre-wrap text-white md:max-w-[70%]">
           {turn.reply}

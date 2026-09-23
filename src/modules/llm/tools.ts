@@ -246,10 +246,38 @@ export const kumaTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'send_fixed_message',
+      // Solo pide la intención: qué mensaje y para qué servicio. El texto y el
+      // monto los pone el código; la IA nunca los escribe.
+      description:
+        'Manda al cliente un mensaje fijo del negocio, tal cual, con los datos del servicio que elegiste. Usala en lugar de escribir esa oferta con tus palabras. Después de llamarla NO repitas ni resumas el mensaje: respondé solo una pregunta corta para seguir.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: {
+            type: 'string',
+            description:
+              'El id del mensaje fijo, tal cual figura en MENSAJES FIJOS del paso actual.',
+          },
+          service: {
+            type: 'string',
+            description:
+              'El nombre exacto del servicio de la lista que corresponde a este cliente.',
+          },
+        },
+        required: ['message', 'service'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const KUMA_TOOL_NAMES = [
   'advance_flow', // la ruta que escribió el dueño → route_selected
+  'send_fixed_message', // un mensaje fijo del negocio, tal cual
   'check_availability', //revisar horarios
   'book_appointment', // reserrvar
   'confirm_pending_appointment', //confirmar cita pendeinte

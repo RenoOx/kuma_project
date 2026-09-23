@@ -1,7 +1,10 @@
 import { randomInt } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import * as customerService from '@/modules/customer/customer.service.js'
+import { isSafeImageName } from '@/modules/llm/fixedMessage.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import type { ExecutedToolCall } from '@/modules/llm/llm.types.js'
 import * as mediaService from '@/modules/media/media.service.js'
@@ -35,7 +38,17 @@ export interface SimulatorAttachment {
   url: string | null
 }
 
+/** Un mensaje fijo tal como lo recibiría el cliente, antes de la respuesta. */
+export interface SimulatorFixedMessage {
+  text: string
+  /** La imagen como data URL para la vista previa; null si no hay o no se pudo leer. */
+  image: string | null
+  imageName: string | null
+}
+
 export interface SimulatorTurn {
+  /** Salen primero, tal cual: la respuesta de Emma va después. */
+  fixedMessages: SimulatorFixedMessage[]
   reply: string
   stateBefore: string
   stateAfter: string
@@ -44,6 +57,21 @@ export interface SimulatorTurn {
   escalated: boolean
   maxIterationsHit: boolean
   tokens: { input: number; output: number }
+}
+
+// La imagen de un mensaje fijo como data URL, para verla en la vista previa. Las
+// imágenes de images/ son chicas (una foto de ejemplo), así que viajan en la
+// respuesta y no hace falta servirlas aparte.
+async function imageDataUrl(name: string): Promise<string | null> {
+  if (!isSafeImageName(name)) return null
+  try {
+    const bytes = await readFile(path.join(process.cwd(), 'images', name))
+    const ext = name.split('.').pop()?.toLowerCase()
+    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+    return `data:${mime};base64,${bytes.toString('base64')}`
+  } catch {
+    return null
+  }
 }
 
 /** Una sesión es un cliente de prueba distinto: empezar de nuevo es pedir otra. */
@@ -98,7 +126,17 @@ export async function sendMessage(
     })
   }
 
+  const fixedMessages: SimulatorFixedMessage[] = []
+  for (const fixed of reply.data.fixedMessages) {
+    fixedMessages.push({
+      text: fixed.text,
+      image: fixed.image ? await imageDataUrl(fixed.image) : null,
+      imageName: fixed.image ?? null,
+    })
+  }
+
   return ok({
+    fixedMessages,
     reply: reply.data.content,
     stateBefore,
     stateAfter: after.state,
