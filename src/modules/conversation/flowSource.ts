@@ -77,7 +77,11 @@ export function compositionFor(
     }
   }
 
-  return { composition: presetFor(settings), source: 'preset', ...(fileSkipped ? { fileSkipped } : {}) }
+  return {
+    composition: presetFor(settings),
+    source: 'preset',
+    ...(fileSkipped ? { fileSkipped } : {}),
+  }
 }
 
 /** The compiled flow a business runs this turn. Logs any source it had to skip. */
@@ -88,7 +92,12 @@ export function resolveBusinessFlow(
   const resolved = compositionFor(businessId, settings)
   if (resolved.fileSkipped) {
     logger.error(
-      { component: 'flowSource', businessId, reason: resolved.fileSkipped, running: resolved.source },
+      {
+        component: 'flowSource',
+        businessId,
+        reason: resolved.fileSkipped,
+        running: resolved.source,
+      },
       'business config file not applied',
     )
   }

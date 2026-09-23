@@ -362,97 +362,97 @@ function NodeRow({
               button inside it — the route editor's select and its add/remove
               included — without threading `locked` through each control. */}
           <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`label-${node.id}`} className="text-xs">
-              Nombre del paso
-            </Label>
-            <span className="text-muted-foreground text-xs">
-              Solo cambia como lo ves acá. Emma sigue corriendo el mismo paso.
-            </span>
-            <Input
-              id={`label-${node.id}`}
-              value={override.label ?? node.label}
-              maxLength={64}
-              onChange={(e) => onOverride({ label: e.target.value })}
-            />
-          </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`label-${node.id}`} className="text-xs">
+                Nombre del paso
+              </Label>
+              <span className="text-muted-foreground text-xs">
+                Solo cambia como lo ves acá. Emma sigue corriendo el mismo paso.
+              </span>
+              <Input
+                id={`label-${node.id}`}
+                value={override.label ?? node.label}
+                maxLength={64}
+                onChange={(e) => onOverride({ label: e.target.value })}
+              />
+            </div>
 
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">Objetivo</p>
-            <p className="mt-0.5 text-sm">{node.objective}</p>
-          </div>
+            <div>
+              <p className="text-muted-foreground text-xs font-medium">Objetivo</p>
+              <p className="mt-0.5 text-sm">{node.objective}</p>
+            </div>
 
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">Pasos</p>
-            <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-sm">
-              {node.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`extra-${node.id}`} className="text-xs">
-              Tus indicaciones para este paso
-            </Label>
-            <span className="text-muted-foreground text-xs">
-              Se suman a los pasos de arriba, no los reemplazan. Acá va lo propio de tu negocio.
-            </span>
-            {categories.length > 0 && (
-              <p className="text-muted-foreground text-xs">
-                Categorías en tu catálogo:{' '}
-                {categories.map((category, index) => (
-                  <span key={category}>
-                    {index > 0 && ', '}
-                    <span className="text-emma-text font-medium">{category}</span>
-                  </span>
+            <div>
+              <p className="text-muted-foreground text-xs font-medium">Pasos</p>
+              <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-sm">
+                {node.steps.map((step) => (
+                  <li key={step}>{step}</li>
                 ))}
-                . Escribilas igual acá para que Emma las reconozca.
-                {/* The one thing an owner cannot guess: the rule has to be on
+              </ol>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`extra-${node.id}`} className="text-xs">
+                Tus indicaciones para este paso
+              </Label>
+              <span className="text-muted-foreground text-xs">
+                Se suman a los pasos de arriba, no los reemplazan. Acá va lo propio de tu negocio.
+              </span>
+              {categories.length > 0 && (
+                <p className="text-muted-foreground text-xs">
+                  Categorías en tu catálogo:{' '}
+                  {categories.map((category, index) => (
+                    <span key={category}>
+                      {index > 0 && ', '}
+                      <span className="text-emma-text font-medium">{category}</span>
+                    </span>
+                  ))}
+                  . Escribilas igual acá para que Emma las reconozca.
+                  {/* The one thing an owner cannot guess: the rule has to be on
                     the step where the listing HAPPENS, and Emma reads the block
                     of the step she was in when the turn started. Written on the
                     next step, it arrives a turn late — which is exactly how a
                     correctly written rule never ran. */}
-                {firstListing &&
-                  ' El primer listado suele pasar en este paso, así que si tu regla decide qué categoría mostrar, va acá.'}
-              </p>
-            )}
-            <Textarea
-              id={`extra-${node.id}`}
-              value={override.extraInstructions ?? ''}
-              rows={3}
-              maxLength={1500}
-              placeholder="Ej: si el alumno pregunta por convalidación, pedile primero el certificado previo."
-              onChange={(e) => onOverride({ extraInstructions: e.target.value })}
-            />
-          </div>
+                  {firstListing &&
+                    ' El primer listado suele pasar en este paso, así que si tu regla decide qué categoría mostrar, va acá.'}
+                </p>
+              )}
+              <Textarea
+                id={`extra-${node.id}`}
+                value={override.extraInstructions ?? ''}
+                rows={3}
+                maxLength={1500}
+                placeholder="Ej: si el alumno pregunta por convalidación, pedile primero el certificado previo."
+                onChange={(e) => onOverride({ extraInstructions: e.target.value })}
+              />
+            </div>
 
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`edge-${node.id}`} className="text-xs">
-              Casos especiales
-            </Label>
-            <span className="text-muted-foreground text-xs">Uno por línea.</span>
-            <Textarea
-              id={`edge-${node.id}`}
-              value={edgeText}
-              rows={4}
-              onChange={(e) =>
-                onOverride({
-                  edgeCases: e.target.value
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter((line) => line !== ''),
-                })
-              }
-            />
-          </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`edge-${node.id}`} className="text-xs">
+                Casos especiales
+              </Label>
+              <span className="text-muted-foreground text-xs">Uno por línea.</span>
+              <Textarea
+                id={`edge-${node.id}`}
+                value={edgeText}
+                rows={4}
+                onChange={(e) =>
+                  onOverride({
+                    edgeCases: e.target.value
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter((line) => line !== ''),
+                  })
+                }
+              />
+            </div>
 
-          <BranchEditor
-            nodeId={node.id}
-            branches={override.branches ?? []}
-            targets={targets}
-            onChange={(branches) => onOverride({ branches })}
-          />
+            <BranchEditor
+              nodeId={node.id}
+              branches={override.branches ?? []}
+              targets={targets}
+              onChange={(branches) => onOverride({ branches })}
+            />
           </fieldset>
 
           {/* Last, and with its own persistence: everything above is a draft

@@ -1,4 +1,3 @@
-import type { NodeBranch } from './types.js'
 import {
   CONFIRM_SUMMARY,
   CORRECT_FIELD,
@@ -7,6 +6,7 @@ import {
   SAVE_DATA,
   to,
 } from './building-blocks.js'
+import type { NodeBranch } from './types.js'
 
 // The nodes only a business that sells gets: the institute, the certification.
 // Never import appointments.nodes.ts from here — the two flow types stay apart

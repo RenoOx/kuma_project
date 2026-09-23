@@ -14,7 +14,10 @@ import { BUSINESS_CONFIGS } from './index.js'
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const
 
 /** A business of this flow type with every node requirement met. */
-function settingsFor(flowType: FlowType, overrides: Record<string, unknown> = {}): BusinessSettings {
+function settingsFor(
+  flowType: FlowType,
+  overrides: Record<string, unknown> = {},
+): BusinessSettings {
   return businessSettingsSchema.parse({
     niche: 'general',
     bookingMode: 'direct',
@@ -117,8 +120,9 @@ describe('compositionFor', () => {
   })
 
   it('skips a file that no longer validates against the current config', () => {
-    // listado_servicios needs services; the owner deleted them all.
-    const resolved = compositionFor('biz-a', settingsFor('sales', { services: [] }), configs)
+    // listado_servicios needs an active service; the owner switched them all off.
+    const inactive = [{ name: 'Curso básico', priceMin: 450, priceMax: 450, active: false }]
+    const resolved = compositionFor('biz-a', settingsFor('sales', { services: inactive }), configs)
     expect(resolved.source).not.toBe('file')
     expect(resolved.fileSkipped).toContain('listado_servicios')
   })

@@ -12,10 +12,7 @@ import type { BusinessSettings, FlowType } from '@/modules/business/business.set
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
-import {
-  getStateConfig,
-  type TransitionEvidence,
-} from '@/modules/conversation/stateMachine.js'
+import { getStateConfig, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'

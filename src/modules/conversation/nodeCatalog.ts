@@ -78,7 +78,9 @@ export const ROUTE_TOOL = ADVANCE_FLOW
 export const IDLE_TRIGGER = 'inactive_24h'
 
 /** Node ids each flow type may compose, known to the compiler as literals. */
-export type CoreNodeId = (typeof CORE_ENTRY_NODES)[number]['id'] | (typeof CORE_EXIT_NODES)[number]['id']
+export type CoreNodeId =
+  | (typeof CORE_ENTRY_NODES)[number]['id']
+  | (typeof CORE_EXIT_NODES)[number]['id']
 export type AppointmentNodeId = (typeof APPOINTMENT_NODES)[number]['id']
 export type SalesNodeId = (typeof SALES_NODES)[number]['id']
 export type NodeIdFor<F extends FlowType> =
