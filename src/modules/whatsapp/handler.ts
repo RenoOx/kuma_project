@@ -10,7 +10,7 @@ import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { configuredMessage, shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import { resolveFlow } from '@/modules/conversation/stateMachine.js'
+import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
@@ -397,7 +397,7 @@ async function handleCustomerImage(params: {
   // anywhere else would make an unrelated photo, sent weeks after the booking
   // was confirmed, look like payment for it all over again.
   const conversation = await conversationRepo.findById(businessId, conversationId)
-  const flow = resolveFlow(settingsResult.ok ? settingsResult.data : null)
+  const flow = resolveBusinessFlow(businessId, settingsResult.ok ? settingsResult.data : null)
   const intent =
     payment ??
     (conversation?.state === 'await_payment'

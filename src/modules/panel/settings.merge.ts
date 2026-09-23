@@ -13,6 +13,7 @@ import {
   assistantFunctionOf,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
+import { compositionFor } from '@/modules/conversation/flowSource.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -477,7 +478,11 @@ export function flowNodeExists(business: Business, nodeId: string): Result<void>
     )
   }
 
-  const composition = parsed.data.conversationFlow ?? presetFor(parsed.data)
+  const resolved = compositionFor(business.id, parsed.data)
+  const composition =
+    resolved.source === 'file'
+      ? resolved.composition
+      : (parsed.data.conversationFlow ?? presetFor(parsed.data))
   if (!composition.nodes.includes(nodeId)) {
     return err(
       new NotFoundError({

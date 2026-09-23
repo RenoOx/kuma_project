@@ -11,9 +11,9 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
+import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
 import {
   getStateConfig,
-  resolveFlow,
   type TransitionEvidence,
 } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
@@ -145,7 +145,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // Compiled once per turn and threaded through: every transition of this turn
   // has to be judged against the same flow, and recompiling per trigger would
   // let a mid-turn settings change split the conversation across two flows.
-  const flow = resolveFlow(settings)
+  const flow = resolveBusinessFlow(params.businessId, settings)
 
   // Every trigger of this turn goes through here. A failed write costs the
   // transition, never the reply: we log it and carry on from where we were.

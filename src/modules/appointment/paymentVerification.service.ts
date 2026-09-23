@@ -4,7 +4,8 @@ import * as businessService from '@/modules/business/business.service.js'
 import { configuredMessage } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import { resolveFlow, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
+import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
+import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
 import { AppError } from '@/shared/errors.js'
 import { formatPersonName } from '@/shared/name.js'
@@ -222,7 +223,7 @@ async function applyConversationTrigger(
   const applied = await conversationService.applyTrigger({
     businessId,
     conversationId,
-    flow: resolveFlow(settings.ok ? settings.data : null),
+    flow: resolveBusinessFlow(businessId, settings.ok ? settings.data : null),
     currentState: conversation.state,
     trigger,
     evidence,

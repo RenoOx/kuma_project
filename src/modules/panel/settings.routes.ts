@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { ServiceMedia } from '@/db/schema/index.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
+import { compositionFor, fileConfigFor } from '@/modules/conversation/flowSource.js'
 import { nodesForFlow, requirementMet } from '@/modules/conversation/nodeCatalog.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import * as mediaService from '@/modules/media/media.service.js'
@@ -227,6 +228,7 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
   const business = panelBusiness(c)
   const parsed = businessSettingsSchema.safeParse(business.settings)
   const settings = parsed.success ? parsed.data : null
+  const resolved = compositionFor(business.id, settings)
 
   return c.json({
     // Only what this business may compose: the core plus its own flow type. An
@@ -248,8 +250,14 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
     })),
     // What runs right now, composed or derived. The card opens on this rather
     // than on an empty list, so the owner edits their actual flow instead of
-    // building one from scratch.
-    current: settings?.conversationFlow ?? presetFor(settings),
+    // building one from scratch. A repo file that applies wins, same as in Emma.
+    current:
+      resolved.source === 'file'
+        ? resolved.composition
+        : (settings?.conversationFlow ?? presetFor(settings)),
+    // A business with a repo file cannot edit its flow here: the file would win
+    // anyway, and a card that saves and then does nothing lies to the owner.
+    managedByFile: fileConfigFor(business.id) !== undefined,
   })
 })
 
