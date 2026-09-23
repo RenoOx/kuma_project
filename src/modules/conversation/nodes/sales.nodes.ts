@@ -14,6 +14,40 @@ import type { NodeBranch, NodeExtension } from './types.js'
 // so a change for one cannot reach the other.
 
 export const SALES_NODES = [
+  // Una asesoría para UN perfil de cliente, separada de la general. Nació del
+  // instituto: el que ya opera maquinaria no ve cursos, ve la certificación de su
+  // nivel. Vivía como un "si tiene experiencia…" dentro de Asesoría, compitiendo con
+  // los pasos genéricos de ese nodo ("mostrale los servicios", "agendar directo") y
+  // sin caja propia en el diagrama.
+  //
+  // Sin salidas fijas: se sale por la ruta que escribe el negocio ("quiere
+  // avanzar" → captura). validateFlow exige que exista.
+  defineNode({
+    id: 'asesoria_perfil',
+    label: 'Asesoría por perfil',
+    hint: 'Para un tipo de cliente: una pregunta clave y la oferta que le corresponde.',
+    requires: ['services_configured'],
+    // Sin show_services a propósito: mandaría la ficha de TODAS las opciones y
+    // este paso existe para ofrecer una sola. La lista ya está en el prompt.
+    tools: [ESCALATE],
+    node: {
+      objective:
+        'Con la respuesta del cliente a la pregunta clave, identificar la opción que le corresponde y ofrecérsela.',
+      steps: [
+        'Si todavía no tenés el dato que define la opción, preguntalo: las indicaciones de este paso dicen cuál es.',
+        'Con ese dato, elegí UNA opción de la lista de servicios. Es una elección, no una cuenta: no sumes ni combines opciones.',
+        'Ofrecé esa opción. Si este paso tiene un mensaje fijo para la oferta, mandalo con esa opción en lugar de escribirla con tus palabras.',
+        'Preguntá si quiere avanzar.',
+      ],
+      edgeCases: [
+        'Si no sabe el dato exacto, pedile una estimación.',
+        'Si pregunta por otra opción que no es para su perfil, explicale en una línea por qué esta es la suya.',
+      ],
+      example: '¡Perfecto! Con eso, esta es la opción que va con tu perfil.',
+    },
+    exits: {},
+  }),
+
   defineNode({
     id: 'collect_data',
     label: 'Captura de datos',
