@@ -14,6 +14,9 @@ import {
   ROUTE_TRIGGER,
   requirementMet,
 } from './nodeCatalog.js'
+import { PRESET_APPOINTMENTS, PRESET_APPOINTMENTS_DEPOSIT } from './nodes/appointments.nodes.js'
+import { PRESET_INFO_ONLY } from './nodes/core.nodes.js'
+import { PRESET_SALES, SALES_ENTRY_BRANCH } from './nodes/sales.nodes.js'
 
 // The conversation flow is owned by the code, not by the model — and now it is
 // COMPOSED rather than written. A business picks nodes from nodeCatalog, in
@@ -115,60 +118,7 @@ export interface FlowComposition {
 //
 // A business type is a composition, not a branch. Adding "informational only"
 // used to mean a new flowType, a new literal flow and a new ternary; here it is
-// four node ids.
-
-const PRESET_APPOINTMENTS = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'show_availability',
-  'confirmed',
-]
-
-const PRESET_APPOINTMENTS_DEPOSIT = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'show_availability',
-  'await_payment',
-  'await_payment_verification',
-  'confirmed',
-]
-
-/** Nothing to book and nothing to charge: the business only answers questions. */
-const PRESET_INFO_ONLY = ['idle', 'greeting', 'informing', 'listado_servicios']
-
-// The selling flow, which for months was an alias of the informational one.
-//
-// What was missing was never the closing nodes — collect_data, confirmacion and
-// correccion_datos have always been complete, with real emitters. It was the way
-// IN: nothing in the code fired a trigger that led from the catalogue to the
-// capture, and validateFlow rightly refused to pretend otherwise.
-//
-// ROUTE_TOOL is that way in. "The customer chose course X" has no slot in it, so
-// it never needed the FrozenBooking that blocked this — which is why the exit
-// out of listado_servicios is a route the model judges and not an event.
-const PRESET_SALES = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'collect_data',
-  'confirmacion',
-  'correccion_datos',
-  'confirmed',
-]
-
-// Shipped WITH the preset rather than left for the owner to draw: a selling
-// business that opens the panel for the first time should already close, and a
-// route is the one part of a flow they have no way to guess is missing.
-const SALES_ENTRY_BRANCH: NodeBranch = {
-  id: 'ruta-cierre',
-  when: 'El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.',
-  to: 'collect_data',
-}
+// four node ids. Each list lives next to the nodes of its flow type.
 
 /**
  * The composition a business gets when it has not customised one.
