@@ -16,7 +16,7 @@ import {
   patchKbBodySchema,
 } from '@/modules/knowledgeBase/knowledgeBase.types.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
-import { SessionGuardError } from '@/shared/errors.js'
+import { SessionGuardError, ValidationError } from '@/shared/errors.js'
 import { normalizePhone, samePhone } from '@/shared/phone.js'
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
@@ -207,6 +207,9 @@ adminRoutes.patch('/admin/businesses/:id', async (c) => {
         409,
       )
     }
+    if (err instanceof ValidationError) {
+      return c.json({ ...updated, whatsappRebind: 'refused', rebindError: err.userMessage }, 409)
+    }
     logger.error({ err, businessId }, 'admin: rebind after number change failed')
     return c.json(
       { ...updated, whatsappRebind: 'failed', rebindError: (err as Error).message },
@@ -353,6 +356,9 @@ adminRoutes.post('/admin/businesses/:id/session/resume', async (c) => {
         },
         429,
       )
+    }
+    if (err instanceof ValidationError) {
+      return c.json({ error: err.code, message: err.userMessage }, 409)
     }
     return c.json({ error: 'resume_failed', message: (err as Error).message }, 500)
   }

@@ -30,6 +30,8 @@ import {
   RESTART_REQUIRED_DELAY_MS,
   reconnectDelayMs,
 } from './modules/whatsapp/sessionPolicy.js'
+import { ValidationError } from './shared/errors.js'
+import { isSandboxNumber } from './shared/phone.js'
 import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
 import { sendDueReminders } from './workers/sendReminders.js'
 import { runTakeoverTimeoutGuarded } from './workers/takeoverTimeout.js'
@@ -240,6 +242,27 @@ export async function restartWhatsappFor(
   businessId: string,
   whatsappNumber: string,
 ): Promise<void> {
+  // Las dos negativas van ANTES del guard: recordRestart cuenta un intento
+  // contra el número, y un clic rechazado acá no tiene que costar nada.
+  if (!env.WHATSAPP_BOOT_ENABLED) {
+    throw new ValidationError({
+      code: 'whatsapp_disabled',
+      message: 'restart refused: this server runs with WHATSAPP_BOOT_ENABLED=false',
+      userMessage:
+        'Este servidor corre sin WhatsApp (WHATSAPP_BOOT_ENABLED=false): desde acá no se vincula ningún número. Hacelo desde el admin de Railway.',
+      logContext: { businessId },
+    })
+  }
+  if (isSandboxNumber(whatsappNumber)) {
+    throw new ValidationError({
+      code: 'sandbox_number',
+      message: 'restart refused: sandbox number',
+      userMessage:
+        'Es un negocio de prueba (número +999): no tiene WhatsApp. Probalo en "Probar Emma" del panel.',
+      logContext: { businessId },
+    })
+  }
+
   await sessionGuard.assertCanRestart(whatsappNumber)
   await sessionGuard.recordRestart(whatsappNumber, businessId)
 
@@ -278,6 +301,16 @@ async function bootWhatsapp(): Promise<void> {
   await logSessionsDirDiagnostics(env.SESSIONS_DIR)
 
   for (const business of allBusinesses) {
+    // Negocio de prueba: no tiene número real. Levantarle un socket lo dejaría
+    // esperando un QR que nadie escanea, reintentando para siempre.
+    if (isSandboxNumber(business.whatsappNumber)) {
+      logger.info(
+        { businessId: business.id, name: business.name },
+        'skipping whatsapp boot — sandbox business (+999), tested through the panel simulator',
+      )
+      continue
+    }
+
     // A redeploy must never re-attempt a number WhatsApp is currently punishing.
     // This used to depend on a human reading a log line; now the block is data.
     //

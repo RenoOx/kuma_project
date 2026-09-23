@@ -23,8 +23,8 @@ import {
   unregisterClient,
 } from '@/modules/whatsapp/clientRegistry.js'
 import * as sessionGuard from '@/modules/whatsapp/sessionGuard.service.js'
-import { SessionGuardError } from '@/shared/errors.js'
-import { normalizePhone, samePhone } from '@/shared/phone.js'
+import { SessionGuardError, ValidationError } from '@/shared/errors.js'
+import { isSandboxNumber, normalizePhone, samePhone } from '@/shared/phone.js'
 import * as dashRepo from './dashboard.repo.js'
 
 export const dashboardRoutes = new Hono()
@@ -127,7 +127,16 @@ function humanizeMs(ms: number): string {
   return hours > 0 ? `${hours}h ${mins}min` : `${mins} min`
 }
 
-function waActions(businessId: string, status: WaStatus | undefined, secret: string): string {
+function waActions(
+  businessId: string,
+  status: WaStatus | undefined,
+  secret: string,
+  whatsappNumber: string,
+): string {
+  // Sin botón de vincular: el servidor igual rechazaría el clic.
+  if (isSandboxNumber(whatsappNumber)) {
+    return `<span class="badge badge-gray" style="font-size:11px">Negocio de prueba — sin WhatsApp</span>`
+  }
   const se = encodeURIComponent(secret)
   const bid = esc(businessId)
   const qrUrl = `/admin/whatsapp/qr?secret=${se}&businessId=${bid}`
@@ -569,7 +578,7 @@ dashboardRoutes.get('/admin/dashboard', async (c) => {
         <td class="muted">${fmtDatetime(stats.lastMessageAt)}</td>
         <td>
           <div class="actions">
-            ${waActions(b.id, status, secret)}
+            ${waActions(b.id, status, secret, b.whatsappNumber)}
             <a href="/admin/dashboard/${esc(b.id)}?secret=${se}" class="btn btn-ghost btn-sm">Detalle</a>
             <a href="/admin/dashboard/${esc(b.id)}/configure?secret=${se}" class="btn btn-ghost btn-sm">Conexión</a>
           </div>
@@ -653,7 +662,7 @@ dashboardRoutes.get('/admin/dashboard/new', (c) => {
               <label class="form-label" for="whatsappNumber">Número WhatsApp del bot *</label>
               <input id="whatsappNumber" name="whatsappNumber" type="text" class="form-input"
                 placeholder="+51987654321" required>
-              <p class="form-hint">Número que usará el bot para atender clientes</p>
+              <p class="form-hint">Número que usará el bot para atender clientes. Para un negocio de prueba sin WhatsApp, usá <span class="mono">+999</span> y 9 dígitos (ej. <span class="mono">+999000000001</span>): no se vincula nunca y se prueba desde "Probar Emma" del panel.</p>
             </div>
             <div class="form-group">
               <label class="form-label" for="ownerWhatsappNumber">WhatsApp del dueño</label>
@@ -745,6 +754,27 @@ dashboardRoutes.post('/admin/dashboard/new', async (c) => {
   // anything — and made the very first real linking attempt look like hammering.
   // Linking is now a separate, explicit click.
   const guardStatus = await sessionGuard.getStatus(newBusiness.whatsappNumber)
+
+  // Un negocio de prueba no se vincula nunca: ofrecerle el QR sería invitar a un
+  // clic que el servidor igual va a rechazar.
+  if (isSandboxNumber(newBusiness.whatsappNumber)) {
+    return c.html(
+      layout(
+        'Negocio creado',
+        `<a href="/admin/dashboard?secret=${se}" class="back">← Negocios</a>
+         <h1 class="page-title">Negocio de prueba creado</h1>
+         <div class="alert alert-success">✓ <strong>${esc(newBusiness.name)}</strong> fue creado como negocio de prueba (sin WhatsApp).</div>
+         <div class="card"><div class="card-body">
+           <p style="margin-bottom:1.25rem;color:#374151;font-size:13px">
+             Configuralo desde el panel y probalo en <strong>Probar Emma</strong> (necesita
+             <span class="mono">SIMULATOR_ENABLED=true</span> en el servidor).
+           </p>
+           <a href="/admin/dashboard/${bid}/configure?secret=${se}" class="btn btn-primary">Revisar datos y abrir el panel</a>
+         </div></div>`,
+        secret,
+      ),
+    )
+  }
 
   const body = `
     <a href="/admin/dashboard?secret=${se}" class="back">← Negocios</a>
@@ -913,7 +943,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
         </div>
         <div class="card-body">
           <div class="actions">
-            ${waActions(businessId, status, secret)}
+            ${waActions(businessId, status, secret, business.whatsappNumber)}
             <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-ghost btn-sm">Ver estado completo</a>
           </div>
         </div>
@@ -1389,7 +1419,9 @@ dashboardRoutes.post('/admin/dashboard/:id/configure', async (c) => {
     rebindError =
       err instanceof SessionGuardError
         ? `${err.userMessage} Reintentá en ${humanizeMs(err.retryAfterMs)}.`
-        : 'No se pudo iniciar la sesión con el número nuevo. Usá el botón "Conectar".'
+        : err instanceof ValidationError
+          ? err.userMessage
+          : 'No se pudo iniciar la sesión con el número nuevo. Usá el botón "Conectar".'
     logger.error(
       { err, businessId, whatsappNumber },
       'dashboard: rebind after number change failed',
@@ -1432,6 +1464,19 @@ dashboardRoutes.post('/admin/dashboard/:id/connect', async (c) => {
           secret,
         ),
         429,
+      )
+    }
+    // Negativa esperada (servidor sin WhatsApp o negocio de prueba): se muestra el
+    // mensaje para el operador, no el técnico, y no es un 500.
+    if (err instanceof ValidationError) {
+      return c.html(
+        layout(
+          'No se puede vincular',
+          `<a href="/admin/dashboard/${esc(businessId)}?secret=${encodeURIComponent(secret)}" class="back">← Volver</a>
+           <div class="alert alert-error" style="margin-top:1rem">${esc(err.userMessage)}</div>`,
+          secret,
+        ),
+        409,
       )
     }
     logger.error({ err, businessId }, 'dashboard: connect failed')
