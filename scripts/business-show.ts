@@ -7,7 +7,7 @@ import {
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
 import { compositionFor, fileConfigFor } from '@/modules/conversation/flowSource.js'
-import { NODE_BY_ID } from '@/modules/conversation/nodeCatalog.js'
+import { blueprintFor } from '@/modules/conversation/nodeCatalog.js'
 import { compileFlow, getStateConfig } from '@/modules/conversation/stateMachine.js'
 import { buildSystemPrompt, renderNodeBlock } from '@/modules/llm/prompts.js'
 
@@ -78,9 +78,11 @@ function showBusiness(business: Business, promptState: string | null): void {
   const { nodes, overrides } = resolved.composition
   out(`  ${nodes.join(' → ')}`)
 
-  const flow = compileFlow(resolved.composition)
+  const flowType = settings?.flowType ?? 'appointments'
+  const flow = compileFlow(resolved.composition, flowType)
   for (const id of nodes) {
-    const blueprint = NODE_BY_ID.get(id)
+    // Como lo corre este tipo de flujo: con el ejemplo y las tools extendidas.
+    const blueprint = blueprintFor(id, flowType)
     const override = overrides[id] ?? {}
     const state = flow[id]
     out()

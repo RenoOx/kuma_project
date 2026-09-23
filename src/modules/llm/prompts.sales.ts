@@ -1,3 +1,5 @@
+import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import { formatPaymentMethods } from '@/modules/business/business.settings.js'
 import type { FlowPrompt } from './prompts.flow.js'
 
 // What a business that sells is told instead of the booking machinery: the
@@ -78,4 +80,51 @@ export const SALES_PROMPT: FlowPrompt = {
   ambiguousReply:
     '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, información de algo en particular, o tienes otra consulta? ❓"',
   availabilityFreshness: [],
+  depositBlock: salesDepositBlock,
+  depositRules: salesDepositRules,
+  // Sin agenda no hay atención con cita ni reservas que aprobar.
+  hybridBlock: () => [],
+  approvalBlock: () => [],
+}
+
+// El dato del adelanto para un negocio que vende. Antes recibía el bloque de la
+// agenda ("para confirmar la cita"), y con él la orden de llamar book_appointment,
+// una tool que un negocio de venta nunca tiene. Lo que sí necesita es el monto y
+// las formas de pago, y cuándo darlos.
+function salesDepositBlock(settings: BusinessSettings): string[] {
+  if (!settings.requiresDeposit) return []
+  const amount = settings.depositAmount?.trim()
+  return [
+    '',
+    '## Adelanto para reservar',
+    amount
+      ? `Este negocio pide un adelanto de ${amount} para separar el cupo.`
+      : 'Este negocio pide un adelanto para separar el cupo.',
+    `Formas de pago: ${formatPaymentMethods(settings.depositPaymentMethods)}`,
+    'Esta es la ÚNICA fuente válida del adelanto. No la busques en el conocimiento del negocio.',
+    'Es la fuente del dato, no una autorización para darlo: cuándo se le pasa al cliente lo decide el bloque "Cómo dar los datos de pago" del final.',
+  ]
+}
+
+// Al final del cuerpo, igual que la regla de cobro de la agenda: tiene que pisar
+// lo de arriba. Sin nombre ni horario que esperar, lo que la ordena es que el
+// cliente ya haya elegido algo — si no, los datos de Yape terminan pegados a un
+// listado de cursos.
+function salesDepositRules(settings: BusinessSettings): string[] {
+  if (!settings.requiresDeposit) return []
+  return [
+    '',
+    '# Cómo dar los datos de pago — ESTA REGLA PISA A CUALQUIER OTRA DE ARRIBA',
+    'Acá no hay citas ni horarios que reservar: el adelanto es para separar el cupo de lo que el cliente elija.',
+    'Das el monto y las formas de pago recién cuando el cliente ya eligió algo concreto y quiere avanzar, o cuando te pregunta directamente cómo pagar. No los largues en un listado ni en el primer mensaje.',
+    'Copiá el monto, el número y el titular tal cual están en "Adelanto para reservar". NUNCA los completes ni los inventes.',
+    // Sin cifras a propósito: un monto de ejemplo es un monto que el modelo puede
+    // repetir en vez del real de este negocio.
+    '  ✅ Cliente: "¿cómo hago para inscribirme al básico?" → le das el monto y las formas de pago de "Adelanto para reservar", copiados tal cual.',
+    '  ❌ Listar los cursos y cerrar con los datos de Yape cuando el cliente todavía no eligió ninguno.',
+    '',
+    'Si el cliente dice que ya pagó o manda el comprobante:',
+    '  - Agradecé y decile que el equipo lo revisa y le confirma.',
+    '  - NUNCA confirmes vos que el pago está recibido o aprobado, ni que la inscripción quedó hecha: no tenés forma de verificarlo.',
+  ]
 }

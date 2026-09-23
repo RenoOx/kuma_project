@@ -13,7 +13,8 @@ describe('compiled preset flows', () => {
   for (const [name, settings] of FLOW_FIXTURES) {
     it(name, () => {
       const composition = presetFor(settings)
-      expect({ composition, flow: compileFlow(composition) }).toMatchSnapshot()
+      const flow = compileFlow(composition, settings?.flowType ?? 'appointments')
+      expect({ composition, flow }).toMatchSnapshot()
     })
   }
 })

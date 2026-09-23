@@ -9,6 +9,8 @@ import {
   SHOW_SERVICES,
   to,
 } from './building-blocks.js'
+import type { CoreNodeId } from './core.nodes.js'
+import type { NodeExtension } from './types.js'
 
 // The nodes only a business that books appointments gets: the clinic, the
 // barbershop, the salon. Never import sales.nodes.ts from here — the two flow
@@ -139,6 +141,46 @@ export const APPOINTMENT_NODES = [
     },
   }),
 ]
+
+/**
+ * Lo que la agenda le suma a los nodos core.
+ *
+ * Todo esto vivía en los nodos core y lo recibía también un instituto: en
+ * greeting se le ofrecía check_availability a un negocio sin agenda, y el modelo
+ * la intentaba. Las listas de tools son las que esos nodos tenían antes, en el
+ * mismo orden, para que el prompt y las tools de una clínica no cambien.
+ */
+export const APPOINTMENT_CORE_EXTENSIONS: Partial<Record<CoreNodeId, NodeExtension>> = {
+  idle: { tools: [PENDING_CONFIRM, ESCALATE] },
+  greeting: {
+    tools: [SHOW_SERVICES, CHECK_AVAILABILITY, SERVICE_MEDIA, PENDING_CONFIRM, ESCALATE],
+    exits: {
+      asks_availability: to('show_availability'),
+      appointment_booked: to('confirmed'),
+    },
+    example: '¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?',
+  },
+  informing: {
+    tools: [SHOW_SERVICES, CHECK_AVAILABILITY, SERVICE_MEDIA, PENDING_CONFIRM, ESCALATE],
+    exits: {
+      asks_availability: to('show_availability'),
+      appointment_booked: to('confirmed'),
+    },
+  },
+  listado_servicios: {
+    tools: [SHOW_SERVICES, SERVICE_MEDIA, CHECK_AVAILABILITY, PENDING_CONFIRM, ESCALATE],
+    exits: {
+      asks_availability: to('show_availability'),
+      appointment_booked: to('confirmed'),
+    },
+    example:
+      'Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?',
+  },
+  confirmed: {
+    tools: [PENDING_CONFIRM, ESCALATE],
+    example: '¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!',
+  },
+}
 
 export const PRESET_APPOINTMENTS = [
   'idle',

@@ -24,11 +24,7 @@ import { renderTemplate } from '@/shared/templates.js'
 import {
   APPOINTMENTS_PROMPT,
   CTA_VARIANTS,
-  depositOrderBlock,
-  HYBRID_AVAILABILITY_BLOCK,
   HYBRID_CTA_VARIANTS,
-  REQUIRES_APPROVAL_BLOCK,
-  renderDepositBlock,
   renderPendingBlock,
 } from './prompts.appointments.js'
 import type { FlowPrompt, NicheExamples } from './prompts.flow.js'
@@ -628,6 +624,7 @@ function renderConfiguredBlock(
   settings: BusinessSettings,
   todayISO: string,
   withMedia: ReadonlySet<string>,
+  flow: FlowPrompt,
 ): string {
   return [
     '# Configuración operativa del negocio',
@@ -662,7 +659,7 @@ function renderConfiguredBlock(
           '',
           `## Duración del slot por defecto: ${settings.slotDurationMinutes} minutos`,
         ]),
-    ...renderDepositBlock(settings),
+    ...flow.depositBlock(settings),
   ].join('\n')
 }
 
@@ -1156,7 +1153,7 @@ function buildStaticBody(
     renderLocationBlock(business.address, business.googleMapsUrl),
     ...renderContactBlock(assistant),
     '',
-    settings ? renderConfiguredBlock(settings, todayISO, withMedia) : NOT_CONFIGURED_BLOCK,
+    settings ? renderConfiguredBlock(settings, todayISO, withMedia, flow) : NOT_CONFIGURED_BLOCK,
     '',
     '# Precios de servicios — cómo responder',
     'FUENTE ÚNICA: los servicios y precios salen SOLO de la lista de "Servicios disponibles" de arriba, que es la configuración del negocio.',
@@ -1244,13 +1241,13 @@ function buildStaticBody(
     // show_availability node — which also means a hybrid business now gets those
     // mechanics in full when it does reach that step, instead of the one-line
     // summary point 4 gave it.
-    ...(mode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : []),
+    ...(settings ? flow.hybridBlock(settings) : []),
     // After every other instruction block — see REQUIRES_APPROVAL_BLOCK's
     // comment. An unconfigured business (settings null) keeps `direct`.
-    ...(settings?.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : []),
+    ...(settings ? flow.approvalBlock(settings) : []),
     // Last of the built-in instruction blocks: it overrides the niche block's
     // payment rules, which sit above and used to contradict it outright.
-    ...(settings ? depositOrderBlock(settings) : []),
+    ...(settings ? flow.depositRules(settings) : []),
     // And after even that: the owner's own instructions outrank everything this
     // file ships, within the limits the block itself names.
     ...customInstructionsBlock(settings),

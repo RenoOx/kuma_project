@@ -97,7 +97,7 @@ describe('flow-type prompt files stay apart', () => {
 describe('node layer', () => {
   for (const [name, settings] of FLOW_FIXTURES) {
     it(name, () => {
-      const flow = compileFlow(presetFor(settings))
+      const flow = compileFlow(presetFor(settings), settings?.flowType ?? 'appointments')
       const blocks = Object.fromEntries(
         Object.entries(flow).map(([state, config]) => [
           state,

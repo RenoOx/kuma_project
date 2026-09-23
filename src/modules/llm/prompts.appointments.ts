@@ -239,19 +239,25 @@ export const APPOINTMENTS_PROMPT: FlowPrompt = {
   ambiguousReply:
     '- Respondé con una pregunta breve y cálida que invite a dar más detalle: "¡Hola! Cuéntame un poco más, ¿estás buscando precios, quieres agendar una cita o tienes otra consulta? ❓"',
   availabilityFreshness: AVAILABILITY_FRESHNESS_BLOCK,
+  depositBlock: renderDepositBlock,
+  depositRules: depositOrderBlock,
+  hybridBlock: (settings) =>
+    settings.appointmentMode === 'hybrid' ? HYBRID_AVAILABILITY_BLOCK : [],
+  approvalBlock: (settings) =>
+    settings.bookingMode === 'requires_approval' ? ['', ...REQUIRES_APPROVAL_BLOCK] : [],
 }
 
-// ── Blocks gated on a booking setting rather than on the flow type ───────────
+// ── Bloques que además dependen de un campo de reserva ───────────────────────
 //
-// They speak only of appointments, but each hangs off its own field —
-// requiresDeposit, appointmentMode, bookingMode — so a selling business with
-// one of those stored still receives it. Known, and pinned by the snapshot
-// fixture 'sales/fields/deposit' until it is gated on the flow type.
+// Cada uno cuelga de su propio campo (requiresDeposit, appointmentMode,
+// bookingMode). Antes se importaban directo desde prompts.ts, así que un negocio
+// de venta con adelanto guardado recibía "llamá book_appointment". Ahora solo
+// llegan por APPOINTMENTS_PROMPT: un negocio de venta nunca los ve.
 
 // Lives with the operational config, NOT in the variable tail: the deposit is a
 // per-business fact that does not change between messages, so keeping it here
 // leaves it inside the cacheable prefix.
-export function renderDepositBlock(settings: BusinessSettings): string[] {
+function renderDepositBlock(settings: BusinessSettings): string[] {
   if (!settings.requiresDeposit) return []
   const amount = settings.depositAmount?.trim()
   return [
@@ -280,7 +286,7 @@ export function renderDepositBlock(settings: BusinessSettings): string[] {
 // It now lives in the show_availability node (nodes/appointments.nodes.ts),
 // which is the only state that offers check_availability as its main job.
 
-export const HYBRID_AVAILABILITY_BLOCK = [
+const HYBRID_AVAILABILITY_BLOCK = [
   '# Consultas de horario y disponibilidad',
   'Modo de atención: este negocio atiende de forma presencial por orden de llegada Y también acepta citas opcionales.',
   '',
@@ -300,7 +306,7 @@ export const HYBRID_AVAILABILITY_BLOCK = [
 // every other instruction block on purpose: the sections above tell Emma to
 // confirm the final date after booking and even show a "✅ ¡Cita confirmada!"
 // example, so this has to arrive after them and override them explicitly.
-export const REQUIRES_APPROVAL_BLOCK = [
+const REQUIRES_APPROVAL_BLOCK = [
   '# Reserva sujeta a aprobación — ESTA REGLA PISA A CUALQUIER OTRA DE ARRIBA',
   'Este negocio NO confirma citas en el momento: cada pedido lo revisa y aprueba un encargado después.',
   '- Recogé servicio, fecha y hora preferida como siempre, y llamá book_appointment igual que en cualquier otro negocio.',
@@ -326,7 +332,7 @@ export const REQUIRES_APPROVAL_BLOCK = [
 // the `greeting` state book_appointment is not in the model's tool list at all
 // (see stateMachine), and that list is fixed for the whole turn — so telling it
 // to call the tool there is telling it to do something it cannot.
-export function depositOrderBlock(settings: BusinessSettings): string[] {
+function depositOrderBlock(settings: BusinessSettings): string[] {
   if (!settings.requiresDeposit) return []
 
   return [

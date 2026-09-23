@@ -2614,15 +2614,15 @@ exports[`compiled preset flows > sales/fields 1`] = `
           "Cliente que dice que no sin aclarar qué: preguntá qué dato hay que corregir.",
         ],
         "example": "Te queda así:
-Servicio: Limpieza dental
-Fecha: jueves 25 de septiembre
-Hora: 3:00pm
+Curso: Operación de maquinaria pesada — Básico
 Nombre: Juan Pérez
+DNI: 45678912
+Correo: juan@correo.com
 
 ¿Está todo correcto?",
         "objective": "Verificar que todo es correcto antes de cerrar.",
         "steps": [
-          "Mostrá el resumen completo: servicio, fecha, hora, datos y monto si aplica.",
+          "Mostrá el resumen completo: lo que eligió, los datos que registraste y el monto si aplica.",
           "Preguntá si está todo bien.",
         ],
       },
@@ -2643,7 +2643,7 @@ Nombre: Juan Pérez
           "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
           "Cliente que no responde: no le escribas de nuevo.",
         ],
-        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "example": "¡Listo! Quedó todo registrado. Cualquier duda, escribime por acá. ¡Gracias!",
         "objective": "Cerrar la conversación con el cliente tranquilo.",
         "steps": [
           "Confirmá lo acordado.",
@@ -2651,7 +2651,6 @@ Nombre: Juan Pérez
         ],
       },
       "tools": [
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -2665,7 +2664,7 @@ Nombre: Juan Pérez
         "edgeCases": [
           "Cliente que quiere cambiar varios datos: uno a la vez.",
         ],
-        "example": "¿Qué dato querés cambiar? (nombre, fecha, hora…)",
+        "example": "¿Qué dato querés cambiar? (nombre, DNI, correo…)",
         "objective": "Permitir corregir un dato sin recapturar todo.",
         "steps": [
           "Preguntá QUÉ dato quiere cambiar. No pidas todos de nuevo.",
@@ -2690,7 +2689,7 @@ Nombre: Juan Pérez
           "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
           "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
         ],
-        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "example": "¡Hola! Soy Emma, del instituto. ¿Te interesa algún curso en particular?",
         "objective": "Dar la bienvenida e identificar la intención del cliente.",
         "steps": [
           "Saludá usando el nombre del asistente y del negocio.",
@@ -2699,13 +2698,10 @@ Nombre: Juan Pérez
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "customer_message": "informing",
         "inactive_24h": "idle",
         "services_listed": "listado_servicios",
@@ -2720,7 +2716,6 @@ Nombre: Juan Pérez
         "steps": [],
       },
       "tools": [
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -2747,13 +2742,10 @@ Nombre: Juan Pérez
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "inactive_24h": "idle",
         "services_listed": "listado_servicios",
       },
@@ -2772,7 +2764,7 @@ Nombre: Juan Pérez
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
@@ -2784,13 +2776,10 @@ Nombre: Juan Pérez
       "tools": [
         "show_services",
         "send_service_media",
-        "check_availability",
-        "confirm_pending_appointment",
         "escalate_to_human",
         "advance_flow",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "inactive_24h": "idle",
       },
     },
@@ -2856,15 +2845,15 @@ exports[`compiled preset flows > sales/fields/deposit 1`] = `
           "Cliente que dice que no sin aclarar qué: preguntá qué dato hay que corregir.",
         ],
         "example": "Te queda así:
-Servicio: Limpieza dental
-Fecha: jueves 25 de septiembre
-Hora: 3:00pm
+Curso: Operación de maquinaria pesada — Básico
 Nombre: Juan Pérez
+DNI: 45678912
+Correo: juan@correo.com
 
 ¿Está todo correcto?",
         "objective": "Verificar que todo es correcto antes de cerrar.",
         "steps": [
-          "Mostrá el resumen completo: servicio, fecha, hora, datos y monto si aplica.",
+          "Mostrá el resumen completo: lo que eligió, los datos que registraste y el monto si aplica.",
           "Preguntá si está todo bien.",
         ],
       },
@@ -2885,7 +2874,7 @@ Nombre: Juan Pérez
           "Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.",
           "Cliente que no responde: no le escribas de nuevo.",
         ],
-        "example": "¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!",
+        "example": "¡Listo! Quedó todo registrado. Cualquier duda, escribime por acá. ¡Gracias!",
         "objective": "Cerrar la conversación con el cliente tranquilo.",
         "steps": [
           "Confirmá lo acordado.",
@@ -2893,7 +2882,6 @@ Nombre: Juan Pérez
         ],
       },
       "tools": [
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -2907,7 +2895,7 @@ Nombre: Juan Pérez
         "edgeCases": [
           "Cliente que quiere cambiar varios datos: uno a la vez.",
         ],
-        "example": "¿Qué dato querés cambiar? (nombre, fecha, hora…)",
+        "example": "¿Qué dato querés cambiar? (nombre, DNI, correo…)",
         "objective": "Permitir corregir un dato sin recapturar todo.",
         "steps": [
           "Preguntá QUÉ dato quiere cambiar. No pidas todos de nuevo.",
@@ -2932,7 +2920,7 @@ Nombre: Juan Pérez
           "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
           "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
         ],
-        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "example": "¡Hola! Soy Emma, del instituto. ¿Te interesa algún curso en particular?",
         "objective": "Dar la bienvenida e identificar la intención del cliente.",
         "steps": [
           "Saludá usando el nombre del asistente y del negocio.",
@@ -2941,13 +2929,10 @@ Nombre: Juan Pérez
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "customer_message": "informing",
         "inactive_24h": "idle",
         "services_listed": "listado_servicios",
@@ -2962,7 +2947,6 @@ Nombre: Juan Pérez
         "steps": [],
       },
       "tools": [
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -2989,13 +2973,10 @@ Nombre: Juan Pérez
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "inactive_24h": "idle",
         "services_listed": "listado_servicios",
       },
@@ -3014,7 +2995,7 @@ Nombre: Juan Pérez
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
@@ -3026,13 +3007,10 @@ Nombre: Juan Pérez
       "tools": [
         "show_services",
         "send_service_media",
-        "check_availability",
-        "confirm_pending_appointment",
         "escalate_to_human",
         "advance_flow",
       ],
       "transitions": {
-        "appointment_booked": "confirmed",
         "inactive_24h": "idle",
       },
     },
@@ -3060,7 +3038,7 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
           "Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.",
           "Cliente que manda solo "hola": respondé y preguntá qué necesita.",
         ],
-        "example": "¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?",
+        "example": "¡Hola! Soy Emma, del instituto. ¿Te interesa algún curso en particular?",
         "objective": "Dar la bienvenida e identificar la intención del cliente.",
         "steps": [
           "Saludá usando el nombre del asistente y del negocio.",
@@ -3069,9 +3047,7 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -3089,7 +3065,6 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
         "steps": [],
       },
       "tools": [
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -3116,9 +3091,7 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
       },
       "tools": [
         "show_services",
-        "check_availability",
         "send_service_media",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {
@@ -3134,7 +3107,7 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?",
+        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
@@ -3146,8 +3119,6 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
       "tools": [
         "show_services",
         "send_service_media",
-        "check_availability",
-        "confirm_pending_appointment",
         "escalate_to_human",
       ],
       "transitions": {

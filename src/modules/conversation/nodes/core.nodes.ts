@@ -1,9 +1,7 @@
 import {
-  CHECK_AVAILABILITY,
   defineNode,
   ESCALATE,
   MEDIA_STEP,
-  PENDING_CONFIRM,
   SERVICE_MEDIA,
   SHOW_SERVICES,
   SHOW_SERVICES_STEP,
@@ -15,6 +13,11 @@ import {
 //
 // Split in two because the panel lists the catalogue in conversation order: the
 // entry nodes come before the ones a flow type adds, and the farewell after.
+//
+// Solo declaran lo que sirve a cualquier negocio: tools comunes y ejemplos sin
+// rubro. Lo de la agenda (check_availability, confirm_pending_appointment, las
+// salidas hacia show_availability y los ejemplos de clínica) lo agrega
+// appointments.nodes.ts con APPOINTMENT_CORE_EXTENSIONS.
 
 export const CORE_ENTRY_NODES = [
   defineNode({
@@ -22,7 +25,7 @@ export const CORE_ENTRY_NODES = [
     label: 'Reposo',
     hint: 'El punto de partida. No le habla al cliente.',
     mandatory: true,
-    tools: [PENDING_CONFIRM, ESCALATE],
+    tools: [ESCALATE],
     node: { objective: '', steps: [], edgeCases: [], example: '' },
     exits: { customer_message: 'next' },
   }),
@@ -32,7 +35,7 @@ export const CORE_ENTRY_NODES = [
     label: 'Saludo inicial',
     hint: 'Siempre primero: es por donde entra toda conversación nueva.',
     mandatory: true,
-    tools: [SHOW_SERVICES, CHECK_AVAILABILITY, SERVICE_MEDIA, PENDING_CONFIRM, ESCALATE],
+    tools: [SHOW_SERVICES, SERVICE_MEDIA, ESCALATE],
     node: {
       objective: 'Dar la bienvenida e identificar la intención del cliente.',
       steps: [
@@ -44,7 +47,7 @@ export const CORE_ENTRY_NODES = [
         'Cliente que llega molesto o con una queja: tono empático, ofrecé derivarlo.',
         'Cliente que manda solo "hola": respondé y preguntá qué necesita.',
       ],
-      example: '¡Hola! Soy Emma, asistente de Clínica Dental Sonrisa. ¿En qué puedo ayudarte hoy?',
+      example: '¡Hola! Soy Emma, la asistente del negocio. ¿En qué puedo ayudarte hoy?',
     },
     exits: {
       // Fires on the customer's next message: the greeting is one turn, and the
@@ -52,8 +55,6 @@ export const CORE_ENTRY_NODES = [
       // reports. This is the exit whose absence kept sales parked in greeting.
       customer_message: 'next',
       services_listed: to('listado_servicios'),
-      asks_availability: to('show_availability'),
-      appointment_booked: to('confirmed'),
     },
   }),
 
@@ -61,7 +62,7 @@ export const CORE_ENTRY_NODES = [
     id: 'informing',
     label: 'Asesoría',
     hint: 'Entender qué busca el cliente antes de mandarle todo el catálogo.',
-    tools: [SHOW_SERVICES, CHECK_AVAILABILITY, SERVICE_MEDIA, PENDING_CONFIRM, ESCALATE],
+    tools: [SHOW_SERVICES, SERVICE_MEDIA, ESCALATE],
     node: {
       objective: 'Entender qué busca el cliente ANTES de enviarle todo el catálogo.',
       steps: [
@@ -84,8 +85,6 @@ export const CORE_ENTRY_NODES = [
     },
     exits: {
       services_listed: 'next',
-      asks_availability: to('show_availability'),
-      appointment_booked: to('confirmed'),
     },
   }),
 
@@ -94,7 +93,7 @@ export const CORE_ENTRY_NODES = [
     label: 'Listado de servicios',
     hint: 'Mostrar los servicios que aplican, con su material adjunto.',
     requires: ['services_configured'],
-    tools: [SHOW_SERVICES, SERVICE_MEDIA, CHECK_AVAILABILITY, PENDING_CONFIRM, ESCALATE],
+    tools: [SHOW_SERVICES, SERVICE_MEDIA, ESCALATE],
     node: {
       objective: 'Mostrar los servicios relevantes con su material asociado.',
       steps: [
@@ -115,13 +114,11 @@ export const CORE_ENTRY_NODES = [
         'Cliente que pide un servicio que no existe: ofrecé los más parecidos.',
         'Varios servicios: uno por uno, no todo junto.',
       ],
-      example:
-        'Limpieza dental — S/ 80. Incluye evaluación y aplicación de flúor. ¿Te gustaría agendar?',
+      example: '*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?',
     },
-    exits: {
-      asks_availability: to('show_availability'),
-      appointment_booked: to('confirmed'),
-    },
+    // Sin salidas propias: en agenda sale por disponibilidad o reserva (lo agrega
+    // la extensión de agenda); en venta, por la ruta que trae el preset.
+    exits: {},
   }),
 ]
 
@@ -130,7 +127,7 @@ export const CORE_EXIT_NODES = [
     id: 'confirmed',
     label: 'Despedida',
     hint: 'El cierre. Va último cuando existe: un negocio solo informativo no cierra nada.',
-    tools: [PENDING_CONFIRM, ESCALATE],
+    tools: [ESCALATE],
     node: {
       objective: 'Cerrar la conversación con el cliente tranquilo.',
       steps: ['Confirmá lo acordado.', 'Despedite con calidez y sin prometer de más.'],
@@ -138,7 +135,7 @@ export const CORE_EXIT_NODES = [
         'Cliente que vuelve a preguntar algo después de la despedida: retomá la conversación con naturalidad.',
         'Cliente que no responde: no le escribas de nuevo.',
       ],
-      example: '¡Listo! Tu cita quedó confirmada para el jueves 25 a las 3:00pm. ¡Te esperamos!',
+      example: '¡Listo! Quedó todo registrado. Cualquier duda, escribime por acá. ¡Gracias!',
     },
     // The returning customer. Nothing closes a conversation and the open thread
     // is reused, so without this a customer who booked once would stay parked
@@ -149,3 +146,8 @@ export const CORE_EXIT_NODES = [
 
 /** Nothing to book and nothing to charge: the business only answers questions. */
 export const PRESET_INFO_ONLY = ['idle', 'greeting', 'informing', 'listado_servicios']
+
+/** Los ids de los nodos core, para que una extensión solo pueda nombrar esos. */
+export type CoreNodeId =
+  | (typeof CORE_ENTRY_NODES)[number]['id']
+  | (typeof CORE_EXIT_NODES)[number]['id']

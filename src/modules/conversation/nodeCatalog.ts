@@ -1,10 +1,10 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { activeServices } from '@/modules/business/business.settings.js'
-import { APPOINTMENT_NODES } from './nodes/appointments.nodes.js'
+import { APPOINTMENT_CORE_EXTENSIONS, APPOINTMENT_NODES } from './nodes/appointments.nodes.js'
 import { ADVANCE_FLOW } from './nodes/building-blocks.js'
-import { CORE_ENTRY_NODES, CORE_EXIT_NODES } from './nodes/core.nodes.js'
-import { SALES_NODES } from './nodes/sales.nodes.js'
-import type { NodeBlueprint, NodeRequirement } from './nodes/types.js'
+import { CORE_ENTRY_NODES, CORE_EXIT_NODES, type CoreNodeId } from './nodes/core.nodes.js'
+import { SALES_CORE_EXTENSIONS, SALES_NODES } from './nodes/sales.nodes.js'
+import type { NodeBlueprint, NodeExtension, NodeRequirement } from './nodes/types.js'
 
 export type {
   ConversationNode,
@@ -48,7 +48,9 @@ export const EMITTED_TRIGGERS: ReadonlyMap<string, string> = new Map([
   ['appointment_booked', 'toolExecutor.ts — book_appointment / confirm_pending_appointment'],
   ['deposit_required', 'toolExecutor.ts — the deposit gate'],
   ['payment_capture_received', 'handler.ts — customer image received'],
-  ['payment_received', 'handler.ts — customer image received (sales)'],
+  // Decía "(sales)", y no lo es: se emite cuando una captura agenda la cita
+  // directo, sin adelanto obligatorio. Es un camino de agenda.
+  ['payment_received', 'handler.ts — customer image booked the appointment directly'],
   ['payment_approved', 'paymentVerification.service.ts — owner approved'],
   ['payment_rejected', 'paymentVerification.service.ts — owner rejected'],
   ['services_listed', 'toolExecutor.ts — show_services'],
@@ -78,9 +80,7 @@ export const ROUTE_TOOL = ADVANCE_FLOW
 export const IDLE_TRIGGER = 'inactive_24h'
 
 /** Node ids each flow type may compose, known to the compiler as literals. */
-export type CoreNodeId =
-  | (typeof CORE_ENTRY_NODES)[number]['id']
-  | (typeof CORE_EXIT_NODES)[number]['id']
+export type { CoreNodeId }
 export type AppointmentNodeId = (typeof APPOINTMENT_NODES)[number]['id']
 export type SalesNodeId = (typeof SALES_NODES)[number]['id']
 export type NodeIdFor<F extends FlowType> =
@@ -105,14 +105,54 @@ export const NODE_BY_ID: ReadonlyMap<string, NodeBlueprint> = new Map(
   NODE_CATALOG.map((n) => [n.id, n]),
 )
 
-const FLOW_NODES: Record<FlowType, ReadonlyArray<NodeBlueprint>> = {
-  appointments: APPOINTMENT_NODES,
-  sales: SALES_NODES,
+// Un nodo core tal como lo recibe un tipo de flujo: sus tools reemplazadas si la
+// extensión trae lista, sus salidas sumadas y su ejemplo reemplazado.
+function extend(blueprint: NodeBlueprint, extension: NodeExtension | undefined): NodeBlueprint {
+  if (!extension) return blueprint
+  return {
+    ...blueprint,
+    tools: extension.tools ?? blueprint.tools,
+    exits: { ...blueprint.exits, ...extension.exits },
+    node:
+      extension.example !== undefined
+        ? { ...blueprint.node, example: extension.example }
+        : blueprint.node,
+  }
+}
+
+function catalogFor(
+  own: ReadonlyArray<NodeBlueprint>,
+  extensions: Partial<Record<CoreNodeId, NodeExtension>>,
+): ReadonlyArray<NodeBlueprint> {
+  const core = (nodes: ReadonlyArray<NodeBlueprint>) =>
+    nodes.map((bp) => extend(bp, extensions[bp.id as CoreNodeId]))
+  return [...core(CORE_ENTRY_NODES), ...own, ...core(CORE_EXIT_NODES)]
+}
+
+// Calculado una vez: cada tipo de flujo ve el core con SUS extensiones, y los
+// nodos del otro tipo directamente no existen para él.
+const FLOW_CATALOG: Record<FlowType, ReadonlyArray<NodeBlueprint>> = {
+  appointments: catalogFor(APPOINTMENT_NODES, APPOINTMENT_CORE_EXTENSIONS),
+  sales: catalogFor(SALES_NODES, SALES_CORE_EXTENSIONS),
+}
+
+const FLOW_BY_ID: Record<FlowType, ReadonlyMap<string, NodeBlueprint>> = {
+  appointments: new Map(FLOW_CATALOG.appointments.map((n) => [n.id, n])),
+  sales: new Map(FLOW_CATALOG.sales.map((n) => [n.id, n])),
 }
 
 /** What a business of this flow type may compose: the core plus its own nodes, in panel order. */
 export function nodesForFlow(flowType: FlowType): ReadonlyArray<NodeBlueprint> {
-  return [...CORE_ENTRY_NODES, ...FLOW_NODES[flowType], ...CORE_EXIT_NODES]
+  return FLOW_CATALOG[flowType]
+}
+
+/**
+ * El nodo tal como lo corre un negocio de este tipo, o undefined si no le
+ * corresponde. Es lo que usan el compilador y el validador: NODE_BY_ID tiene el
+ * core sin extender, que no es lo que corre ningún negocio.
+ */
+export function blueprintFor(id: string, flowType: FlowType): NodeBlueprint | undefined {
+  return FLOW_BY_ID[flowType].get(id)
 }
 
 /** Whether the business config a node depends on is actually there. */

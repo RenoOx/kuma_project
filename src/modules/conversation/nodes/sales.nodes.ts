@@ -6,7 +6,8 @@ import {
   SAVE_DATA,
   to,
 } from './building-blocks.js'
-import type { NodeBranch } from './types.js'
+import type { CoreNodeId } from './core.nodes.js'
+import type { NodeBranch, NodeExtension } from './types.js'
 
 // The nodes only a business that sells gets: the institute, the certification.
 // Never import appointments.nodes.ts from here — the two flow types stay apart
@@ -42,8 +43,10 @@ export const SALES_NODES = [
     tools: [CONFIRM_SUMMARY, ESCALATE],
     node: {
       objective: 'Verificar que todo es correcto antes de cerrar.',
+      // Decía "servicio, fecha, hora": un curso no tiene horario reservado, y el
+      // modelo inventaba uno para llenar el resumen.
       steps: [
-        'Mostrá el resumen completo: servicio, fecha, hora, datos y monto si aplica.',
+        'Mostrá el resumen completo: lo que eligió, los datos que registraste y el monto si aplica.',
         'Preguntá si está todo bien.',
       ],
       edgeCases: [
@@ -51,7 +54,7 @@ export const SALES_NODES = [
         'Cliente que dice que no sin aclarar qué: preguntá qué dato hay que corregir.',
       ],
       example:
-        'Te queda así:\nServicio: Limpieza dental\nFecha: jueves 25 de septiembre\nHora: 3:00pm\nNombre: Juan Pérez\n\n¿Está todo correcto?',
+        'Te queda así:\nCurso: Operación de maquinaria pesada — Básico\nNombre: Juan Pérez\nDNI: 45678912\nCorreo: juan@correo.com\n\n¿Está todo correcto?',
     },
     exits: {
       // Always 'confirmed', never 'next', for the same reason show_availability
@@ -76,7 +79,7 @@ export const SALES_NODES = [
         'Volvé al resumen.',
       ],
       edgeCases: ['Cliente que quiere cambiar varios datos: uno a la vez.'],
-      example: '¿Qué dato querés cambiar? (nombre, fecha, hora…)',
+      example: '¿Qué dato querés cambiar? (nombre, DNI, correo…)',
     },
     exits: { field_corrected: to('confirmacion') },
   }),
@@ -102,6 +105,17 @@ export const PRESET_SALES = [
   'correccion_datos',
   'confirmed',
 ]
+
+/**
+ * Lo que la venta le suma a los nodos core. Hoy solo el tono del saludo: el
+ * ejemplo neutro de core sirve, pero uno que hable de cursos es lo que el modelo
+ * imita mejor en un instituto. Las tools de core ya son las correctas para venta.
+ */
+export const SALES_CORE_EXTENSIONS: Partial<Record<CoreNodeId, NodeExtension>> = {
+  greeting: {
+    example: '¡Hola! Soy Emma, del instituto. ¿Te interesa algún curso en particular?',
+  },
+}
 
 // Shipped WITH the preset rather than left for the owner to draw: a selling
 // business that opens the panel for the first time should already close, and a

@@ -1,8 +1,9 @@
 import { logger } from '@/config/logger.js'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import {
+  blueprintFor,
   type ConversationNode,
   EMITTED_TRIGGERS,
   type ExitTarget,
@@ -10,7 +11,6 @@ import {
   NODE_BY_ID,
   type NodeBlueprint,
   type NodeBranch,
-  nodesForFlow,
   ROUTE_TOOL,
   ROUTE_TRIGGER,
   requirementMet,
@@ -180,14 +180,18 @@ function resolveExit(
  * Total by construction: an unknown node id is skipped and an unresolvable exit
  * is dropped, so a composition that somehow got past validateFlow still yields
  * a flow that runs rather than a crash in the middle of a conversation.
+ *
+ * El `flowType` es obligatorio a propósito: decide qué tools y salidas recibe
+ * cada nodo core. Un valor por defecto le daría la agenda a un instituto sin que
+ * nadie lo note. Un nodo del otro tipo se descarta, igual que un id desconocido.
  */
-export function compileFlow(composition: FlowComposition): FlowDefinition {
-  const nodes = composition.nodes.filter((id) => NODE_BY_ID.has(id))
+export function compileFlow(composition: FlowComposition, flowType: FlowType): FlowDefinition {
+  const nodes = composition.nodes.filter((id) => blueprintFor(id, flowType) !== undefined)
   const present = new Set(nodes)
   const flow: FlowDefinition = {}
 
   nodes.forEach((id, index) => {
-    const bp = NODE_BY_ID.get(id) as NodeBlueprint
+    const bp = blueprintFor(id, flowType) as NodeBlueprint
     const transitions: Record<string, string> = {}
 
     for (const [trigger, target] of Object.entries(bp.exits)) {
@@ -275,12 +279,12 @@ export function validateFlow(
 
   // A node of the other flow type is refused here and not merely hidden in the
   // panel: a hand-built PATCH could otherwise put collect_data in a clinic.
-  const allowed = new Set(nodesForFlow(settings?.flowType ?? 'appointments').map((n) => n.id))
+  const flowType: FlowType = settings?.flowType ?? 'appointments'
 
   const seen = new Set<string>()
   for (const id of nodes) {
     if (!NODE_BY_ID.has(id)) problems.push({ node: id, reason: 'no existe en el catálogo' })
-    else if (!allowed.has(id)) {
+    else if (!blueprintFor(id, flowType)) {
       problems.push({ node: id, reason: 'no corresponde a este tipo de negocio' })
     }
     if (seen.has(id)) problems.push({ node: id, reason: 'está repetido' })
@@ -297,7 +301,9 @@ export function validateFlow(
   }
 
   for (const id of nodes) {
-    const bp = NODE_BY_ID.get(id)
+    // El nodo como lo corre ESTE tipo de flujo: las tools que hay que validar son
+    // las extendidas, no las del core a secas.
+    const bp = blueprintFor(id, flowType)
     if (!bp) continue
     for (const req of bp.requires ?? []) {
       if (!requirementMet(req, settings)) {
@@ -325,7 +331,7 @@ export function validateFlow(
     }
   }
 
-  const flow = compileFlow(composition)
+  const flow = compileFlow(composition, flowType)
   const ids = Object.keys(flow)
 
   // Every exit a node keeps has to be one something in the code can actually
@@ -408,8 +414,9 @@ const EMPTY_NODE: ConversationNode = { objective: '', steps: [], edgeCases: [], 
  * something different from what Emma is doing.
  */
 export function resolveFlow(settings: BusinessSettings | null): FlowDefinition {
+  const flowType: FlowType = settings?.flowType ?? 'appointments'
   const stored = settings?.conversationFlow
-  if (!stored) return compileFlow(presetFor(settings))
+  if (!stored) return compileFlow(presetFor(settings), flowType)
 
   const checked = validateFlow(stored, settings)
   if (!checked.ok) {
@@ -417,9 +424,9 @@ export function resolveFlow(settings: BusinessSettings | null): FlowDefinition {
       { component: 'stateMachine', code: checked.error.code, ...checked.error.logContext },
       'stored conversation flow does not validate, falling back to preset',
     )
-    return compileFlow(presetFor(settings))
+    return compileFlow(presetFor(settings), flowType)
   }
-  return compileFlow(stored)
+  return compileFlow(stored, flowType)
 }
 
 /**

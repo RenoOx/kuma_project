@@ -107,5 +107,5 @@ export function resolveBusinessFlow(
       'stored conversation flow does not validate, falling back to preset',
     )
   }
-  return compileFlow(resolved.composition)
+  return compileFlow(resolved.composition, settings?.flowType ?? 'appointments')
 }

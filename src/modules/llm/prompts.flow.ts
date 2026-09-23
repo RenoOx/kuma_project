@@ -1,3 +1,5 @@
+import type { BusinessSettings } from '@/modules/business/business.settings.js'
+
 // The contract every flow type's prompt file fills.
 //
 // Each field is a place in the business layer of the prompt where a clinic and
@@ -60,4 +62,16 @@ export interface FlowPrompt {
   ambiguousReply: string
   /** "Disponibilidad — SIEMPRE de la tool". */
   availabilityFreshness: string[]
+  /**
+   * El dato del adelanto, dentro de la configuración operativa. Se llama siempre
+   * "## Adelanto para reservar": la regla general 4 lo nombra así, y si falta,
+   * le dice al modelo que el negocio no cobra por adelantado.
+   */
+  depositBlock: (settings: BusinessSettings) => string[]
+  /** Cuándo y cómo se dan los datos de pago. Va al final del cuerpo: pisa lo de arriba. */
+  depositRules: (settings: BusinessSettings) => string[]
+  /** Atención presencial Y con cita (appointmentMode 'hybrid'). */
+  hybridBlock: (settings: BusinessSettings) => string[]
+  /** Reservas que aprueba el encargado (bookingMode 'requires_approval'). */
+  approvalBlock: (settings: BusinessSettings) => string[]
 }

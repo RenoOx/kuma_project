@@ -67,3 +67,23 @@ export interface NodeBlueprint {
   /** Cannot be removed from a composition, and cannot be reordered. */
   mandatory?: boolean
 }
+
+/**
+ * Lo que un tipo de flujo le agrega a un nodo core.
+ *
+ * Los nodos core declaran solo lo que sirve a cualquier negocio. Lo propio de la
+ * agenda (consultar horarios, confirmar una cita propuesta) lo agrega el archivo
+ * de agenda, y un instituto nunca lo recibe. Vive en el archivo de cada tipo, así
+ * que cambiar lo que recibe uno no puede tocar al otro.
+ */
+export interface NodeExtension {
+  /**
+   * La lista COMPLETA de tools, no un agregado: el orden en que se le ofrecen al
+   * modelo es parte de lo que recibe, y reconstruirlo sumando sería frágil.
+   */
+  tools?: string[]
+  /** Salidas que se suman a las del nodo core. */
+  exits?: Record<string, ExitTarget>
+  /** Reemplaza el ejemplo del nodo core para este tipo de flujo. */
+  example?: string
+}
