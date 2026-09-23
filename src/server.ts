@@ -362,9 +362,16 @@ async function bootWhatsapp(): Promise<void> {
   }
 }
 
-bootWhatsapp().catch((err) => {
-  logger.fatal({ err }, 'failed to bootstrap whatsapp')
-})
+// Apagado solo en local, para probar contra la base de dev con el simulador sin
+// tocar ningún número. Sin sockets, todo lo que intente enviar (recordatorios,
+// avisos al dueño) falla y queda en el log: no sale nada.
+if (env.WHATSAPP_BOOT_ENABLED) {
+  bootWhatsapp().catch((err) => {
+    logger.fatal({ err }, 'failed to bootstrap whatsapp')
+  })
+} else {
+  logger.warn('WHATSAPP_BOOT_ENABLED=false — no WhatsApp client will be started')
+}
 
 // Owner-thread message cleanup. Runs every hour, deleting messages older
 // than 48h in any owner_thread conversation. .unref() so the timer doesn't

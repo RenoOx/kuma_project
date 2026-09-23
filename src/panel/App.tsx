@@ -27,6 +27,9 @@ const ServicesPage = lazy(async () => ({
 const AssistantPage = lazy(async () => ({
   default: (await import('./pages/AssistantPage.js')).AssistantPage,
 }))
+const SimulatorPage = lazy(async () => ({
+  default: (await import('./pages/SimulatorPage.js')).SimulatorPage,
+}))
 
 /**
  * The panel's routes, all nested under /:businessId.
@@ -72,6 +75,9 @@ function PanelShell(): React.JSX.Element {
           <Route path="/servicios" element={<ServicesPage />} />
           <Route path="/asistente" element={<AssistantPage />} />
           <Route path="/configuracion" element={<ConfigPage />} />
+          {/* Siempre registrada: si el servidor no tiene el simulador prendido,
+              la página misma lo dice en vez de mandar al Inbox sin explicar. */}
+          <Route path="/probar" element={<SimulatorPage />} />
           <Route path="*" element={<Navigate to="." replace />} />
         </Routes>
       </Suspense>

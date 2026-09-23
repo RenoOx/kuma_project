@@ -619,3 +619,41 @@ export interface ConversationCatalog {
   /** True when Vamvu manages this flow from a repo file: shown, never editable here. */
   managedByFile: boolean
 }
+
+// ── Simulador ────────────────────────────────────────────────────────────────
+//
+// Espejo de lo que sirve simulator.routes.ts. El simulador solo existe si el
+// servidor corre con SIMULATOR_ENABLED=true (nunca en prod).
+
+export interface SimulatorStatus {
+  enabled: boolean
+}
+
+export interface SimulatorToolCall {
+  name: string
+  args: unknown
+  /** Lo que la tool le devolvió a Emma, tal cual. */
+  result: string
+  error?: string
+}
+
+export interface SimulatorAttachment {
+  type: 'image' | 'pdf' | 'audio' | 'video'
+  filename: string
+  caption: string
+  /** Firmado por una hora; null si el almacenamiento no está configurado. */
+  url: string | null
+}
+
+/** Un turno: lo que respondió Emma y todo lo que pasó para llegar ahí. */
+export interface SimulatorTurn {
+  reply: string
+  stateBefore: string
+  stateAfter: string
+  tools: SimulatorToolCall[]
+  /** Lo que en WhatsApp se habría enviado después del texto. Acá solo se muestra. */
+  attachments: SimulatorAttachment[]
+  escalated: boolean
+  maxIterationsHit: boolean
+  tokens: { input: number; output: number }
+}
