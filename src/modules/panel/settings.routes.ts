@@ -3,7 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { ServiceMedia } from '@/db/schema/index.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { NODE_CATALOG, requirementMet } from '@/modules/conversation/nodeCatalog.js'
+import { nodesForFlow, requirementMet } from '@/modules/conversation/nodeCatalog.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import * as mediaService from '@/modules/media/media.service.js'
 import { MAX_MEDIA_BYTES } from '@/modules/media/media.validate.js'
@@ -229,7 +229,9 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
   const settings = parsed.success ? parsed.data : null
 
   return c.json({
-    nodes: NODE_CATALOG.map((bp) => ({
+    // Only what this business may compose: the core plus its own flow type. An
+    // institute never sees the booking steps, a clinic never sees the capture.
+    nodes: nodesForFlow(settings?.flowType ?? 'appointments').map((bp) => ({
       id: bp.id,
       label: bp.label,
       hint: bp.hint,

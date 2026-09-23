@@ -10,6 +10,7 @@ import {
   NODE_BY_ID,
   type NodeBlueprint,
   type NodeBranch,
+  nodesForFlow,
   ROUTE_TOOL,
   ROUTE_TRIGGER,
   requirementMet,
@@ -272,9 +273,16 @@ export function validateFlow(
   const problems: FlowProblem[] = []
   const { nodes } = composition
 
+  // A node of the other flow type is refused here and not merely hidden in the
+  // panel: a hand-built PATCH could otherwise put collect_data in a clinic.
+  const allowed = new Set(nodesForFlow(settings?.flowType ?? 'appointments').map((n) => n.id))
+
   const seen = new Set<string>()
   for (const id of nodes) {
     if (!NODE_BY_ID.has(id)) problems.push({ node: id, reason: 'no existe en el catálogo' })
+    else if (!allowed.has(id)) {
+      problems.push({ node: id, reason: 'no corresponde a este tipo de negocio' })
+    }
     if (seen.has(id)) problems.push({ node: id, reason: 'está repetido' })
     seen.add(id)
   }
