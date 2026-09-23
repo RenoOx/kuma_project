@@ -303,6 +303,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     pending,
     servicesWithMedia,
     customerFacts,
+    stateConfig.cta,
   )
   // The node goes last, after the variable tail — the static body has to stay
   // first for the prompt cache, and the final position is where an instruction

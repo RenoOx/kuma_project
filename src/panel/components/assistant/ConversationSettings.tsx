@@ -4,6 +4,7 @@ import type {
   ConversationBranch,
   ConversationCatalog,
   ConversationFlow,
+  ConversationImageHandling,
   ConversationNodeOption,
   ConversationNodeOverride,
 } from '../../api/types.js'
@@ -16,6 +17,7 @@ import { Button } from '../ui/button.js'
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
+import { Switch } from '../ui/switch.js'
 import { Textarea } from '../ui/textarea.js'
 
 // Pulled only when the owner asks for the diagram. @xyflow/react and dagre are
@@ -480,9 +482,106 @@ function NodeRow({
               onChange={(e) => onOverride({ example: e.target.value })}
             />
           </fieldset>
+
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
+            <Label htmlFor={`cta-${node.id}`} className="text-xs">
+              Invitación de cierre
+            </Label>
+            <span className="text-muted-foreground text-xs">
+              La pregunta con la que Emma cierra en este paso, tal cual. Vacío: usa las de siempre.
+            </span>
+            <Input
+              id={`cta-${node.id}`}
+              value={override.cta ?? ''}
+              maxLength={120}
+              placeholder="Ej: ¿Cuál te gustaría iniciar?"
+              onChange={(e) => onOverride({ cta: e.target.value })}
+            />
+          </fieldset>
+
+          <ImageHandlingEditor
+            nodeId={node.id}
+            locked={locked}
+            value={override.onImage}
+            onChange={(onImage) => onOverride({ onImage })}
+          />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Qué pasa si el cliente manda una foto en este paso.
+ *
+ * Emma nunca ve la foto: esto lo resuelve el código. Pensado para el paso en que
+ * el cliente ya eligió y manda su documento o su comprobante — ahí el dueño
+ * quiere recibirla y seguir él la conversación.
+ */
+function ImageHandlingEditor({
+  nodeId,
+  locked,
+  value,
+  onChange,
+}: {
+  nodeId: string
+  locked: boolean
+  value: ConversationImageHandling | undefined
+  onChange: (next: ConversationImageHandling) => void
+}): React.JSX.Element {
+  const current: ConversationImageHandling = {
+    forward: value?.forward ?? false,
+    pause: value?.pause ?? false,
+    ...(value?.reply !== undefined ? { reply: value.reply } : {}),
+  }
+
+  return (
+    <fieldset
+      disabled={locked}
+      className="m-0 flex min-w-0 flex-col gap-2 rounded-md border border-emma-border bg-emma-elevated p-3"
+    >
+      <legend className="sr-only">Si el cliente manda una foto en este paso</legend>
+      <p className="text-xs font-medium">Si el cliente manda una foto en este paso</p>
+      <label className="flex items-start gap-2 text-sm" htmlFor={`img-fwd-${nodeId}`}>
+        <Switch
+          id={`img-fwd-${nodeId}`}
+          checked={current.forward}
+          onCheckedChange={(forward) => onChange({ ...current, forward })}
+        />
+        <span>
+          Reenviársela al dueño
+          <span className="text-muted-foreground block text-xs">
+            Con el nombre, el teléfono, la hora y el curso que eligió.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-sm" htmlFor={`img-pause-${nodeId}`}>
+        <Switch
+          id={`img-pause-${nodeId}`}
+          checked={current.pause}
+          onCheckedChange={(pause) => onChange({ ...current, pause })}
+        />
+        <span>
+          Pausar a Emma en este chat
+          <span className="text-muted-foreground block text-xs">
+            Seguís vos. La volvés a prender desde el Inbox.
+          </span>
+        </span>
+      </label>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor={`img-reply-${nodeId}`} className="text-xs">
+          Mensaje al cliente
+        </Label>
+        <Textarea
+          id={`img-reply-${nodeId}`}
+          value={current.reply ?? ''}
+          rows={2}
+          maxLength={600}
+          placeholder="Ej: ¡Recibido! Un asesor revisa tus datos y te escribe por acá en breve."
+          onChange={(e) => onChange({ ...current, reply: e.target.value })}
+        />
+      </div>
+    </fieldset>
   )
 }
 

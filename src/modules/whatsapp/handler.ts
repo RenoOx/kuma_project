@@ -7,10 +7,16 @@ import * as appointmentService from '@/modules/appointment/appointment.service.j
 import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
-import { configuredMessage, shouldForwardImages } from '@/modules/business/business.settings.js'
+import {
+  activeServices,
+  configuredMessage,
+  shouldForwardImages,
+} from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
+import { blueprintFor } from '@/modules/conversation/nodeCatalog.js'
+import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
@@ -415,10 +421,17 @@ async function handleCustomerImage(params: {
   // unblocks it would be the one photo nobody forwards.
   const wanted = purpose !== null || pendingAppointment !== null || requiresDeposit
 
+  // Lo que el paso en que está la conversación pide hacer con una foto. Un paso
+  // con reenvío configurado reenvía aunque el negocio no pida adelanto: es lo que
+  // necesita un negocio de venta, que no tiene cita ni captura esperada.
+  const onImage = conversation ? getStateConfig(flow, conversation.state).onImage : undefined
+
   // Downloaded at most once, and only when something will actually use the bytes:
   // the owner's relay, the S3 archive, or both. With forwarding off and no
   // deposit to archive there is nothing worth spending the bandwidth on.
-  const needsRelay = forwardImages && wanted && Boolean(business.ownerWhatsappNumber)
+  const needsRelay =
+    (onImage?.forward === true || (forwardImages && wanted)) &&
+    Boolean(business.ownerWhatsappNumber)
   const needsArchive = intent !== null && requiresDeposit
   const image = needsRelay || needsArchive ? await downloadImage(raw, log) : null
 
@@ -444,6 +457,19 @@ async function handleCustomerImage(params: {
 
   let forwarded = false
   if (needsRelay && image) {
+    const stepCaption =
+      onImage?.forward && conversation
+        ? await buildStepImageNotice({
+            business,
+            settings: settingsResult.ok ? settingsResult.data : null,
+            customer,
+            conversationId,
+            state: conversation.state,
+            caption,
+            paused: onImage.pause,
+            log,
+          })
+        : undefined
     forwarded = await relayImage({
       image,
       business,
@@ -453,6 +479,7 @@ async function handleCustomerImage(params: {
       purpose,
       payment: intent,
       awaitsVerification: needsArchive,
+      ...(stepCaption ? { stepCaption } : {}),
       log,
     })
   } else {
@@ -460,6 +487,25 @@ async function handleCustomerImage(params: {
       { conversationId, forwardImages, wanted, hasOwner: !!business.ownerWhatsappNumber },
       'customer image not forwarded',
     )
+  }
+
+  // Pausa por paso: Emma se apaga en este chat con el mismo interruptor que usa
+  // el Inbox, así el dueño la ve apagada y la vuelve a prender desde ahí. Si el
+  // paso también pedía reenviar y el reenvío falló, NO se pausa: el dueño no se
+  // enteró de nada y el cliente quedaría hablándole a nadie.
+  if (onImage?.pause && (!onImage.forward || forwarded)) {
+    try {
+      await conversationRepo.setEmmaEnabled(businessId, conversationId, false)
+      await eventsRepo.create({
+        businessId,
+        conversationId,
+        type: 'emma_paused_on_image',
+        payload: { state: conversation?.state ?? null },
+      })
+      log.info({ conversationId, state: conversation?.state }, 'emma paused after customer image')
+    } catch (err) {
+      log.error({ err, conversationId }, 'failed to pause emma after customer image')
+    }
   }
 
   // THE SPLIT. With a deposit, the capture buys a review, not a booking: Emma
@@ -568,17 +614,24 @@ async function handleCustomerImage(params: {
   // A failed open or a failed booking falls back to the old wording on purpose:
   // it promises nothing, which is the only honest thing to say when we do not
   // know whether this capture is going anywhere.
-  const reply = awaitingVerification
-    ? paymentVerificationText(settingsResult.ok ? settingsResult.data : null, business.name, intent)
-    : booked
-      ? booked.status === 'pending'
-        ? PAYMENT_BOOKED_PENDING_REPLY
-        : PAYMENT_BOOKED_CONFIRMED_REPLY
-      : intent
-        ? PAYMENT_IMAGE_REPLY
-        : forwarded
-          ? IMAGE_FORWARDED_REPLY
-          : IMAGE_RECEIVED_REPLY
+  // El mensaje que el dueño escribió para este paso gana sobre los de siempre.
+  const reply = onImage?.reply
+    ? onImage.reply
+    : awaitingVerification
+      ? paymentVerificationText(
+          settingsResult.ok ? settingsResult.data : null,
+          business.name,
+          intent,
+        )
+      : booked
+        ? booked.status === 'pending'
+          ? PAYMENT_BOOKED_PENDING_REPLY
+          : PAYMENT_BOOKED_CONFIRMED_REPLY
+        : intent
+          ? PAYMENT_IMAGE_REPLY
+          : forwarded
+            ? IMAGE_FORWARDED_REPLY
+            : IMAGE_RECEIVED_REPLY
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -692,6 +745,56 @@ async function bookFromPaymentCapture(params: {
  * same bytes — the owner's relay and the S3 archive — and asking WhatsApp for
  * them twice would double the bandwidth for one message.
  */
+/**
+ * El aviso al dueño para una foto que llegó en un paso con reenvío configurado.
+ *
+ * El resumen es la descripción del servicio elegido, sin pasar por el modelo. Si
+ * leer el historial falla, el aviso sale igual, sin resumen: la foto le tiene
+ * que llegar al dueño aunque falte ese dato.
+ */
+async function buildStepImageNotice(params: {
+  business: Business
+  settings: BusinessSettings | null
+  customer: Customer
+  conversationId: string
+  state: string
+  caption: string | null
+  paused: boolean
+  log: HandlerLogger
+}): Promise<string> {
+  const { business, settings, customer, conversationId, state, log } = params
+
+  let assistantTexts: string[] = []
+  const history = await messageService.getRecentHistory(business.id, conversationId, 20)
+  if (history.ok) {
+    assistantTexts = history.data
+      .filter((m) => m.role === 'assistant' && m.content.trim() !== '')
+      .map((m) => m.content)
+      .reverse()
+  } else {
+    log.warn({ code: history.error.code }, 'could not read history for the image notice')
+  }
+
+  const chosen = settings
+    ? mediaForwarder.findChosenService(
+        activeServices(settings),
+        customerService.collectedDataOf(customer),
+        assistantTexts,
+      )
+    : null
+
+  return mediaForwarder.buildStepImageCaption({
+    stepLabel: blueprintFor(state, settings?.flowType ?? 'appointments')?.label ?? state,
+    customer,
+    receivedAt: new Date(),
+    timezone: business.timezone,
+    // Sin descripción cargada, el nombre: sigue siendo lo que eligió, tal cual.
+    summary: chosen?.description ?? chosen?.name ?? null,
+    said: params.caption,
+    paused: params.paused,
+  })
+}
+
 async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
   try {
     return await downloadMediaMessage(raw, 'buffer', {})
@@ -715,6 +818,8 @@ async function relayImage(params: {
   purpose: ImagePurpose | null
   payment: PaymentContext | null
   awaitsVerification: boolean
+  /** El aviso por paso ya armado; si viene, reemplaza al de siempre. */
+  stepCaption?: string
   log: HandlerLogger
 }): Promise<boolean> {
   const { image, business, customer, caption, pendingAppointment, purpose, payment, log } = params
@@ -735,6 +840,7 @@ async function relayImage(params: {
     purpose,
     payment,
     awaitsVerification: params.awaitsVerification,
+    ...(params.stepCaption ? { stepCaption: params.stepCaption } : {}),
   })
   if (!sent.ok) {
     log.error(

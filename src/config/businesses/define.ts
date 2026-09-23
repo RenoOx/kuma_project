@@ -1,5 +1,5 @@
 import type { FlowType } from '@/modules/business/business.settings.js'
-import type { NodeIdFor } from '@/modules/conversation/nodeCatalog.js'
+import type { ImageHandling, NodeIdFor } from '@/modules/conversation/nodeCatalog.js'
 import type { FlowComposition, NodeOverride } from '@/modules/conversation/stateMachine.js'
 
 // A business whose conversation is managed from the repo instead of the panel.
@@ -22,6 +22,10 @@ export interface BusinessStep<F extends FlowType> {
   extraInstructions?: string
   /** Owner-written ways out of this step, on top of its fixed exits. */
   routes?: Array<{ id: string; when: string; to: NodeIdFor<F> }>
+  /** La invitación de cierre de este paso, tal cual. */
+  cta?: string
+  /** Qué hacer si el cliente manda una foto en este paso. */
+  onImage?: ImageHandling
 }
 
 export interface BusinessConfigInput<F extends FlowType> {
@@ -48,6 +52,8 @@ function overrideOf<F extends FlowType>(step: BusinessStep<F>): NodeOverride | n
     ...(step.example !== undefined ? { example: step.example } : {}),
     ...(step.extraInstructions !== undefined ? { extraInstructions: step.extraInstructions } : {}),
     ...(step.routes !== undefined ? { branches: step.routes } : {}),
+    ...(step.cta !== undefined ? { cta: step.cta } : {}),
+    ...(step.onImage !== undefined ? { onImage: step.onImage } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }

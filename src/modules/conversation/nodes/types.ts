@@ -69,6 +69,23 @@ export interface NodeBlueprint {
 }
 
 /**
+ * Qué pasa cuando el cliente manda una foto mientras la conversación está en un
+ * paso. Emma nunca ve la foto: esto lo decide el código, igual que hoy.
+ *
+ * Es la única personalización de un paso que no es texto. No toca el motor
+ * (tools, salidas, guards): solo decide a quién llega una foto que el modelo
+ * igual no iba a ver y si Emma sigue hablando después.
+ */
+export interface ImageHandling {
+  /** Reenviar la foto al WhatsApp del dueño, con el aviso armado por el código. */
+  forward: boolean
+  /** Apagar a Emma en este chat al recibirla: el dueño sigue la conversación. */
+  pause: boolean
+  /** Lo que se le responde al cliente. Vacío: la respuesta de siempre. */
+  reply?: string
+}
+
+/**
  * Lo que un tipo de flujo le agrega a un nodo core.
  *
  * Los nodos core declaran solo lo que sirve a cualquier negocio. Lo propio de la

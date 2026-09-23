@@ -303,8 +303,45 @@ export function isFarewell(text: string): boolean {
 }
 
 export type CallToActionDecision =
-  | { include: true; text: string; reason: 'welcome' | 'stalled' }
-  | { include: false; reason: 'just_answered' | 'booking_flow' | 'farewell' | 'booking_done' }
+  | { include: true; text: string; reason: 'welcome' | 'stalled' | 'step' }
+  | {
+      include: false
+      reason: 'just_answered' | 'booking_flow' | 'farewell' | 'booking_done' | 'step_already_said'
+    }
+
+/**
+ * La invitación fija del paso en que está la conversación.
+ *
+ * Reemplaza a la rotativa en ese paso y va una vez: si la última respuesta de
+ * Emma ya la dijo, no la repite. Tampoco la dice si el cliente se está
+ * despidiendo, por la misma razón que la rotativa.
+ */
+export function decideStepCallToAction(history: Message[], stepCta: string): CallToActionDecision {
+  const lastCustomer = [...history].reverse().find((m) => m.role === 'user')
+  if (lastCustomer && isFarewell(lastCustomer.content))
+    return { include: false, reason: 'farewell' }
+
+  const lastAssistant = [...history]
+    .reverse()
+    .find((m) => m.role === 'assistant' && m.content.trim() !== '')
+  if (
+    lastAssistant &&
+    normalizeForMatch(lastAssistant.content).includes(normalizeForMatch(stepCta))
+  ) {
+    return { include: false, reason: 'step_already_said' }
+  }
+  return { include: true, text: stepCta, reason: 'step' }
+}
+
+// Para comparar textos sin que una tilde o una mayúscula cambien el resultado.
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 /**
  * Decides whether this reply should end with an invitation.
@@ -1349,6 +1386,9 @@ export function buildSystemPrompt(
   // defaulted for the same reason withMedia is: every existing caller keeps
   // working and simply renders nothing.
   customerFacts: Record<string, string> = {},
+  // La invitación fija del paso actual, si el dueño escribió una. Al final y
+  // opcional por lo mismo que los dos anteriores.
+  stepCta?: string,
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
@@ -1362,7 +1402,9 @@ export function buildSystemPrompt(
   const greeting = configuredGreeting
     ? renderTemplate(configuredGreeting, { nombre_negocio: business.name })
     : pickGreeting(business.name)
-  const cta = decideCallToAction(history, ctaFlavourFor(settings))
+  const cta = stepCta
+    ? decideStepCallToAction(history, stepCta)
+    : decideCallToAction(history, ctaFlavourFor(settings))
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),

@@ -8,6 +8,7 @@ import {
   EMITTED_TRIGGERS,
   type ExitTarget,
   IDLE_TRIGGER,
+  type ImageHandling,
   NODE_BY_ID,
   type NodeBlueprint,
   type NodeBranch,
@@ -76,6 +77,10 @@ export interface StateConfig {
   branches: NodeBranch[]
   // Refuses entry unless the trigger arrives with evidence that satisfies this.
   entryGuard?: EntryGuard
+  /** La invitación de cierre fija de este paso; reemplaza a la rotativa. */
+  cta?: string
+  /** Qué hacer si llega una foto en este paso; ausente = lo de siempre. */
+  onImage?: ImageHandling
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -87,9 +92,9 @@ export const INITIAL_STATE = 'idle'
 /**
  * What the owner overrode for one node. An absent key means "use the default".
  *
- * Every field here is wording. Nothing that decides behaviour — tools, exits,
- * guards — is overridable, and that boundary is applied in compileFlow rather
- * than declared anywhere else, so there is exactly one place to read it.
+ * Todo es texto salvo `onImage`, que decide qué pasa con una foto que el modelo
+ * igual no ve. Nada del motor —tools, salidas, guards— es personalizable, y ese
+ * límite se aplica en compileFlow y en ningún otro lugar.
  */
 export interface NodeOverride {
   /** What the panel calls this step. Cosmetic: the id is what the flow runs on. */
@@ -107,6 +112,10 @@ export interface NodeOverride {
    * arrow" stays inside the same guarantee as everything else.
    */
   branches?: NodeBranch[]
+  /** La invitación de cierre de este paso, tal cual. */
+  cta?: string
+  /** Qué hacer si llega una foto en este paso. */
+  onImage?: ImageHandling
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -207,6 +216,8 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
 
     const override = composition.overrides[id]
     const extra = override?.extraInstructions?.trim()
+    const cta = override?.cta?.trim()
+    const onImage = imageHandlingOf(override)
     // Same rule as a blueprint's fixed jump: a route to a step the owner did not
     // include is dropped rather than an error, so removing a step never breaks
     // the ones pointing at it.
@@ -232,10 +243,23 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       transitions,
       branches,
       ...(bp.entryGuard ? { entryGuard: bp.entryGuard } : {}),
+      // Solo si hay algo: un paso sin estos campos compila idéntico a antes, y
+      // eso es lo que mantienen los snapshots de todos los negocios.
+      ...(cta ? { cta } : {}),
+      ...(onImage ? { onImage } : {}),
     }
   })
 
   return flow
+}
+
+/** El manejo de fotos de un paso, o undefined si no pide nada distinto a lo de siempre. */
+function imageHandlingOf(override: NodeOverride | undefined): ImageHandling | undefined {
+  const raw = override?.onImage
+  if (!raw) return undefined
+  const reply = raw.reply?.trim()
+  if (!raw.forward && !raw.pause && !reply) return undefined
+  return { forward: raw.forward, pause: raw.pause, ...(reply ? { reply } : {}) }
 }
 
 // ── Validator ────────────────────────────────────────────────────────────────

@@ -238,6 +238,18 @@ const conversationFlowSchema = z.object({
           )
           .max(4)
           .optional(),
+        // La invitación de cierre de este paso, tal cual. Corta porque va al
+        // final de un mensaje de WhatsApp: una pregunta, no un párrafo.
+        cta: z.string().trim().max(120).optional(),
+        // Qué hacer si llega una foto en este paso (ver ImageHandling en
+        // conversation/nodes/types.ts). Ausente = lo de siempre.
+        onImage: z
+          .object({
+            forward: z.boolean().default(false),
+            pause: z.boolean().default(false),
+            reply: z.string().trim().max(600).optional(),
+          })
+          .optional(),
       }),
     )
     .default({}),

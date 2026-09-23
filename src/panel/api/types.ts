@@ -605,6 +605,17 @@ export interface ConversationNodeOverride {
   extraInstructions?: string
   /** At most four: past a handful Emma stops choosing and starts guessing. */
   branches?: ConversationBranch[]
+  /** La invitación de cierre de este paso, tal cual. Hasta 120 caracteres. */
+  cta?: string
+  /** Qué hacer si el cliente manda una foto en este paso. */
+  onImage?: ConversationImageHandling
+}
+
+/** Espejo de ImageHandling (conversation/nodes/types.ts). */
+export interface ConversationImageHandling {
+  forward: boolean
+  pause: boolean
+  reply?: string
 }
 
 export interface ConversationFlow {

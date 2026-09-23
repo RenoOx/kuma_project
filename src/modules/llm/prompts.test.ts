@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { Business } from '@/db/schema/index.js'
+import type { Business, Message } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
 import { CTA_VARIANTS } from './prompts.appointments.js'
-import { buildSystemPrompt, GREETING_VARIANTS, pickGreeting, renderNodeBlock } from './prompts.js'
+import {
+  buildSystemPrompt,
+  decideStepCallToAction,
+  GREETING_VARIANTS,
+  pickGreeting,
+  renderNodeBlock,
+} from './prompts.js'
 import { SALES_CTA_VARIANTS } from './prompts.sales.js'
 
 const BUSINESS_NAME = 'Bella Vida Salón & Spa'
@@ -156,6 +162,58 @@ describe('the diagnosis path survives in every state', () => {
   it('still prints it for a business that books', () => {
     const prompt = buildSystemPrompt(fakeBusiness(), [], fakeSettings())
     expect(prompt).toContain('desde S/ 200 (requiere evaluación previa)')
+  })
+})
+
+describe('la invitación de cierre de un paso', () => {
+  // Un mensaje completo: decideStepCallToAction solo mira rol y contenido, pero
+  // armarlo entero evita castear un objeto a medias.
+  function message(role: 'user' | 'assistant', content: string): Message {
+    return {
+      id: `m-${content.length}-${role}`,
+      conversationId: 'conv-1',
+      businessId: 'biz-1',
+      role,
+      senderType: role === 'user' ? 'customer' : 'bot',
+      content,
+      toolCalls: null,
+      toolCallId: null,
+      createdAt: new Date('2026-09-23T12:00:00Z'),
+    }
+  }
+  const CTA = '¿Cuál te gustaría iniciar?'
+
+  it('la incluye tal cual en ese paso', () => {
+    const decision = decideStepCallToAction([message('user', 'qué cursos tienen?')], CTA)
+    expect(decision).toEqual({ include: true, text: CTA, reason: 'step' })
+  })
+
+  it('no la repite si la última respuesta de Emma ya la dijo', () => {
+    const history = [
+      message('user', 'qué cursos tienen?'),
+      message('assistant', 'Tenemos tres cursos.\n\n¿cual te gustaria iniciar?'),
+      message('user', 'y cuánto dura el básico?'),
+    ]
+    expect(decideStepCallToAction(history, CTA).include).toBe(false)
+  })
+
+  it('no invita a un cliente que se está despidiendo', () => {
+    const history = [message('assistant', 'Listo.'), message('user', 'gracias, chau')]
+    expect(decideStepCallToAction(history, CTA)).toEqual({ include: false, reason: 'farewell' })
+  })
+
+  it('reemplaza a la rotativa en el prompt', () => {
+    const prompt = buildSystemPrompt(
+      fakeBusiness(),
+      [],
+      fakeSettings({ flowType: 'sales' }),
+      [message('user', 'hola')],
+      null,
+      new Set(),
+      {},
+      CTA,
+    )
+    expect(prompt).toContain(`"${CTA}"`)
   })
 })
 

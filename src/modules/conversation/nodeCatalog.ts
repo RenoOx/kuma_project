@@ -9,6 +9,7 @@ import type { NodeBlueprint, NodeExtension, NodeRequirement } from './nodes/type
 export type {
   ConversationNode,
   ExitTarget,
+  ImageHandling,
   NodeBlueprint,
   NodeBranch,
   NodeRequirement,

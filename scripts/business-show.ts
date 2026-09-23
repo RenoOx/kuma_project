@@ -102,6 +102,15 @@ function showBusiness(business: Business, promptState: string | null): void {
     for (const branch of state?.branches ?? []) {
       out(`  ruta:      ${branch.id} → ${branch.to}  (${branch.when})`)
     }
+    if (state?.cta) out(`  cierre:    "${state.cta}"`)
+    if (state?.onImage) {
+      const what = [
+        state.onImage.forward ? 'reenvía al dueño' : '',
+        state.onImage.pause ? 'pausa a Emma' : '',
+        state.onImage.reply ? `responde "${state.onImage.reply}"` : '',
+      ].filter(Boolean)
+      out(`  foto:      ${what.join(' · ')}`)
+    }
     out(`  tools:     ${(state?.tools ?? []).join(', ') || '—'}`)
   }
 
