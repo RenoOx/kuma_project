@@ -304,11 +304,15 @@ El flujo NO lo decide el LLM — lo controla el código.
 
 Los dos flujos hardcodeados murieron. Hoy hay tres piezas:
 
-1. **Catálogo** — 11 nodos cerrados, en tres archivos bajo
+1. **Catálogo** — 12 nodos cerrados, en tres archivos bajo
    `src/modules/conversation/nodes/`: `core.nodes.ts` (idle, greeting,
    informing, listado_servicios, confirmed), `appointments.nodes.ts`
    (show_availability, await_payment, await_payment_verification) y
-   `sales.nodes.ts` (collect_data, confirmacion, correccion_datos). Cada uno
+   `sales.nodes.ts` (asesoria_perfil, collect_data, confirmacion,
+   correccion_datos). `asesoria_perfil` es "para un tipo de cliente: una
+   pregunta clave y la oferta que le corresponde"; no tiene salidas fijas, así
+   que sale por una ruta, y no lleva `show_services` a propósito (mandaría la
+   ficha de TODAS las opciones en vez de la de su perfil). Cada uno
    declara `objective`, `steps`, `edgeCases`, `example`, sus `tools`, sus
    `exits` y qué config necesita (`requires`). `nodeCatalog.ts` los junta y
    guarda `EMITTED_TRIGGERS`: el registro a mano de qué trigger emite qué archivo.
@@ -353,6 +357,30 @@ el destino de una foto que el modelo igual nunca ve. Lo aplica
   el dueño no se enteró y el cliente quedaría hablándole a nadie. Como el gate
   "¿Emma apagada?" corre antes que el de fotos, las fotos siguientes ya no se
   reenvían: solo la primera.
+
+### Mensajes fijos (solo desde archivo)
+
+Texto que el negocio escribió y que el **código** manda tal cual. La IA decide
+cuándo y para qué servicio (la intención); el texto y el monto no pasan por ella.
+Nació de un modelo que redactaba la oferta y hacía cuentas: decía precios que el
+negocio nunca dio.
+
+- Se declaran en el archivo del negocio (`fixedMessages: { id: { text, image?,
+  when? } }`) y cada paso nombra los que puede usar (`fixedMessages: ['id']`,
+  chequeado en compilación con `NoInfer`). No existen desde el panel.
+- Un paso con mensajes fijos gana la tool `send_fixed_message` (`{message,
+  service}`), igual que un paso con rutas gana `advance_flow`. `renderNodeBlock`
+  le lista los ids con su `when`.
+- `renderFixedMessage` (`llm/fixedMessage.ts`) completa `{servicio}` y
+  `{precio}`. **`{precio}` exige precio fijo** (`priceMin === priceMax`, sin
+  evaluación): con un rango se niega, la tool devuelve error y el modelo escala.
+  Un marcador desconocido también se niega antes de llegar al cliente.
+- Máximo uno por turno. Sale ANTES de la respuesta de Emma, por `enqueueSend`
+  (`sendFixedMessages` en `handler.ts`), y se guarda en el historial como mensaje
+  de assistant DESPUÉS de todos los resultados de tools de la vuelta: meterlo
+  entre `tool_calls` y su resultado rompe el formato de OpenAI.
+- `image` es un archivo de `images/` del repo (`isSafeImageName`: solo nombre,
+  sin carpetas). El simulador lo muestra marcado "Mensaje fijo".
 
 ### Aislamiento entre tipos de flujo
 
@@ -812,6 +840,18 @@ Hay tres del lado del dueño y una de Vamvu, y no se pisan:
   duplica en el SPA: es el contrato entre lo que el dueño compone y lo que Emma
   corre.
 
+  **La mayor parte es de solo lectura, para TODOS los negocios.** El dueño edita
+  lo básico: datos del negocio (con dirección y Maps), servicios con sus precios
+  y su material, horarios y días especiales. Todo lo que decide cómo habla y
+  vende Emma —Identidad, Mensajes, Flujo, Conversación (y su material por paso),
+  Reservas y avisos, Formas de pago y adelanto, base de conocimiento— lo ve pero
+  no lo toca: lo configura Vamvu en el repo. El bloqueo vive en el servidor
+  (`panel/panelLocks.ts`, middleware después de `panelAuth`, 403
+  `managed_by_vamvu`); en el SPA, `SettingsCard readOnly` apaga los controles con
+  un `<fieldset disabled>`. Lo operativo sigue abierto: responder, pausar a Emma,
+  etiquetas, citas. Una sección nueva que decida el comportamiento de Emma va a
+  `LOCKED_PATHS`, y `panelLocks.test.ts` fija la frontera.
+
 - **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
   solo con lo que el panel no puede tocar: crear negocios, el número de
   WhatsApp del bot y el del dueño (con el rebind del socket), vinculación por
@@ -840,10 +880,17 @@ Si falla alguna, el archivo **se salta**: corre lo guardado o el preset y queda
 un `logger.error` en cada turno. Un archivo roto no tumba el servidor ni a otros
 negocios. `business:show` dice cuál corre y por qué.
 
-Para ese negocio el panel muestra la card Conversación en solo lectura
-(`managedByFile` en el catálogo) y rechaza guardar el flujo y cambiar Vende/Agenda
-(`flow_managed_by_file`). El material por paso sigue editable: no vive en el
-archivo.
+Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions` y
+`collectData`** por encima de `messages.greeting`, `assistant.tone`,
+`assistant.customInstructions` y `collectDataFields`, y declarar los **mensajes
+fijos**. Lo aplica `flowSource.withFileSettings`, con la misma condición de
+`flowType`, en dos lectores: `businessService.getSettings` (todo lo que corre en
+vivo lee por ahí) y `readSettings` del panel (así el panel muestra lo que corre).
+Nunca se escribe en la base: se aplica en cada lectura. `business:show` lista qué
+campos vinieron del archivo. Lo que no dice el archivo queda como en la base.
+
+Rechaza también guardar el flujo y cambiar Vende/Agenda (`flow_managed_by_file`),
+aunque hoy el bloqueo general del panel ya los cubre.
 
 Montar uno: copiar `_plantilla.ts`, llenarlo desde
 `npm run business:show:dev -- <id>` para que arranque idéntico a lo que corre, y
@@ -1002,7 +1049,7 @@ Heredados de los planes ya cerrados:
 - **Material de nodos huérfano en negocios con archivo**: el barrido
   `purgeOrphans(…, 'node', …)` solo corre al guardar el flujo desde el panel, que
   para ellos está bloqueado. Si el archivo quita un paso, su material queda en S3.
-- **Nodos custom**: el dueño compone desde un catálogo cerrado de 11. Crear un
+- **Nodos custom**: el dueño compone desde un catálogo cerrado de 12. Crear un
   paso propio desde cero no existe.
 - **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
   la composición ni forma de preparar un cambio sin que salga en vivo.
