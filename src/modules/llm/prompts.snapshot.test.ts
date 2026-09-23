@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Business } from '@/db/schema/index.js'
 import { FLOW_FIXTURES } from '@/modules/conversation/flowFixtures.testutil.js'
@@ -71,6 +74,24 @@ describe('business + turn layers', () => {
     const facts = { 'nombre completo': 'Ana Torres', correo: 'ana@example.com' }
     expect(buildSystemPrompt(business, [], settings, [], null, new Set(), facts)).toMatchSnapshot()
   })
+})
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+describe('flow-type prompt files stay apart', () => {
+  // Same guarantee as the node files: once one imports the other, a sales edit
+  // can reach a clinic's prompt without the diff saying so.
+  const ISOLATED: ReadonlyArray<readonly [string, RegExp]> = [
+    ['prompts.appointments.ts', /prompts\.sales|'\.\/prompts\.js'/],
+    ['prompts.sales.ts', /prompts\.appointments|'\.\/prompts\.js'/],
+  ]
+  for (const [file, forbidden] of ISOLATED) {
+    it(`${file} imports neither the other flow type nor the shared prompt`, () => {
+      const source = readFileSync(resolve(here, file), 'utf8')
+      const imports = source.split('\n').filter((line) => /^\s*import\b|from\s+'/.test(line))
+      expect(imports.filter((line) => forbidden.test(line))).toEqual([])
+    })
+  }
 })
 
 describe('node layer', () => {

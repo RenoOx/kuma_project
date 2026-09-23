@@ -2,14 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { Business } from '@/db/schema/index.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import {
-  buildSystemPrompt,
-  CTA_VARIANTS,
-  GREETING_VARIANTS,
-  pickGreeting,
-  renderNodeBlock,
-  SALES_CTA_VARIANTS,
-} from './prompts.js'
+import { buildSystemPrompt, GREETING_VARIANTS, pickGreeting, renderNodeBlock } from './prompts.js'
+import { CTA_VARIANTS } from './prompts.appointments.js'
+import { SALES_CTA_VARIANTS } from './prompts.sales.js'
 
 const BUSINESS_NAME = 'Bella Vida Salón & Spa'
 
