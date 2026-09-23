@@ -167,7 +167,7 @@ function managedByFile(businessId: string, what: string): ValidationError {
   return new ValidationError({
     code: 'flow_managed_by_file',
     message: `business ${businessId} has a repo config file, refusing to change ${what} from the panel`,
-    userMessage: 'Este flujo lo administra Vamvu. Si necesitas cambiarlo, contáctanos.',
+    userMessage: 'Este flujo lo administra Vamvu. Si necesitás cambiarlo, escribinos.',
     logContext: { businessId, what },
   })
 }

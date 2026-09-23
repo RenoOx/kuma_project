@@ -614,6 +614,8 @@ export interface ConversationFlow {
 
 export interface ConversationCatalog {
   nodes: ConversationNodeOption[]
-  /** The flow running right now: the owner's composition, or the derived preset. */
+  /** The flow running right now: a repo file, the owner's composition, or the derived preset. */
   current: ConversationFlow
+  /** True when Vamvu manages this flow from a repo file: shown, never editable here. */
+  managedByFile: boolean
 }

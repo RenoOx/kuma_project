@@ -82,6 +82,9 @@ export function ConversationSettings({
 
   const byId = new Map(catalog.nodes.map((n) => [n.id, n]))
   const dirty = JSON.stringify(draft) !== servedKey
+  // Vamvu manages this flow from the repo: the file wins over anything saved
+  // here, so the card shows it and edits nothing. The server refuses the save too.
+  const locked = catalog.managedByFile
 
   // A step is named by whatever the owner renamed it to, everywhere it appears —
   // including as the destination of somebody else's route.
@@ -134,13 +137,27 @@ export function ConversationSettings({
   return (
     <SettingsCard
       title="Conversación"
-      description="Los pasos que sigue Emma, en orden. De cada uno podés cambiarle el nombre, sumarle indicaciones tuyas y ajustar los casos especiales y el ejemplo."
+      description={
+        locked
+          ? 'Los pasos que sigue Emma, en orden.'
+          : 'Los pasos que sigue Emma, en orden. De cada uno podés cambiarle el nombre, sumarle indicaciones tuyas y ajustar los casos especiales y el ejemplo.'
+      }
       onSave={() => save({ section: 'conversation', conversationFlow: draft })}
       saving={saving}
       saved={saved}
       error={error}
       dirty={dirty}
     >
+      {locked && (
+        <div className="flex items-start gap-2 rounded-lg border border-emma-border bg-emma-elevated p-3 text-sm">
+          <Lock size={15} className="mt-0.5 shrink-0" aria-hidden />
+          <p>
+            Este flujo lo administra Vamvu. Podés verlo acá, pero no editarlo. Si necesitás
+            cambiarlo, escribinos.
+          </p>
+        </div>
+      )}
+
       {isDesktop && (
         <div className="flex items-center gap-1 self-start rounded-md border border-emma-border p-0.5">
           <ViewTab active={view === 'list'} onClick={() => setView('list')} icon={List}>
@@ -164,7 +181,7 @@ export function ConversationSettings({
             <ConversationCanvas
               draft={draft}
               catalog={catalog}
-              onReorder={reorder}
+              onReorder={locked ? () => {} : reorder}
               onOpen={(id) => setOpen(open === id ? null : id)}
               openId={open}
             />
@@ -186,6 +203,7 @@ export function ConversationSettings({
               key={id}
               node={node}
               position={index + 1}
+              locked={locked}
               // In the diagram only the step the owner tapped stays expanded, so
               // the list below acts as its inspector instead of a second copy.
               expanded={open === id}
@@ -212,7 +230,7 @@ export function ConversationSettings({
         })}
       </div>
 
-      {missing.length > 0 && (
+      {!locked && missing.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-emma-border pt-3">
           <p className="text-muted-foreground text-xs">Pasos que no estás usando</p>
           <div className="flex flex-wrap gap-2">
@@ -261,9 +279,12 @@ function NodeRow({
   categories,
   firstListing = false,
   collapsed = false,
+  locked = false,
 }: {
   node: ConversationNodeOption
   position: number
+  /** Shown but not editable: the flow is managed from a repo file. */
+  locked?: boolean
   expanded: boolean
   /** Hidden entirely while the diagram is showing and this is not the open step. */
   collapsed?: boolean
@@ -314,7 +335,7 @@ function NodeRow({
             </Badge>
           )}
         </button>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className={locked ? 'hidden' : 'flex shrink-0 items-center gap-0.5'}>
           <IconButton label={`Subir ${title}`} onClick={onUp}>
             <ChevronUp size={14} aria-hidden />
           </IconButton>
@@ -337,6 +358,10 @@ function NodeRow({
 
       {expanded && (
         <div className="flex flex-col gap-3 border-t border-emma-border p-3">
+          {/* A native disabled fieldset turns off every input, textarea and
+              button inside it — the route editor's select and its add/remove
+              included — without threading `locked` through each control. */}
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
           <div className="flex flex-col gap-1">
             <Label htmlFor={`label-${node.id}`} className="text-xs">
               Nombre del paso
@@ -428,6 +453,7 @@ function NodeRow({
             targets={targets}
             onChange={(branches) => onOverride({ branches })}
           />
+          </fieldset>
 
           {/* Last, and with its own persistence: everything above is a draft
               until Guardar, while a file is written the moment it is picked.
@@ -439,7 +465,7 @@ function NodeRow({
             unsavedHint="Guardá la conversación primero y volvé para subirle archivos."
           />
 
-          <div className="flex flex-col gap-1">
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
             <Label htmlFor={`example-${node.id}`} className="text-xs">
               Ejemplo de respuesta
             </Label>
@@ -453,7 +479,7 @@ function NodeRow({
               maxLength={1000}
               onChange={(e) => onOverride({ example: e.target.value })}
             />
-          </div>
+          </fieldset>
         </div>
       )}
     </div>
