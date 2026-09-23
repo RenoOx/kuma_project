@@ -84,9 +84,11 @@ export function ConversationSettings({
 
   const byId = new Map(catalog.nodes.map((n) => [n.id, n]))
   const dirty = JSON.stringify(draft) !== servedKey
-  // Vamvu manages this flow from the repo: the file wins over anything saved
-  // here, so the card shows it and edits nothing. The server refuses the save too.
-  const locked = catalog.managedByFile
+  // Solo lectura para todos los negocios: la conversación la configura Vamvu en
+  // el repo (src/config/businesses/) y el servidor rechaza el guardado
+  // (panelLocks). Se queda como variable y no se borra la edición: es la misma
+  // tarjeta que se va a reabrir cuando el dueño vuelva a poder tocar algo.
+  const locked = true
 
   // A step is named by whatever the owner renamed it to, everywhere it appears —
   // including as the destination of somebody else's route.
@@ -139,27 +141,15 @@ export function ConversationSettings({
   return (
     <SettingsCard
       title="Conversación"
-      description={
-        locked
-          ? 'Los pasos que sigue Emma, en orden.'
-          : 'Los pasos que sigue Emma, en orden. De cada uno podés cambiarle el nombre, sumarle indicaciones tuyas y ajustar los casos especiales y el ejemplo.'
-      }
+      description="Los pasos que sigue Emma, en orden. Tocá uno para ver qué hace."
       onSave={() => save({ section: 'conversation', conversationFlow: draft })}
       saving={saving}
       saved={saved}
       error={error}
       dirty={dirty}
+      readOnly={locked}
+      locksItself
     >
-      {locked && (
-        <div className="flex items-start gap-2 rounded-lg border border-emma-border bg-emma-elevated p-3 text-sm">
-          <Lock size={15} className="mt-0.5 shrink-0" aria-hidden />
-          <p>
-            Este flujo lo administra Vamvu. Podés verlo acá, pero no editarlo. Si necesitás
-            cambiarlo, escribinos.
-          </p>
-        </div>
-      )}
-
       {isDesktop && (
         <div className="flex items-center gap-1 self-start rounded-md border border-emma-border p-0.5">
           <ViewTab active={view === 'list'} onClick={() => setView('list')} icon={List}>
@@ -189,9 +179,9 @@ export function ConversationSettings({
             />
           </Suspense>
           <p className="text-muted-foreground text-xs">
-            Arrastrá un paso hacia arriba o abajo para cambiar el orden. La línea punteada es una
-            ruta tuya; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso
-            para editarlo abajo.
+            {locked
+              ? 'La línea punteada es una ruta; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso para ver su detalle abajo.'
+              : 'Arrastrá un paso hacia arriba o abajo para cambiar el orden. La línea punteada es una ruta tuya; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso para editarlo abajo.'}
           </p>
         </div>
       )}

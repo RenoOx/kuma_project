@@ -14,6 +14,7 @@ import type { AppError } from '@/shared/errors.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import type { Result } from '@/shared/result.js'
 import { panelAuth, panelBusiness } from './panelAuth.js'
+import { panelWriteLock } from './panelLocks.js'
 import * as settingsService from './settings.service.js'
 
 export const panelSettingsRoutes = new Hono()
@@ -22,6 +23,8 @@ export const panelSettingsRoutes = new Hono()
 // handler added below cannot forget it. The business this resolves is the ONLY
 // source of the tenant id in this file — nothing here reads an id from a body.
 panelSettingsRoutes.use('/api/panel/:businessId/*', panelAuth)
+// Después de la autenticación: las secciones que el dueño solo puede leer.
+panelSettingsRoutes.use('/api/panel/:businessId/*', panelWriteLock)
 
 function failure(c: Context, error: AppError): Response {
   // The two media codes are checked before the ValidationError branch they would

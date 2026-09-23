@@ -62,7 +62,7 @@ export function ServicesPage(): React.JSX.Element {
         {/* The knowledge base does not depend on settings parsing: a business
             whose configuration is incomplete can still have policies loaded,
             and hiding them would look like they were lost. */}
-        <KnowledgeList entries={knowledge.data ?? []} />
+        <KnowledgeList entries={knowledge.data ?? []} readOnly />
       </div>
     </div>
   )

@@ -105,6 +105,7 @@ export function FlowSettings({ data }: { data: PanelSettings }): React.JSX.Eleme
       saved={saved}
       error={error}
       dirty={dirty && attemptsValid && keyword.trim().length > 0}
+      readOnly
     >
       <Field
         label="Datos a capturar"

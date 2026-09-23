@@ -129,6 +129,7 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
       saved={saved}
       error={error}
       dirty={dirty && name.trim().length > 0}
+      readOnly
     >
       <Field
         label="Nombre del asistente"

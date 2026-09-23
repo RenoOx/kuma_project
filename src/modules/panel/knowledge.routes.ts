@@ -10,11 +10,14 @@ import type { AppError } from '@/shared/errors.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import type { Result } from '@/shared/result.js'
 import { panelAuth, panelBusiness } from './panelAuth.js'
+import { panelWriteLock } from './panelLocks.js'
 
 export const panelKnowledgeRoutes = new Hono()
 
 // Auth on the whole surface, same wildcard as the other panel route files.
 panelKnowledgeRoutes.use('/api/panel/:businessId/*', panelAuth)
+// La base de conocimiento es de solo lectura para el dueño (ver panelLocks).
+panelKnowledgeRoutes.use('/api/panel/:businessId/*', panelWriteLock)
 
 function failure(c: Context, error: AppError): Response {
   const status = error instanceof NotFoundError ? 404 : error instanceof ValidationError ? 400 : 500

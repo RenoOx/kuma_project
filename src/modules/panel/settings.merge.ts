@@ -13,7 +13,7 @@ import {
   assistantFunctionOf,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
-import { compositionFor } from '@/modules/conversation/flowSource.js'
+import { compositionFor, withFileSettings } from '@/modules/conversation/flowSource.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -604,7 +604,10 @@ export function readSettings(business: Business): PanelSettingsView {
     timezone: business.timezone,
     whatsappNumber: business.whatsappNumber,
     assistantFunction: parsed.success ? assistantFunctionOf(parsed.data) : null,
-    settings: parsed.success ? parsed.data : null,
+    // Lo que corre, no lo guardado: si el archivo del negocio pone el saludo, el
+    // panel muestra ese saludo. Esas secciones son de solo lectura (panelLocks),
+    // así que un guardado nunca devuelve estos valores a la base.
+    settings: parsed.success ? withFileSettings(business.id, parsed.data).settings : null,
     invalidFields: parsed.success
       ? []
       : parsed.error.issues.map((issue) =>

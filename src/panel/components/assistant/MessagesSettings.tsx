@@ -131,6 +131,7 @@ export function MessagesSettings({ data }: { data: PanelSettings }): React.JSX.E
       saved={saved}
       error={error}
       dirty={dirty}
+      readOnly
     >
       <p className="text-muted-foreground text-xs">
         Podés usar <code>{'{nombre_negocio}'}</code>, <code>{'{nombre_cliente}'}</code>,{' '}
