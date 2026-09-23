@@ -404,30 +404,8 @@ export function validateFlow(
 
 const EMPTY_NODE: ConversationNode = { objective: '', steps: [], edgeCases: [], example: '' }
 
-/**
- * The flow a business is actually running.
- *
- * Falls back to the preset when the owner has not composed one, and ALSO when
- * what they composed no longer validates — a flow that stopped being runnable
- * because the deposit was switched off must not take the conversation down with
- * it. The fallback is logged, because it means the panel is showing the owner
- * something different from what Emma is doing.
- */
-export function resolveFlow(settings: BusinessSettings | null): FlowDefinition {
-  const flowType: FlowType = settings?.flowType ?? 'appointments'
-  const stored = settings?.conversationFlow
-  if (!stored) return compileFlow(presetFor(settings), flowType)
-
-  const checked = validateFlow(stored, settings)
-  if (!checked.ok) {
-    logger.warn(
-      { component: 'stateMachine', code: checked.error.code, ...checked.error.logContext },
-      'stored conversation flow does not validate, falling back to preset',
-    )
-    return compileFlow(presetFor(settings), flowType)
-  }
-  return compileFlow(stored, flowType)
-}
+// Qué flujo corre un negocio (archivo del repo → guardado en el panel → preset)
+// lo decide conversation/flowSource.ts: resolveBusinessFlow.
 
 /**
  * Where a trigger leads from here. A trigger the state does not list means

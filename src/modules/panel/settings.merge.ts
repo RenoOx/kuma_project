@@ -539,7 +539,7 @@ export function mergeSettingsSection(
   // A composition is a list of node ids, and the nodes that make sense depend on
   // the flow: a business that saved "Disponibilidad" while it booked appointments
   // keeps a runnable composition after switching to selling — validateFlow still
-  // accepts it, because its requirement is only that services exist. So resolveFlow
+  // accepts it, because its requirement is only that services exist. So resolveBusinessFlow
   // goes on running the booking flow, the owner sees no error at all, and Emma
   // keeps offering slots for a business that no longer has an agenda.
   //
