@@ -48,6 +48,36 @@ export const SALES_NODES = [
     exits: {},
   }),
 
+  // Entre "ya eligió" y "dame tus datos". Nació porque antes de pedir el nombre
+  // el negocio quiere mostrar lo que el cliente recibe al terminar — una
+  // galería de fotos, no una foto sola — y eso es contenido, no un dato a
+  // capturar: no le corresponde a collect_data.
+  //
+  // Mismo molde que asesoria_perfil: sin salidas fijas, sale por la ruta que
+  // escribe el negocio. Vive en el catálogo para que cualquier venta pueda
+  // usarlo, pero no entra al preset — es opt-in por archivo.
+  defineNode({
+    id: 'mostrar_beneficios',
+    label: 'Beneficios',
+    hint: 'Le muestra al cliente lo que recibe al terminar, antes de pedirle sus datos.',
+    requires: ['services_configured'],
+    tools: [ESCALATE],
+    node: {
+      objective:
+        'Mostrarle lo que va a recibir al terminar lo que eligió, y confirmar que quiere seguir antes de pedirle sus datos.',
+      steps: [
+        'Mandá la galería de beneficios que corresponda con send_fixed_message.',
+        'Preguntale si quiere continuar con la inscripción.',
+      ],
+      edgeCases: [
+        'Si todavía no eligió nada concreto, volvé a preguntarle cuál quiere.',
+        'Si pregunta algo más antes de seguir, respondé y volvé a invitarlo a continuar.',
+      ],
+      example: 'Esto es lo que vas a tener. ¿Seguimos con tu inscripción?',
+    },
+    exits: {},
+  }),
+
   defineNode({
     id: 'collect_data',
     label: 'Captura de datos',

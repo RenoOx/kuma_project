@@ -77,7 +77,7 @@ export default defineBusinessConfig({
         {
           id: 'ruta-cierre',
           when: 'El alumno eligió un curso concreto y quiere inscribirse.',
-          to: 'collect_data',
+          to: 'mostrar_beneficios',
         },
       ],
     },
@@ -102,6 +102,25 @@ export default defineBusinessConfig({
         {
           id: 'quiere-certificarse',
           when: 'El alumno quiere avanzar con la certificación que se le ofreció.',
+          to: 'mostrar_beneficios',
+        },
+      ],
+    },
+
+    // Entre "ya eligió" y "dame tus datos": le muestra lo que recibe al
+    // terminar antes de pedirle el nombre. Cruzan los dos caminos.
+    {
+      node: 'mostrar_beneficios',
+      extraInstructions: [
+        'Mandá la galería con send_fixed_message:',
+        '- "beneficiosCertificado" si eligió una certificación.',
+        '- "beneficiosCurso" si eligió un curso.',
+      ].join('\n'),
+      fixedMessages: ['beneficiosCurso', 'beneficiosCertificado'],
+      routes: [
+        {
+          id: 'continua',
+          when: 'El alumno quiere seguir con la inscripción después de ver la galería.',
           to: 'collect_data',
         },
       ],
@@ -127,8 +146,8 @@ export default defineBusinessConfig({
 
   fixedMessages: {
     // {precio} sale del servicio elegido en el panel: si el dueño cambia el precio
-    // de una certificación, la oferta cambia sola. Imagen del carnet: pendiente
-    // (cuando esté en images/, agregar `image: 'carnet-qr.png'`).
+    // de una certificación, la oferta cambia sola. La foto del carnet se sube
+    // desde /asistente ("Fotos de tus mensajes automáticos") — no vive acá.
     ofertaCertificacion: {
       when: 'Cuando ya sabés cuántas máquinas maneja y elegiste su certificación.',
       text: [
@@ -139,6 +158,20 @@ export default defineBusinessConfig({
         '📖 01 manual digital de cada equipo.',
         '🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃',
       ].join('\n'),
+      images: true,
+    },
+    // Las dos galerías de beneficios se suben desde el panel, no acá — el
+    // instituto todavía no cargó las fotos; send_fixed_message manda el texto
+    // solo hasta que lo haga.
+    beneficiosCurso: {
+      when: 'Eligió un CURSO y ya le mostraste la ruta de cierre.',
+      text: 'Esto es lo que vas a tener al terminar tu curso:',
+      images: true,
+    },
+    beneficiosCertificado: {
+      when: 'Eligió una CERTIFICACIÓN y ya le mostraste la ruta de cierre.',
+      text: 'Esto es lo que vas a tener con tu certificación:',
+      images: true,
     },
   },
 })
