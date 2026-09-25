@@ -98,23 +98,23 @@ export function updateServices(
 
 // ── Media ────────────────────────────────────────────────────────────────────
 //
-// Two owners, one shape. A file hangs either off a service of the catalogue or
-// off a step of the conversation, and everything after that — upload, delete,
-// order — is identical, so only the path differs.
+// Tres dueños, una sola forma. Un archivo cuelga de un servicio del catálogo,
+// de un paso de la conversación, o de un mensaje fijo — y todo lo demás
+// (subir, borrar, ordenar) es idéntico, solo cambia la ruta.
 //
 // Separate from the section PATCHes above: the file is multipart, and an upload
 // that failed must not take the owner's text edits down with it.
 
 /** Which list a file belongs to. The server checks the id against that list. */
 export interface MediaOwner {
-  kind: 'service' | 'node'
+  kind: 'service' | 'node' | 'fixedMessage'
   id: string
 }
 
 function mediaBase(owner: MediaOwner): string {
-  return owner.kind === 'node'
-    ? `/settings/conversation/nodes/${owner.id}/media`
-    : `/settings/services/${owner.id}/media`
+  if (owner.kind === 'node') return `/settings/conversation/nodes/${owner.id}/media`
+  if (owner.kind === 'fixedMessage') return `/settings/fixed-messages/${owner.id}/media`
+  return `/settings/services/${owner.id}/media`
 }
 
 export function getOwnerMedia(

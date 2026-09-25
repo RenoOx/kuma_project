@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeImageName, renderFixedMessage } from './fixedMessage.js'
+import { renderFixedMessage } from './fixedMessage.js'
 
 // El mensaje fijo existe para que ningún monto pase por la IA: estos tests
 // cuidan que el código tampoco invente uno cuando el servicio no lo tiene.
@@ -40,24 +40,5 @@ describe('renderFixedMessage', () => {
   it('refuses an unknown marker rather than sending it to the customer', () => {
     const result = renderFixedMessage('Hola {nombre}', service(295, 295))
     expect(result).toEqual({ ok: false, reason: 'marcador desconocido {nombre}' })
-  })
-})
-
-describe('isSafeImageName', () => {
-  it('accepts a plain image file name', () => {
-    expect(isSafeImageName('carnet-qr.png')).toBe(true)
-    expect(isSafeImageName('oferta_1.jpeg')).toBe(true)
-  })
-
-  it('rejects anything that could leave the images folder', () => {
-    expect(isSafeImageName('../.env')).toBe(false)
-    expect(isSafeImageName('sub/carnet.png')).toBe(false)
-    expect(isSafeImageName('..\\carnet.png')).toBe(false)
-    expect(isSafeImageName('.hidden.png')).toBe(false)
-  })
-
-  it('rejects files that are not images', () => {
-    expect(isSafeImageName('carnet.pdf')).toBe(false)
-    expect(isSafeImageName('carnet.png.exe')).toBe(false)
   })
 })

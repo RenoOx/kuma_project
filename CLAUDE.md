@@ -304,15 +304,21 @@ El flujo NO lo decide el LLM — lo controla el código.
 
 Los dos flujos hardcodeados murieron. Hoy hay tres piezas:
 
-1. **Catálogo** — 12 nodos cerrados, en tres archivos bajo
+1. **Catálogo** — 13 nodos cerrados, en tres archivos bajo
    `src/modules/conversation/nodes/`: `core.nodes.ts` (idle, greeting,
    informing, listado_servicios, confirmed), `appointments.nodes.ts`
    (show_availability, await_payment, await_payment_verification) y
-   `sales.nodes.ts` (asesoria_perfil, collect_data, confirmacion,
-   correccion_datos). `asesoria_perfil` es "para un tipo de cliente: una
-   pregunta clave y la oferta que le corresponde"; no tiene salidas fijas, así
-   que sale por una ruta, y no lleva `show_services` a propósito (mandaría la
-   ficha de TODAS las opciones en vez de la de su perfil). Cada uno
+   `sales.nodes.ts` (asesoria_perfil, mostrar_beneficios, collect_data,
+   confirmacion, correccion_datos). `asesoria_perfil` es "para un tipo de
+   cliente: una pregunta clave y la oferta que le corresponde"; no tiene
+   salidas fijas, así que sale por una ruta, y no lleva `show_services` a
+   propósito (mandaría la ficha de TODAS las opciones en vez de la de su
+   perfil). `mostrar_beneficios` es el mismo molde (sin salidas fijas, sale
+   por ruta del negocio): un paso de contenido entre "ya eligió" y "dame tus
+   datos", para mostrar una galería antes de pedir el nombre — no le
+   corresponde a `collect_data`, que es captura de datos, no contenido. Ninguno
+   de los dos entra a los presets (`PRESET_SALES`): quedan disponibles en el
+   catálogo para cualquier venta, pero son opt-in por archivo. Cada nodo
    declara `objective`, `steps`, `edgeCases`, `example`, sus `tools`, sus
    `exits` y qué config necesita (`requires`). `nodeCatalog.ts` los junta y
    guarda `EMITTED_TRIGGERS`: el registro a mano de qué trigger emite qué archivo.
@@ -365,9 +371,10 @@ cuándo y para qué servicio (la intención); el texto y el monto no pasan por e
 Nació de un modelo que redactaba la oferta y hacía cuentas: decía precios que el
 negocio nunca dio.
 
-- Se declaran en el archivo del negocio (`fixedMessages: { id: { text, image?,
+- Se declaran en el archivo del negocio (`fixedMessages: { id: { text, images?,
   when? } }`) y cada paso nombra los que puede usar (`fixedMessages: ['id']`,
-  chequeado en compilación con `NoInfer`). No existen desde el panel.
+  chequeado en compilación con `NoInfer`). El texto y el `when` no existen desde
+  el panel — solo Vamvu los toca, en el repo.
 - Un paso con mensajes fijos gana la tool `send_fixed_message` (`{message,
   service}`), igual que un paso con rutas gana `advance_flow`. `renderNodeBlock`
   le lista los ids con su `when`.
@@ -375,12 +382,38 @@ negocio nunca dio.
   `{precio}`. **`{precio}` exige precio fijo** (`priceMin === priceMax`, sin
   evaluación): con un rango se niega, la tool devuelve error y el modelo escala.
   Un marcador desconocido también se niega antes de llegar al cliente.
-- Máximo uno por turno. Sale ANTES de la respuesta de Emma, por `enqueueSend`
-  (`sendFixedMessages` en `handler.ts`), y se guarda en el historial como mensaje
-  de assistant DESPUÉS de todos los resultados de tools de la vuelta: meterlo
-  entre `tool_calls` y su resultado rompe el formato de OpenAI.
-- `image` es un archivo de `images/` del repo (`isSafeImageName`: solo nombre,
-  sin carpetas). El simulador lo muestra marcado "Mensaje fijo".
+- Máximo uno por turno (el mensaje en sí, no las fotos que lleva). Sale ANTES
+  de la respuesta de Emma, por `enqueueSend` (`sendFixedMessages` en
+  `handler.ts`), y se guarda en el historial como mensaje de assistant DESPUÉS
+  de todos los resultados de tools de la vuelta: meterlo entre `tool_calls` y
+  su resultado rompe el formato de OpenAI.
+- **`images?: boolean` es un flag de intención, no la lista de fotos.** Un
+  mensaje que lo declara puede llevar una galería; uno que no, es puro texto y
+  ni se consulta contra el almacenamiento al mandarse — no tiene sentido
+  preguntar por fotos de un mensaje que por diseño nunca las lleva.
+- **Las fotos las sube el dueño desde el panel, nunca el repo.** `send_fixed_message`
+  resuelve la galería en el momento (`serviceMediaService.listForOwner(businessId,
+  'fixedMessage', messageId)`, ya ordenada por `displayOrder`) y manda sus
+  `s3Key` — mismo mecanismo S3 que las fotos de un servicio, tercer `ownerKind`
+  (`media/media.types.ts`). `handler.ts` las descarga con
+  `mediaService.downloadMedia`, una por una, en orden, cada una como mensaje de
+  WhatsApp aparte. **No pasa por `attachmentQueue`/`MAX_ATTACHMENTS_PER_TURN` ni
+  por el enfriamiento de `sentServiceImages.ts`** — esos protegen el camino de
+  `send_service_media` (el LLM eligiendo fotos del catálogo); los mensajes
+  fijos van uno por uno por `enqueueSend` + `humanDelay`, igual que cualquier
+  otro envío, así que una galería de varias fotos no arriesga un ban ni compite
+  con ese enfriamiento. El simulador la muestra completa (link firmado),
+  marcada "Mensaje fijo".
+- Panel: card "Fotos de tus mensajes automáticos" en `/asistente`, la única de
+  esa pantalla que NO está bloqueada — sube por `settings/fixed-messages/:messageId/media`
+  (mismas cuatro operaciones que el material de un paso). Solo lista los
+  mensajes con `images: true`; el tenant check es `fixedMessageAcceptsMedia`
+  (`settings.merge.ts`), distinto al de servicio/nodo porque el id no vive en
+  la base — vive en `fileConfigFor(businessId).fixedMessages`.
+- **Deuda conocida:** sin barrido automático de huérfanos para este `ownerKind`.
+  El de servicio y nodo se dispara cuando el dueño guarda esa lista desde el
+  panel; un mensaje fijo no tiene ese evento — su id vive en un archivo que solo
+  cambia con un deploy.
 
 ### Aislamiento entre tipos de flujo
 
@@ -840,17 +873,25 @@ Hay tres del lado del dueño y una de Vamvu, y no se pisan:
   duplica en el SPA: es el contrato entre lo que el dueño compone y lo que Emma
   corre.
 
-  **La mayor parte es de solo lectura, para TODOS los negocios.** El dueño edita
-  lo básico: datos del negocio (con dirección y Maps), servicios con sus precios
-  y su material, horarios y días especiales. Todo lo que decide cómo habla y
-  vende Emma —Identidad, Mensajes, Flujo, Conversación (y su material por paso),
-  Reservas y avisos, Formas de pago y adelanto, base de conocimiento— lo ve pero
-  no lo toca: lo configura Vamvu en el repo. El bloqueo vive en el servidor
+  **El TEXTO y la LÓGICA son de solo lectura, para TODOS los negocios — los
+  ARCHIVOS nunca.** El dueño edita lo básico (datos del negocio con dirección y
+  Maps, horarios, días especiales) y las palabras de todo lo que decide cómo
+  habla y vende Emma —Identidad, Mensajes, Flujo, Conversación, Reservas y
+  avisos, Formas de pago y adelanto, base de conocimiento— las ve pero no las
+  toca: eso lo configura Vamvu en el repo. El bloqueo vive en el servidor
   (`panel/panelLocks.ts`, middleware después de `panelAuth`, 403
   `managed_by_vamvu`); en el SPA, `SettingsCard readOnly` apaga los controles con
-  un `<fieldset disabled>`. Lo operativo sigue abierto: responder, pausar a Emma,
-  etiquetas, citas. Una sección nueva que decida el comportamiento de Emma va a
-  `LOCKED_PATHS`, y `panelLocks.test.ts` fija la frontera.
+  un `<fieldset disabled>`.
+
+  **Pero ninguna foto vive en el repo — todas entran por panel+S3, sin
+  excepción**, aunque el texto que las acompaña esté bloqueado: los precios y
+  fotos de un servicio, el material que Emma manda al entrar a un paso
+  (`settings/conversation/nodes/:nodeId/media`) y la galería de un mensaje fijo
+  (`settings/fixed-messages/:messageId/media`, card "Fotos de tus mensajes
+  automáticos") quedan siempre editables. Lo operativo también sigue abierto:
+  responder, pausar a Emma, etiquetas, citas. Una sección nueva que decida el
+  comportamiento de Emma va a `LOCKED_PATHS`; un archivo nunca — `panelLocks.test.ts`
+  fija la frontera.
 
 - **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
   solo con lo que el panel no puede tocar: crear negocios, el número de
@@ -1049,7 +1090,11 @@ Heredados de los planes ya cerrados:
 - **Material de nodos huérfano en negocios con archivo**: el barrido
   `purgeOrphans(…, 'node', …)` solo corre al guardar el flujo desde el panel, que
   para ellos está bloqueado. Si el archivo quita un paso, su material queda en S3.
-- **Nodos custom**: el dueño compone desde un catálogo cerrado de 12. Crear un
+- **Sin barrido de huérfanos para mensajes fijos.** El de servicio y nodo se
+  dispara al guardar esa lista desde el panel; un mensaje fijo no tiene ese
+  evento — su id vive en un archivo que solo cambia con un deploy. Si se le
+  quita `images: true` o se borra el mensaje, sus fotos quedan en S3.
+- **Nodos custom**: el dueño compone desde un catálogo cerrado de 13. Crear un
   paso propio desde cero no existe.
 - **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
   la composición ni forma de preparar un cambio sin que salga en vivo.

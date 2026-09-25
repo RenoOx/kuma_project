@@ -1174,6 +1174,13 @@ export async function executeTool(
         }
       }
 
+      // Si el mensaje no declaró `images: true`, ni se consulta: por diseño es
+      // solo texto, y una fila subida a mano a ese id (poco probable, pero
+      // posible) tampoco debería mandarse ahí.
+      const gallery = message.images
+        ? await serviceMediaService.listForOwner(context.businessId, 'fixedMessage', message.id)
+        : []
+
       return {
         result: JSON.stringify({
           status: 'sent',
@@ -1181,7 +1188,10 @@ export async function executeTool(
             'El mensaje ya le llega al cliente tal cual, antes de tu respuesta. NO lo repitas, no lo resumas y no vuelvas a dar el precio: respondé solo una pregunta corta para seguir.',
         }),
         fixedMessages: [
-          { text: rendered.text, ...(message.image ? { image: message.image } : {}) },
+          {
+            text: rendered.text,
+            ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+          },
         ],
       }
     }

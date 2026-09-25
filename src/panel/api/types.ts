@@ -623,12 +623,21 @@ export interface ConversationFlow {
   overrides: Record<string, ConversationNodeOverride>
 }
 
+/** Un mensaje fijo que admite fotos, subidas por panel. */
+export interface ConversationFixedMessage {
+  id: string
+  /** Cuándo lo manda Emma, en palabras del negocio. Nunca el texto: eso es de Vamvu. */
+  when?: string
+}
+
 export interface ConversationCatalog {
   nodes: ConversationNodeOption[]
   /** The flow running right now: a repo file, the owner's composition, or the derived preset. */
   current: ConversationFlow
   /** True when Vamvu manages this flow from a repo file: shown, never editable here. */
   managedByFile: boolean
+  /** Solo los mensajes fijos que declararon `images: true` — los de puro texto no aparecen. */
+  fixedMessages: ConversationFixedMessage[]
 }
 
 // ── Simulador ────────────────────────────────────────────────────────────────
@@ -656,12 +665,17 @@ export interface SimulatorAttachment {
   url: string | null
 }
 
+/** Una imagen de una galería, subida por panel. */
+export interface SimulatorFixedImage {
+  /** Firmado por una hora; null si el almacenamiento no está configurado. */
+  url: string | null
+}
+
 /** Un mensaje fijo del negocio, tal como lo recibe el cliente. */
 export interface SimulatorFixedMessage {
   text: string
-  /** Data URL de la imagen, o null si no hay o no se pudo leer. */
-  image: string | null
-  imageName: string | null
+  /** La galería completa, en orden — puede ser vacía. */
+  images: SimulatorFixedImage[]
 }
 
 /** Un turno: lo que respondió Emma y todo lo que pasó para llegar ahí. */

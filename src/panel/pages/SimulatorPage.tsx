@@ -165,18 +165,28 @@ function EmmaTurn({
           <div className="bg-emma-bubble-bot rounded-2xl rounded-br-sm px-3.5 py-2 text-sm whitespace-pre-wrap text-white ring-2 ring-offset-1 ring-emma-accent/40">
             {fixed.text}
           </div>
-          {fixed.imageName &&
-            (fixed.image ? (
-              <img
-                src={fixed.image}
-                alt={fixed.imageName}
-                className="max-h-64 rounded-lg border border-emma-border"
-              />
-            ) : (
-              <span className="text-muted-foreground text-[11px]">
-                Imagen {fixed.imageName} no encontrada en images/
-              </span>
-            ))}
+          {/* La galería completa, en el mismo orden en que WhatsApp las recibe:
+              una foto por mensaje, una atrás de otra. */}
+          {fixed.images.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {fixed.images.map((img, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: lista inmutable del turno
+                <div key={i}>
+                  {img.url ? (
+                    <img
+                      src={img.url}
+                      alt=""
+                      className="h-32 rounded-lg border border-emma-border object-cover"
+                    />
+                  ) : (
+                    <span className="text-muted-foreground text-[11px]">
+                      Una foto no se pudo cargar (almacenamiento no configurado)
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <span className="text-muted-foreground text-[11px]">
             Mensaje fijo · lo manda el código
           </span>

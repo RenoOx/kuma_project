@@ -5,14 +5,14 @@ import type { ServiceMedia } from '@/db/schema/index.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, isErr, ok, type Result } from '@/shared/result.js'
 import * as mediaService from './media.service.js'
-import type { MediaOwnerKind } from './media.types.js'
+import type { MediaOwnerKind, MediaTarget } from './media.types.js'
 import * as repo from './serviceMedia.repo.js'
 
 /**
- * The CRUD of a service's or a conversation step's files, with the bucket and
- * the table kept in step.
+ * The CRUD of a service's, a conversation step's, or a fixed message's files,
+ * with the bucket and the table kept in step.
  *
- * Both owners share one table and one code path. What tells them apart is
+ * The three owners share one table and one code path. What tells them apart is
  * `ownerKind`, which is required everywhere it matters - a service id and a node
  * id are both nanoids, so an unscoped query would cross them.
  *
@@ -33,9 +33,12 @@ import * as repo from './serviceMedia.repo.js'
 
 export interface ServiceMediaInput {
   businessId: string
-  /** 'service' for a catalogue item, 'node' for a step of the conversation. */
+  /**
+   * 'service' for a catalogue item, 'node' for a step of the conversation,
+   * 'fixedMessage' for a mensaje fijo declarado en el archivo del negocio.
+   */
   ownerKind: MediaOwnerKind
-  /** The nanoid of the service, or the id of the conversation node. */
+  /** El nanoid del servicio, el id del nodo, o el id del mensaje fijo. */
   ownerId: string
   filename: string | null
   buffer: Buffer
@@ -50,22 +53,19 @@ export interface ServiceMediaInput {
 export async function addMedia(input: ServiceMediaInput): Promise<Result<ServiceMedia>> {
   const mediaId = nanoid()
 
-  const uploaded = await mediaService.uploadMedia(
+  const target: MediaTarget =
     input.ownerKind === 'node'
-      ? {
-          kind: 'node_media',
-          businessId: input.businessId,
-          nodeId: input.ownerId,
-          mediaId,
-        }
-      : {
-          kind: 'service_media',
-          businessId: input.businessId,
-          serviceId: input.ownerId,
-          mediaId,
-        },
-    input.buffer,
-  )
+      ? { kind: 'node_media', businessId: input.businessId, nodeId: input.ownerId, mediaId }
+      : input.ownerKind === 'fixedMessage'
+        ? {
+            kind: 'fixed_message_media',
+            businessId: input.businessId,
+            messageId: input.ownerId,
+            mediaId,
+          }
+        : { kind: 'service_media', businessId: input.businessId, serviceId: input.ownerId, mediaId }
+
+  const uploaded = await mediaService.uploadMedia(target, input.buffer)
   if (isErr(uploaded)) return uploaded
 
   const existing = await repo.listByOwner(input.businessId, input.ownerKind, input.ownerId)

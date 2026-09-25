@@ -13,7 +13,11 @@ import {
   assistantFunctionOf,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
-import { compositionFor, withFileSettings } from '@/modules/conversation/flowSource.js'
+import {
+  compositionFor,
+  fileConfigFor,
+  withFileSettings,
+} from '@/modules/conversation/flowSource.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -489,6 +493,30 @@ export function flowNodeExists(business: Business, nodeId: string): Result<void>
         resource: 'conversation_node',
         userMessage: 'Ese paso no forma parte de tu conversacion.',
         logContext: { businessId: business.id, nodeId },
+      }),
+    )
+  }
+  return ok(undefined)
+}
+
+/**
+ * Confirms this business declared `images: true` for this mensaje fijo, before
+ * a file is hung off it.
+ *
+ * Distinto de `serviceExists`/`flowNodeExists`: el id no vive en la base, vive
+ * en el archivo TS del negocio (`fileConfigFor`). Sin archivo, sin ese id, o
+ * con el id declarado pero sin `images: true` — mismo error: ese mensaje no
+ * admite fotos. No alcanza con "existe": un mensaje de puro texto rechaza la
+ * subida acá, no solo la oculta en el panel.
+ */
+export function fixedMessageAcceptsMedia(business: Business, messageId: string): Result<void> {
+  const message = fileConfigFor(business.id)?.fixedMessages[messageId]
+  if (!message?.images) {
+    return err(
+      new NotFoundError({
+        resource: 'fixed_message',
+        userMessage: 'Ese mensaje no admite fotos.',
+        logContext: { businessId: business.id, messageId },
       }),
     )
   }

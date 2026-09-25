@@ -6,9 +6,15 @@ import type { MiddlewareHandler } from 'hono'
 // los horarios y los días especiales. Además todo lo operativo: responder, pausar
 // a Emma, etiquetas, citas.
 //
-// Solo lectura: todo lo que decide CÓMO habla y vende Emma (identidad, mensajes,
-// flujo, conversación, reservas y avisos, formas de pago y adelanto, base de
-// conocimiento). Eso lo configura Vamvu en el repo (src/config/businesses/).
+// Solo lectura: TEXTO y LÓGICA de lo que decide cómo habla y vende Emma
+// (identidad, mensajes, flujo, conversación, reservas y avisos, formas de pago
+// y adelanto, base de conocimiento). Eso lo configura Vamvu en el repo
+// (src/config/businesses/).
+//
+// Los ARCHIVOS son otro eje, y nunca se bloquean: ninguna foto vive en el repo,
+// todas entran por panel+S3, sin excepción — el material de un paso de
+// conversación y la galería de un mensaje fijo (`settings/fixed-messages/…`)
+// se suben acá aunque el texto de ese mismo paso o mensaje esté bloqueado.
 //
 // Vale para TODOS los negocios, tengan archivo o no. El bloqueo vive en el
 // servidor: ocultar el botón en el panel no alcanza, un PATCH armado a mano
@@ -20,8 +26,6 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 // autenticación ya corrió y resolvió el negocio antes de llegar acá.
 const LOCKED_PATHS: ReadonlyArray<RegExp> = [
   /^\/api\/panel\/[^/]+\/settings\/(identity|messages|flow|conversation|booking|payments)\/?$/,
-  // El material que se manda al entrar a un paso es parte del flujo.
-  /^\/api\/panel\/[^/]+\/settings\/conversation\/nodes\/[^/]+\/media(\/.*)?$/,
   /^\/api\/panel\/[^/]+\/knowledge(\/.*)?$/,
 ]
 

@@ -14,8 +14,16 @@ export interface FixedMessage {
    *   {servicio} el nombre del servicio elegido
    */
   text: string
-  /** Una imagen de la carpeta images/ del repo que va después del texto. */
-  image?: string
+  /**
+   * Si este mensaje puede llevar una galería después del texto. Default: no.
+   *
+   * Es un flag de intención, no la lista de fotos: las fotos las sube el
+   * dueño desde el panel (ownerKind 'fixedMessage' en service_media), en el
+   * orden que él elija. Un mensaje que no declara esto ni se consulta contra
+   * S3 al mandarse — no tiene sentido preguntar por fotos de un mensaje que
+   * por diseño es solo texto.
+   */
+  images?: boolean
   /** Cuándo mandarlo, en palabras del negocio. Es lo que Emma lee en el paso. */
   when?: string
 }
@@ -23,10 +31,11 @@ export interface FixedMessage {
 /** Un mensaje fijo disponible en el paso actual, con su id. */
 export type StepFixedMessage = FixedMessage & { id: string }
 
-/** Lo que sale hacia el cliente: el texto ya completo y, si hay, la imagen. */
+/** Lo que sale hacia el cliente: el texto ya completo y, si hay, la galería. */
 export interface FixedOutbound {
   text: string
-  image?: string
+  /** Las keys de S3 de la galería subida por panel, en orden. */
+  images?: string[]
 }
 
 export type RenderResult = { ok: true; text: string } | { ok: false; reason: string }
@@ -61,15 +70,4 @@ export function renderFixedMessage(
   const leftover = text.match(/\{[a-z_]+\}/)
   if (leftover) return { ok: false, reason: `marcador desconocido ${leftover[0]}` }
   return { ok: true, text }
-}
-
-/**
- * Si el nombre de imagen es seguro para leerlo de images/.
- *
- * Solo un nombre de archivo, sin carpetas: el valor viene del archivo del
- * negocio, pero se usa para armar una ruta en disco, y "../" no puede salir de
- * images/ nunca.
- */
-export function isSafeImageName(name: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp)$/.test(name)
 }

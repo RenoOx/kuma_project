@@ -261,6 +261,13 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
     // A business with a repo file cannot edit its flow here: the file would win
     // anyway, and a card that saves and then does nothing lies to the owner.
     managedByFile: fileConfigFor(business.id) !== undefined,
+    // Solo los que declararon `images: true`: un mensaje de puro texto ni
+    // aparece — no tiene sentido ofrecerle al dueño un cajón de fotos vacío
+    // que nunca va a usar. Nunca el `text`: eso es redacción de Vamvu, no le
+    // hace falta al panel para subir una foto.
+    fixedMessages: Object.entries(fileConfigFor(business.id)?.fixedMessages ?? {})
+      .filter(([, message]) => message.images)
+      .map(([id, message]) => ({ id, when: message.when })),
   })
 })
 
@@ -424,6 +431,84 @@ panelSettingsRoutes.patch(
       business.id,
       'node',
       c.req.param('nodeId'),
+      body.data.ids,
+    )
+    if (!reordered.ok) return failure(c, reordered.error)
+    return c.json(await Promise.all(reordered.data.map((row) => toView(business.id, row))))
+  },
+)
+
+// ── Media de un mensaje fijo ─────────────────────────────────────────────────
+//
+// Mismas cuatro operaciones, mismo service. El dueño edita el texto y la
+// lógica de un mensaje fijo NUNCA — eso es del archivo del negocio — pero la
+// foto que lo acompaña sí es suya: no vive en el repo, vive en S3, y se sube
+// desde acá. Por eso NO pasa por panelWriteLock: a diferencia de
+// `settings/conversation`, esta ruta queda abierta a propósito.
+//
+// El id no está en la base — está en `fileConfigFor(businessId).fixedMessages`
+// — así que el chequeo de tenencia es `fixedMessageAcceptsMedia`, no
+// `flowNodeExists`: un negocio sin archivo, o un mensaje que no declaró
+// `images: true`, dan 404 acá.
+
+panelSettingsRoutes.get(
+  '/api/panel/:businessId/settings/fixed-messages/:messageId/media',
+  async (c) => {
+    const business = panelBusiness(c)
+    const rows = await serviceMediaService.listForOwner(
+      business.id,
+      'fixedMessage',
+      c.req.param('messageId'),
+    )
+    return c.json(await Promise.all(rows.map((row) => toView(business.id, row))))
+  },
+)
+
+panelSettingsRoutes.post(
+  '/api/panel/:businessId/settings/fixed-messages/:messageId/media',
+  async (c) => {
+    const business = panelBusiness(c)
+    const messageId = c.req.param('messageId')
+
+    const accepts = settingsService.fixedMessageAcceptsMedia(business, messageId)
+    if (!accepts.ok) return failure(c, accepts.error)
+
+    const file = await parseMultipartFile(c)
+    if (!file.ok) return file.res
+
+    const added = await serviceMediaService.addMedia({
+      businessId: business.id,
+      ownerKind: 'fixedMessage',
+      ownerId: messageId,
+      filename: file.filename,
+      buffer: file.buffer,
+    })
+    if (!added.ok) return failure(c, added.error)
+    return c.json(await toView(business.id, added.data))
+  },
+)
+
+panelSettingsRoutes.delete(
+  '/api/panel/:businessId/settings/fixed-messages/:messageId/media/:mediaId',
+  async (c) => {
+    const business = panelBusiness(c)
+    const removed = await serviceMediaService.removeOne(business.id, c.req.param('mediaId'))
+    if (!removed.ok) return failure(c, removed.error)
+    return c.json({ id: removed.data.id })
+  },
+)
+
+panelSettingsRoutes.patch(
+  '/api/panel/:businessId/settings/fixed-messages/:messageId/media/order',
+  async (c) => {
+    const business = panelBusiness(c)
+    const body = await parseBody(c, reorderSchema)
+    if (!body.ok) return body.res
+
+    const reordered = await serviceMediaService.reorder(
+      business.id,
+      'fixedMessage',
+      c.req.param('messageId'),
       body.data.ids,
     )
     if (!reordered.ok) return failure(c, reordered.error)

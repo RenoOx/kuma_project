@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { downloadMediaMessage, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
@@ -22,7 +20,7 @@ import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
 import * as eventsRepo from '@/modules/events/events.repo.js'
-import { type FixedOutbound, isSafeImageName } from '@/modules/llm/fixedMessage.js'
+import type { FixedOutbound } from '@/modules/llm/fixedMessage.js'
 import * as llmService from '@/modules/llm/llm.service.js'
 import type { ToolAttachment } from '@/modules/llm/toolExecutor.js'
 import * as mediaService from '@/modules/media/media.service.js'
@@ -1379,10 +1377,12 @@ async function processMessage(
 }
 
 /**
- * Manda los mensajes fijos del turno, tal cual, cada uno seguido de su imagen.
+ * Manda los mensajes fijos del turno, tal cual, cada uno seguido de su galería
+ * de imágenes en orden (puede ser una sola, o ninguna).
  *
  * No tira nunca: la respuesta de Emma sale después igual. Una imagen que falta o
- * no se puede leer se registra y se saltea; el texto ya salió.
+ * no se puede leer se registra y se saltea; el resto de la galería y el texto
+ * ya salieron.
  */
 async function sendFixedMessages(params: {
   businessId: string
@@ -1406,31 +1406,21 @@ async function sendFixedMessages(params: {
       log.error({ err, jid }, 'failed to send fixed message')
       continue
     }
-    if (!message.image) continue
-    const image = await readFixedImage(message.image, log)
-    if (!image) continue
-    try {
-      await sendImageToCustomer({ businessId, jid, image })
-    } catch (err) {
-      log.error({ err, jid, image: message.image }, 'failed to send fixed message image')
+    for (const key of message.images ?? []) {
+      const downloaded = await mediaService.downloadMedia(businessId, key)
+      if (!downloaded.ok) {
+        log.warn(
+          { code: downloaded.error.code, key },
+          'could not read fixed message media from storage, reply went out without it',
+        )
+        continue
+      }
+      try {
+        await sendImageToCustomer({ businessId, jid, image: downloaded.data })
+      } catch (err) {
+        log.error({ err, jid, key }, 'failed to send fixed message image')
+      }
     }
-  }
-}
-
-/**
- * Lee una imagen de la carpeta images/ del repo. Solo un nombre de archivo
- * validado: el valor viene del archivo del negocio y arma una ruta en disco.
- */
-async function readFixedImage(name: string, log: HandlerLogger): Promise<Buffer | null> {
-  if (!isSafeImageName(name)) {
-    log.error({ image: name }, 'fixed message image name rejected')
-    return null
-  }
-  try {
-    return await readFile(path.join(process.cwd(), 'images', name))
-  } catch (err) {
-    log.error({ err, image: name }, 'fixed message image not found in images/')
-    return null
   }
 }
 

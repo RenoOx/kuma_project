@@ -1,10 +1,10 @@
 import type { MediaType } from './media.validate.js'
 
 /** What a stored object is, which decides the key layout under the tenant prefix. */
-export type MediaKind = 'service_media' | 'node_media' | 'payment_proof'
+export type MediaKind = 'service_media' | 'node_media' | 'fixed_message_media' | 'payment_proof'
 
-/** Which of the two owners a `service_media` row hangs from. */
-export type MediaOwnerKind = 'service' | 'node'
+/** Which of the three owners a `service_media` row hangs from. */
+export type MediaOwnerKind = 'service' | 'node' | 'fixedMessage'
 
 /**
  * Where an upload should land.
@@ -40,6 +40,18 @@ export type MediaTarget =
       businessId: string
       nodeId: string
       /** Same pre-minted row id as service_media, for the same reason. */
+      mediaId: string
+    }
+  | {
+      /**
+       * Una galería que va después del texto de un mensaje fijo. El "dueño" es
+       * el id del mensaje (declarado en el archivo del negocio, no en la base) —
+       * distinto espacio de ids que servicio y nodo, por eso su propio prefijo.
+       */
+      kind: 'fixed_message_media'
+      businessId: string
+      messageId: string
+      /** Mismo patrón que en los otros dos: minteado antes de subir. */
       mediaId: string
     }
   | {
