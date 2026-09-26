@@ -46,7 +46,12 @@ export function fileConfigFor(
 }
 
 /** Qué campos de los settings puso el archivo, para mostrarlo (business:show, panel). */
-export type FileSettingsField = 'greeting' | 'tone' | 'instructions' | 'collectData'
+export type FileSettingsField =
+  | 'greeting'
+  | 'tone'
+  | 'instructions'
+  | 'collectData'
+  | 'requiresDeposit'
 
 export interface SettingsWithFile {
   settings: BusinessSettings
@@ -56,7 +61,7 @@ export interface SettingsWithFile {
 
 /**
  * Los settings de la base con lo que el archivo del negocio pone encima: saludo,
- * tono, instrucciones generales y datos a pedir.
+ * tono, instrucciones generales, datos a pedir y, si lo apaga, el adelanto.
  *
  * Misma condición que el flujo: solo si el flowType del archivo coincide con el
  * de la base. Un archivo escrito para un instituto no le cambia el saludo a un
@@ -71,18 +76,20 @@ export function withFileSettings(
   const file = configs.get(businessId)
   if (!file || file.flowType !== settings.flowType) return { settings, fromFile: [] }
 
-  const { greeting, tone, instructions, collectData } = file.settings
+  const { greeting, tone, instructions, collectData, requiresDeposit } = file.settings
   const fromFile: FileSettingsField[] = []
   if (greeting !== undefined) fromFile.push('greeting')
   if (tone !== undefined) fromFile.push('tone')
   if (instructions !== undefined) fromFile.push('instructions')
   if (collectData !== undefined) fromFile.push('collectData')
+  if (requiresDeposit !== undefined) fromFile.push('requiresDeposit')
   if (fromFile.length === 0) return { settings, fromFile }
 
   return {
     settings: {
       ...settings,
       ...(collectData !== undefined ? { collectDataFields: collectData } : {}),
+      ...(requiresDeposit !== undefined ? { requiresDeposit } : {}),
       messages: { ...settings.messages, ...(greeting !== undefined ? { greeting } : {}) },
       assistant: {
         ...settings.assistant,

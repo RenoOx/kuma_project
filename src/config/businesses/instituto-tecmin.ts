@@ -19,14 +19,16 @@ import { defineBusinessConfig } from './define.js'
 //
 // Antes de que esto corra tal cual en prod hacen falta dos cambios en el panel
 // de Tecmin, del lado del dueño — no los hace este archivo:
-//   a) Crear las 3 certificaciones (mismos nombres exactos que abajo, precio
-//      fijo): "Certificación - 1 a 2 máquinas" S/295, "Certificación - 3 a 4
-//      máquinas" S/349, "Certificación - 5 máquinas o más" S/499. Sin ellas,
-//      asesoria_perfil no tiene qué ofrecer y send_fixed_message falla.
-//   b) Apagar el adelanto (Servicios → Formas de pago). El flujo nuevo cobra
-//      directo, sin adelanto — hoy Tecmin tiene uno de S/30 por Yape activo.
-// Hasta que pase (a), `compositionFor` va a saltear este archivo (no valida
-// contra la config actual) y Tecmin sigue con el flujo viejo — no rompe nada.
+// Las 3 certificaciones (2026-09-25, ya creadas en el panel de Tecmin):
+// "Certificación - 1 a 2 máquinas" S/295, "Certificación - 3 a 4 máquinas"
+// S/350, "Certificación - 5 máquinas o más" S/500. asesoria_perfil las nombra
+// tal cual — sin ellas, send_fixed_message fallaría.
+//
+// El adelanto de S/30 por Yape sigue prendido en la fila real: "Formas de pago
+// y adelanto" quedó bloqueado en el panel (lo configura Vamvu), así que el
+// dueño no puede apagarlo ahí. `requiresDeposit: false` abajo lo apaga PARA
+// ESTE FLUJO sin tocar esa fila — el mismo mecanismo que ya usan greeting y
+// collectData.
 
 export default defineBusinessConfig({
   businessId: '4aIwSdMZBY12B06MSSovj',
@@ -40,6 +42,11 @@ export default defineBusinessConfig({
 
   // Lo que Emma pide y guarda en collect_data, en este orden.
   collectData: ['nombre completo', 'curso o certificación elegida'],
+
+  // El flujo nuevo cobra directo: sin esto, la fila real de Tecmin (adelanto
+  // de S/30 por Yape) le agregaría al prompt un bloque de "para separar el
+  // cupo" que este flujo no maneja en ningún paso.
+  requiresDeposit: false,
 
   flow: [
     { node: 'idle' },
