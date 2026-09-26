@@ -1098,12 +1098,12 @@ Heredados de los planes ya cerrados:
   paso propio desde cero no existe.
 - **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
   la composición ni forma de preparar un cambio sin que salga en vivo.
-- **Prod está tres migraciones atrás**: `0020` (`owner_kind` en `service_media`),
-  `0019` (`service_media`) y `0017` (`tags`) siguen sin aplicarse ahí. Dev está al
-  día (la 0020 corrió el 2026-09-23). **Mergear `dev` a `main` sin migrar prod
-  primero rompe cada mensaje**: `llm.service` lee el material por nodo
-  (`owner_kind`) en todos los turnos — en dev pasó exactamente eso antes de
-  migrar.
+- **Prod ya está al día** (verificado 2026-09-25, comparando
+  `drizzle.__drizzle_migrations` de las dos bases: 21/21, mismos hashes). Ya no
+  es un bloqueante para el próximo merge — pero **el orden sigue siendo el
+  mismo** para la migración que sigue: primero `db:migrate:prod`, después el
+  deploy. Mergear sin migrar antes rompe cada mensaje (`llm.service` lee el
+  material por nodo en todos los turnos).
 - `npm run backfill:service-ids` no corrió en ninguna de las dos.
 - **Multimedia sin probar contra WhatsApp real.** El envío de PDF, audio y video
   compila y tiene tests de validación, pero ningún archivo salió todavía por
