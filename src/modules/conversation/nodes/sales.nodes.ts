@@ -4,6 +4,7 @@ import {
   defineNode,
   ESCALATE,
   SAVE_DATA,
+  SERVICE_MEDIA,
   to,
 } from './building-blocks.js'
 import type { CoreNodeId } from './core.nodes.js'
@@ -22,6 +23,16 @@ export const SALES_NODES = [
   //
   // Sin salidas fijas: se sale por la ruta que escribe el negocio ("quiere
   // avanzar" → captura). validateFlow exige que exista.
+  //
+  // Bug real en prod (Instituto Tecmin, 2026-09-25): un cliente sin experiencia
+  // preguntó por certificación, Emma lo mandó acá, y ÉL preguntó por los cursos
+  // en cambio ("y los cursos?" → "básico"). Sin salir del paso, quiso el detalle
+  // de un curso — y este nodo no tenía con qué mandarlo: send_fixed_message
+  // rechazó el pedido (no hay mensaje fijo de curso acá) y Emma improvisó una
+  // descripción en texto, sin material ni imagen. `show_services` sigue sin
+  // estar a propósito (mandaría la ficha de TODAS las opciones), pero
+  // send_service_media manda el detalle de UNA — que es justo lo que hacía
+  // falta.
   defineNode({
     id: 'asesoria_perfil',
     label: 'Asesoría por perfil',
@@ -29,7 +40,7 @@ export const SALES_NODES = [
     requires: ['services_configured'],
     // Sin show_services a propósito: mandaría la ficha de TODAS las opciones y
     // este paso existe para ofrecer una sola. La lista ya está en el prompt.
-    tools: [ESCALATE],
+    tools: [SERVICE_MEDIA, ESCALATE],
     node: {
       objective:
         'Con la respuesta del cliente a la pregunta clave, identificar la opción que le corresponde y ofrecérsela.',
@@ -42,6 +53,7 @@ export const SALES_NODES = [
       edgeCases: [
         'Si no sabe el dato exacto, pedile una estimación.',
         'Si pregunta por otra opción que no es para su perfil, explicale en una línea por qué esta es la suya.',
+        'Si pide el detalle de otra opción del catálogo (por ejemplo, un curso en vez de la certificación que le corresponde): usá send_service_media para mandarle su ficha con material. No la describas de memoria ni te niegues.',
       ],
       example: '¡Perfecto! Con eso, esta es la opción que va con tu perfil.',
     },

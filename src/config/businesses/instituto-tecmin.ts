@@ -40,6 +40,13 @@ export default defineBusinessConfig({
   greeting:
     '¡Hola! ¿Cómo estás? Para apoyarte necesito saber si tienes experiencia en maquinaria pesada.',
 
+  // Por ahora, sin precio en el listado (2026-09-26): cuando lista VARIAS
+  // opciones no dice el monto de cada una — solo cuando el cliente pregunta por
+  // UNA en particular, o cuando ya lo trae un mensaje fijo. Revertir borrando
+  // esto: el motor por defecto sí muestra precio en el listado.
+  instructions:
+    'Cuando LISTES varias opciones juntas (cursos o certificaciones), no digas el precio de cada una — solo el nombre. El precio se lo das recién cuando pregunta por UNA en particular, o cuando ya viene en un mensaje fijo.',
+
   // Lo que Emma pide y guarda en collect_data, en este orden.
   collectData: ['nombre completo', 'curso o certificación elegida'],
 
@@ -106,13 +113,18 @@ export default defineBusinessConfig({
         '- 5 o más → Certificación - 5 máquinas o más',
         'Mandá la oferta con send_fixed_message (mensaje "ofertaCertificacion" y esa certificación). No escribas el precio vos: ya va en el mensaje.',
         'Después del mensaje fijo, solo preguntale si quiere avanzar con su certificación.',
-        'A este alumno no le ofrezcas los cursos.',
+        'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
       ].join('\n'),
       fixedMessages: ['ofertaCertificacion'],
       routes: [
         {
           id: 'quiere-certificarse',
           when: 'El alumno quiere avanzar con la certificación que se le ofreció.',
+          to: 'mostrar_beneficios',
+        },
+        {
+          id: 'prefiere-curso',
+          when: 'El alumno prefiere un curso concreto en vez de la certificación y quiere inscribirse.',
           to: 'mostrar_beneficios',
         },
       ],
