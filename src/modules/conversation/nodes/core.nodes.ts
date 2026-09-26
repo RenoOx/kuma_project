@@ -114,7 +114,7 @@ export const CORE_ENTRY_NODES = [
         'Cliente que pide un servicio que no existe: ofrecé los más parecidos.',
         'Varios servicios: uno por uno, no todo junto.',
       ],
-      example: '*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?',
+      example: '*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?',
     },
     // Sin salidas propias: en agenda sale por disponibilidad o reserva (lo agrega
     // la extensión de agenda); en venta, por la ruta que trae el preset.
