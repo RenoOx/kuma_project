@@ -75,7 +75,7 @@ export default defineBusinessConfig({
     {
       node: 'listado_servicios',
       extraInstructions: [
-        'Mostrá los cursos de la categoría Cursos con show_services, cada uno por separado: no los agrupes ni los resumas.',
+        'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes.',
         '',
         PRECIOS_CURSOS,
       ].join('\n'),
