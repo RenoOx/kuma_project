@@ -68,7 +68,7 @@ export default defineBusinessConfig({
       node: 'informing',
       extraInstructions: [
         'El saludo ya le preguntó si tiene experiencia en maquinaria pesada. Tu único trabajo acá es saber la respuesta.',
-        '- Si TIENE experiencia: pasá al paso de certificación. No le ofrezcas cursos.',
+        '- Si TIENE experiencia: pasá al paso de certificación.',
         '- Si NO tiene experiencia: pasá al paso de cursos.',
         '- Si la respuesta no es clara, preguntale de nuevo si tiene experiencia manejando maquinaria pesada.',
       ].join('\n'),
@@ -90,9 +90,10 @@ export default defineBusinessConfig({
       node: 'listado_servicios',
       extraInstructions: [
         'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. Tu texto es solo una intro corta: el precio y el detalle ya van en cada ficha, no los repitas vos.',
+        'La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.',
         'Cuando el alumno elija un curso concreto, ANTES de avanzar mandá el descuento de ESE curso con send_fixed_message: "descuentoBasico" para BÁSICO, "descuentoAvanzado" para AVANZADO, "descuentoMultiple" para OPERACIÓN MÚLTIPLE. No inventes vos el monto: ya va en el mensaje. Recién cuando confirme que quiere seguir, avanzá.',
       ].join('\n'),
-      cta: '¿Cuál te gustaría iniciar?',
+      cta: '¿En qué curso estás interesado?\nA. Básico\nB. Avanzado\nC. Operación Múltiple',
       fixedMessages: ['descuentoBasico', 'descuentoAvanzado', 'descuentoMultiple'],
       routes: [
         {
@@ -109,15 +110,15 @@ export default defineBusinessConfig({
       node: 'asesoria_perfil',
       label: 'Asesoría con experiencia',
       extraInstructions: [
-        'La pregunta clave es "¿Cuántas maquinarias manejas?".',
-        'Con ese número elegí la certificación de su tramo, con el nombre exacto de la lista:',
-        '- 1 o 2 máquinas → Certificación - 1 a 2 máquinas',
-        '- 3 o 4 máquinas → Certificación - 3 a 4 máquinas',
-        '- 5 o más → Certificación - 5 máquinas o más',
+        'La invitación de este paso ya da las 3 opciones con letra. No repreguntes el número de máquinas en texto libre: esperá la letra (o el tramo si lo dice directo) y mapealo así:',
+        '- A o "1 a 2" → Certificación - 1 a 2 máquinas',
+        '- B o "3 a 4" → Certificación - 3 a 4 máquinas',
+        '- C o "5 o más" → Certificación - 5 máquinas o más',
         'Mandá la oferta con send_fixed_message (mensaje "ofertaCertificacion" y esa certificación). No escribas el precio vos: ya va en el mensaje.',
         'Después del mensaje fijo, solo preguntale si quiere avanzar con su certificación.',
         'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
       ].join('\n'),
+      cta: '¿Cuántas máquinas operas?\nA. 1 a 2 máquinas\nB. 3 a 4 máquinas\nC. 5 máquinas o más',
       fixedMessages: ['ofertaCertificacion'],
       routes: [
         {
@@ -187,14 +188,32 @@ export default defineBusinessConfig({
     // Las dos galerías de beneficios se suben desde el panel — el instituto
     // todavía no cargó las fotos; send_fixed_message manda el texto solo hasta
     // que lo haga.
+    // {precio} es la inversión SEMANAL de ese curso (así carga el dueño el
+    // precio de un curso en el panel — no es un monto único por todo el
+    // curso). El cronograma semanal (días, práctico, semanas) es el mismo
+    // para cualquier curso: solo el monto cambia según cuál eligió.
     beneficiosCurso: {
       when: 'Eligió un CURSO y ya le mostraste la ruta de cierre.',
-      text: 'Esto es lo que vas a tener al terminar tu curso: Al culminar te brindaremos 01 certificado físico y un carnet con un código QR para que verifiques que tu certificado esta subido y registrado en el sistema',
+      text: [
+        'En este curso la inversión semanal es S/. {precio} y cada semana incluye:',
+        '- 03 días de clases teóricas (lunes, martes, miércoles).',
+        '- 01 práctico en el taller (jueves).',
+        '- 01 hora de operación en el equipo (viernes).',
+        '- 12 semanas de clases',
+        '🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃',
+      ].join('\n'),
       images: true,
     },
     beneficiosCertificado: {
       when: 'Eligió una CERTIFICACIÓN y ya le mostraste la ruta de cierre.',
-      text: 'Esto es lo que vas a tener con tu certificación: Al culminar te brindaremos los certificados físicos y un carnet con un código QR para que verifiques que tus certificados esta registrado en el sistema',
+      text: [
+        'En tu caso, todos tus certificados te vamos a dejar a solo S/. {precio}:',
+        '📜 01 certificado físico y digital.',
+        '🎞️ 10 clases teóricas en video.',
+        'Recuerda que la inversión incluye:',
+        '📖 01 manual digital de cada equipo.',
+        '🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃',
+      ].join('\n'),
       images: true,
     },
     // El gancho de venta: descuento por curso, montos reales (2026-09-26). Uno
@@ -202,15 +221,15 @@ export default defineBusinessConfig({
     // en el servicio, así que el monto va tal cual acá, igual que el precio.
     descuentoBasico: {
       when: 'Eligió el curso BÁSICO, antes de avanzar.',
-      text: '¿Quisieras aplicar el descuento de S/ 100 en el curso BÁSICO ahora?',
+      text: 'Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 100, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
     },
     descuentoAvanzado: {
       when: 'Eligió el curso AVANZADO, antes de avanzar.',
-      text: '¿Quisieras aplicar el descuento de S/ 300 en el curso AVANZADO ahora?',
+      text: 'Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 300, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
     },
     descuentoMultiple: {
       when: 'Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.',
-      text: '¿Quisieras aplicar el descuento de S/ 800 en el curso OPERACIÓN MÚLTIPLE ahora?',
+      text: 'Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 800, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
     },
   },
 })

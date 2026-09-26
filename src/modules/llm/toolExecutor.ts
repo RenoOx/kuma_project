@@ -243,7 +243,7 @@ function depositRequiredInstruction(
 // is the whole point of the change: a rule asking the model to show part of a
 // catalogue it can see in full is a suggestion, and it was being ignored.
 const SHOW_SERVICES_INSTRUCTION =
-  'Escribí UNA intro corta (una o dos líneas) y nada más. Los servicios de details.services son los únicos que podés nombrar en este turno — no agregues otros aunque los tengas en el catálogo. Los que traen ficha se están enviando solos con su foto, precio y detalle: NO los repitas en tu texto. De los que no traen ficha, poné una línea cada uno con nombre y precio. Cerrá invitando a elegir uno.'
+  'Escribí UNA intro corta (una o dos líneas) y nada más. Los servicios de details.services son los únicos que podés nombrar en este turno — no agregues otros aunque los tengas en el catálogo. Los que traen ficha se están enviando solos con su foto y detalle: NO los repitas en tu texto. De los que no traen ficha, poné una línea cada uno con nombre y precio. Cerrá invitando a elegir uno.'
 
 const NO_SERVICES_IN_CATEGORY_INSTRUCTION =
   'Esa categoría existe pero no tiene servicios activos ahora. Decíselo con naturalidad y ofrecé las otras categorías que sí tienen.'
@@ -330,7 +330,7 @@ async function buildServiceCards(
  * sentence cut at a letter reads like a bug.
  */
 function buildCardCaption(service: Service): string {
-  const head = `*${service.name}* — ${formatServicePrice(service)}`
+  const head = `*${service.name}*}`
   const body = service.description?.trim()
   if (!body) return head
 

@@ -76,10 +76,11 @@ export default defineBusinessConfig({
       node: 'listado_servicios',
       extraInstructions: [
         'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes.',
+        'La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.',
         '',
         PRECIOS_CURSOS,
       ].join('\n'),
-      cta: '¿Cuál te gustaría iniciar?',
+      cta: '¿En qué curso estás interesado?\nA. Básico\nB. Avanzado\nC. Operación Múltiple',
       routes: [
         {
           id: 'ruta-cierre',
@@ -95,15 +96,15 @@ export default defineBusinessConfig({
       node: 'asesoria_perfil',
       label: 'Asesoría con experiencia',
       extraInstructions: [
-        'La pregunta clave es "¿Cuántas maquinarias manejas?".',
-        'Con ese número elegí la certificación de su tramo, con el nombre exacto de la lista:',
-        '- 1 o 2 máquinas → Certificación - 1 a 2 máquinas',
-        '- 3 o 4 máquinas → Certificación - 3 a 4 máquinas',
-        '- 5 o más → Certificación - 5 máquinas o más',
+        'La invitación de este paso ya da las 3 opciones con letra. No repreguntes el número de máquinas en texto libre: esperá la letra (o el tramo si lo dice directo) y mapealo así:',
+        '- A o "1 a 2" → Certificación - 1 a 2 máquinas',
+        '- B o "3 a 4" → Certificación - 3 a 4 máquinas',
+        '- C o "5 o más" → Certificación - 5 máquinas o más',
         'Mandá la oferta con send_fixed_message (mensaje "ofertaCertificacion" y esa certificación). No escribas el precio vos: ya va en el mensaje.',
         'Después del mensaje fijo, solo preguntale si quiere avanzar con su certificación.',
         'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
       ].join('\n'),
+      cta: '¿Cuántas máquinas operas?\nA. 1 a 2 máquinas\nB. 3 a 4 máquinas\nC. 5 máquinas o más',
       fixedMessages: ['ofertaCertificacion'],
       routes: [
         {
