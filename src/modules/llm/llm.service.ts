@@ -129,6 +129,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       }),
     )
   }
+  // Extraído en un const propio: dentro de forState (una función anidada,
+  // más abajo) TypeScript no arrastra el angostamiento de este chequeo.
+  const customerId = conversation.customerId
 
   // 3b. Conversation state. The flow belongs to the code, not to the model:
   // this service reads the state to decide what the model is allowed to reach
@@ -171,35 +174,11 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // produces a trigger. In every other state it matches nothing and writes
   // nothing.
   let effectiveState = await applyTriggerOrKeep(currentState, 'customer_message')
-  const stateConfig = getStateConfig(flow, effectiveState)
-
-  // A tool the state does not list is not refused — it is never offered, so the
-  // model never considers it. Different layer from the executor's gates, which
-  // judge the calls that do come through: the deposit gate stays the authority
-  // over book_appointment.
-  const allowedToolNames = new Set(stateConfig.tools)
-  const stateTools = kumaTools.filter(
-    (t) => t.type === 'function' && allowedToolNames.has(t.function.name),
-  )
-  // Every state defines at least one tool today, so this is never empty. The
-  // guard is here because OpenAI rejects `tools: []` with a 400 — a state added
-  // later without tools should degrade to a plain completion, not an error.
-  const toolsParam = stateTools.length > 0 ? stateTools : undefined
 
   // Los mensajes fijos de este paso: el id lo da el paso compilado, el texto el
-  // archivo del negocio. Un id sin texto se descarta en vez de ofrecer una
-  // herramienta que después no tiene qué mandar.
+  // archivo del negocio. No depende del estado — se resuelve una vez y se
+  // reusa cada vez que se recalcula el resto para un estado nuevo.
   const fileMessages = fileConfigFor(params.businessId)?.fixedMessages ?? {}
-  const stepFixedMessages: StepFixedMessage[] = (stateConfig.fixedMessages ?? []).flatMap((id) => {
-    const message = fileMessages[id]
-    return message ? [{ id, ...message }] : []
-  })
-  const toolChoiceParam = stateTools.length > 0 ? ('auto' as const) : undefined
-
-  log.debug(
-    { flowType, stateIn: currentState, state: effectiveState, allowedTools: stateConfig.tools },
-    'conversation state resolved for this reply',
-  )
 
   // 4. Knowledge base — selective, not the whole table. The customer message
   // routes to a category; `always` entries and matching `trigger_based` entries
@@ -219,11 +198,11 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     settings?.niche ?? 'general',
   )
   if (!kbResult.ok) return kbResult
+  // Extraído en un const propio: dentro de forState TypeScript no arrastra
+  // el angostamiento de `if (!kbResult.ok)`.
+  const kbEntries = kbResult.data.entries
   log.debug(
-    {
-      matchedCategories: kbResult.data.matchedCategories,
-      kbEntryCount: kbResult.data.entries.length,
-    },
+    { matchedCategories: kbResult.data.matchedCategories, kbEntryCount: kbEntries.length },
     'knowledge base entries selected for prompt',
   )
 
@@ -235,18 +214,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     HISTORY_LIMIT,
   )
   if (!historyResult.ok) return historyResult
-
-  const toolContext: ToolContext = {
-    businessId: params.businessId,
-    conversationId: params.conversationId,
-    customerId: conversation.customerId,
-    // From the flow compiled once at the top of this turn, so the executor
-    // judges advance_flow against the same routes the prompt just showed the
-    // model. Resolving them again here could disagree if the owner saved
-    // mid-turn.
-    branches: stateConfig.branches,
-    fixedMessages: stepFixedMessages,
-  }
+  // Mismo motivo que kbEntries: para que forState lo use sin depender del
+  // angostamiento de este chequeo.
+  const history = historyResult.data
 
   // 6. Anything this customer still has open. The proposal text is already in
   // the history above, but a past assistant turn is something the model
@@ -256,7 +226,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // Non-fatal: failing to read it must not cost the customer their reply.
   const pendingResult = await appointmentService.getPendingContextForCustomer(
     params.businessId,
-    conversation.customerId,
+    customerId,
     business.timezone,
   )
   if (!pendingResult.ok) {
@@ -300,35 +270,97 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // cost the customer an answer.
   let customerFacts: Record<string, string> = {}
   if ((settings?.collectDataFields.length ?? 0) > 0) {
-    const found = await customerService.getById(params.businessId, conversation.customerId)
+    const found = await customerService.getById(params.businessId, customerId)
     if (found.ok) customerFacts = customerService.collectedDataOf(found.data)
     else
       log.warn({ code: found.error.code }, 'could not read customer facts; replying without them')
   }
 
-  const basePrompt = buildSystemPrompt(
-    business,
-    kbResult.data.entries,
-    settings,
-    historyResult.data,
-    pending,
-    servicesWithMedia,
-    customerFacts,
-    stateConfig.cta,
+  // Todo lo que depende del ESTADO — qué tools se ofrecen, qué mensajes fijos
+  // puede mandar, el contexto que ve el executor, y el prompt del sistema
+  // completo — sale de acá. Se llama al principio del turno y de nuevo cada
+  // vez que el estado cambia A MITAD de turno (advance_flow dentro del loop
+  // de tools): si no, el modelo sigue el resto de la vuelta con las tools y
+  // el texto del paso VIEJO, aunque la conversación ya haya avanzado — así
+  // "no tengo experiencia" contestaba de memoria en vez de con
+  // show_services, porque esa tool ni siquiera estaba ofrecida todavía.
+  //
+  // El prompt del sistema nunca se persiste (se arma de cero en cada turno),
+  // así que rehacerlo acá no ensucia nada. El caché de OpenAI es por
+  // prefijo: la capa 1 (`business`/KB, la cara) es igual sea cual sea el
+  // nodo, así que esto solo invalida el sufijo (el bloque del nodo).
+  function forState(state: string) {
+    const config = getStateConfig(flow, state)
+    // A tool the state does not list is not refused — it is never offered, so
+    // the model never considers it. Different layer from the executor's
+    // gates, which judge the calls that do come through: the deposit gate
+    // stays the authority over book_appointment.
+    const allowedToolNames = new Set(config.tools)
+    const stateTools = kumaTools.filter(
+      (t) => t.type === 'function' && allowedToolNames.has(t.function.name),
+    )
+    // Every state defines at least one tool today, so this is never empty. The
+    // guard is here because OpenAI rejects `tools: []` with a 400 — a state
+    // added later without tools should degrade to a plain completion, not an
+    // error.
+    const toolsParam = stateTools.length > 0 ? stateTools : undefined
+    const toolChoiceParam = stateTools.length > 0 ? ('auto' as const) : undefined
+    const stepFixedMessages: StepFixedMessage[] = (config.fixedMessages ?? []).flatMap((id) => {
+      const message = fileMessages[id]
+      return message ? [{ id, ...message }] : []
+    })
+    const toolContext: ToolContext = {
+      businessId: params.businessId,
+      conversationId: params.conversationId,
+      customerId,
+      // Del flujo compilado una vez al principio del turno, así el executor
+      // juzga advance_flow contra las mismas rutas que el prompt le mostró al
+      // modelo. Resolverlas de nuevo acá podría discrepar si el dueño guardó
+      // a mitad de turno.
+      branches: config.branches,
+      fixedMessages: stepFixedMessages,
+    }
+    const basePrompt = buildSystemPrompt(
+      business,
+      kbEntries,
+      settings,
+      history,
+      pending,
+      servicesWithMedia,
+      customerFacts,
+      config.cta,
+    )
+    // The node goes last, after the variable tail — the static body has to
+    // stay first for the prompt cache, and the final position is where an
+    // instruction weighs most. A node with no objective ('idle') renders to
+    // nothing at all, not even the header.
+    const nodeBlock = renderNodeBlock(
+      config.node,
+      config.branches,
+      stepFixedMessages.map((m) => ({ id: m.id, when: m.when ?? '' })),
+    )
+    const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
+    return {
+      stateConfig: config,
+      toolsParam,
+      toolChoiceParam,
+      stepFixedMessages,
+      toolContext,
+      systemPrompt,
+    }
+  }
+
+  let { stateConfig, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
+    forState(effectiveState)
+
+  log.debug(
+    { flowType, stateIn: currentState, state: effectiveState, allowedTools: stateConfig.tools },
+    'conversation state resolved for this reply',
   )
-  // The node goes last, after the variable tail — the static body has to stay
-  // first for the prompt cache, and the final position is where an instruction
-  // weighs most. A node with no objective ('idle') renders to nothing at all,
-  // not even the header.
-  const nodeBlock = renderNodeBlock(
-    stateConfig.node,
-    stateConfig.branches,
-    stepFixedMessages.map((m) => ({ id: m.id, when: m.when ?? '' })),
-  )
-  const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
+
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
-    ...convertHistoryToChatMessages(historyResult.data),
+    ...convertHistoryToChatMessages(history),
   ]
 
   let totalTokensInput = 0
@@ -539,11 +571,19 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         // The evidence rides along with the trigger that produced it: the
         // executor is the only layer that can prove a target state's entry
         // guard, and it has already gone by the time this state is persisted.
+        const stateBeforeThisCall = effectiveState
         effectiveState = await applyTriggerOrKeep(
           effectiveState,
           toolResult.trigger,
           toolResult.evidence,
         )
+        if (effectiveState !== stateBeforeThisCall) {
+          // El resto de esta vuelta tiene que ver el paso NUEVO — ver el
+          // comentario de forState más arriba.
+          ;({ stateConfig, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
+            forState(effectiveState))
+          chatMessages[0] = { role: 'system', content: systemPrompt }
+        }
       }
 
       if (call.function.name === 'escalate_to_human' && !toolResult.error) {
