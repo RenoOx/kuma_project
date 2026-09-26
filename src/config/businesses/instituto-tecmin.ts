@@ -88,9 +88,12 @@ export default defineBusinessConfig({
 
     {
       node: 'listado_servicios',
-      extraInstructions:
+      extraInstructions: [
         'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. Tu texto es solo una intro corta: el precio y el detalle ya van en cada ficha, no los repitas vos.',
+        'Cuando el alumno elija un curso concreto, ANTES de avanzar mandá el descuento de ESE curso con send_fixed_message: "descuentoBasico" para BÁSICO, "descuentoAvanzado" para AVANZADO, "descuentoMultiple" para OPERACIÓN MÚLTIPLE. No inventes vos el monto: ya va en el mensaje. Recién cuando confirme que quiere seguir, avanzá.',
+      ].join('\n'),
       cta: '¿Cuál te gustaría iniciar?',
+      fixedMessages: ['descuentoBasico', 'descuentoAvanzado', 'descuentoMultiple'],
       routes: [
         {
           id: 'ruta-cierre',
@@ -153,8 +156,8 @@ export default defineBusinessConfig({
       node: 'collect_data',
       extraInstructions: [
         'Según lo que eligió:',
-        '- Si eligió una CERTIFICACIÓN, dale los requisitos tal cual: 1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos. 2. Te enviaré los certificados para que verifiques que tus datos son correctos. 3. Realizas el pago por Yape, Plin, transferencia bancaria o depósito.',
-        '- Si eligió un CURSO: pedile que te mande la captura del pago del curso, con el precio que ya le diste.',
+        '- Si eligió una CERTIFICACIÓN, dale los requisitos tal cual: 1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos. 2. Te enviaré los certificados para que verifiques que tus datos son correctos. 3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.',
+        '- Si eligió un CURSO: pedile que te mande la captura del pago del curso por Yape al 986547823 (Alexis Instituto Tecmin), con el precio que ya le diste.',
         'Guardá el curso o la certificación elegida con su nombre exacto de la lista.',
       ].join('\n'),
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
@@ -186,13 +189,28 @@ export default defineBusinessConfig({
     // que lo haga.
     beneficiosCurso: {
       when: 'Eligió un CURSO y ya le mostraste la ruta de cierre.',
-      text: 'Esto es lo que vas a tener al terminar tu curso:',
+      text: 'Esto es lo que vas a tener al terminar tu curso: Al culminar te brindaremos 01 certificado físico y un carnet con un código QR para que verifiques que tu certificado esta subido y registrado en el sistema',
       images: true,
     },
     beneficiosCertificado: {
       when: 'Eligió una CERTIFICACIÓN y ya le mostraste la ruta de cierre.',
-      text: 'Esto es lo que vas a tener con tu certificación:',
+      text: 'Esto es lo que vas a tener con tu certificación: Al culminar te brindaremos los certificados físicos y un carnet con un código QR para que verifiques que tus certificados esta registrado en el sistema',
       images: true,
+    },
+    // El gancho de venta: descuento por curso, montos reales (2026-09-26). Uno
+    // por curso porque cada uno tiene el suyo — no hay un campo de "descuento"
+    // en el servicio, así que el monto va tal cual acá, igual que el precio.
+    descuentoBasico: {
+      when: 'Eligió el curso BÁSICO, antes de avanzar.',
+      text: '¿Quisieras aplicar el descuento de S/ 100 en el curso BÁSICO ahora?',
+    },
+    descuentoAvanzado: {
+      when: 'Eligió el curso AVANZADO, antes de avanzar.',
+      text: '¿Quisieras aplicar el descuento de S/ 300 en el curso AVANZADO ahora?',
+    },
+    descuentoMultiple: {
+      when: 'Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.',
+      text: '¿Quisieras aplicar el descuento de S/ 800 en el curso OPERACIÓN MÚLTIPLE ahora?',
     },
   },
 })
