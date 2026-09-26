@@ -95,13 +95,18 @@ export default defineBusinessConfig({
         '- 5 o más → Certificación - 5 máquinas o más',
         'Mandá la oferta con send_fixed_message (mensaje "ofertaCertificacion" y esa certificación). No escribas el precio vos: ya va en el mensaje.',
         'Después del mensaje fijo, solo preguntale si quiere avanzar con su certificación.',
-        'A este alumno no le ofrezcas los cursos.',
+        'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
       ].join('\n'),
       fixedMessages: ['ofertaCertificacion'],
       routes: [
         {
           id: 'quiere-certificarse',
           when: 'El alumno quiere avanzar con la certificación que se le ofreció.',
+          to: 'mostrar_beneficios',
+        },
+        {
+          id: 'prefiere-curso',
+          when: 'El alumno prefiere un curso concreto en vez de la certificación y quiere inscribirse.',
           to: 'mostrar_beneficios',
         },
       ],
