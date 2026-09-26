@@ -89,7 +89,7 @@ export default defineBusinessConfig({
     {
       node: 'listado_servicios',
       extraInstructions:
-        'Mostrá los cursos de la categoría Cursos con show_services, cada uno por separado: no los agrupes ni los resumas. Cada curso tiene un precio único de lista — decilo tal cual, no hay matrícula ni mensualidad aparte.',
+        'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. Tu texto es solo una intro corta: el precio y el detalle ya van en cada ficha, no los repitas vos.',
       cta: '¿Cuál te gustaría iniciar?',
       routes: [
         {
