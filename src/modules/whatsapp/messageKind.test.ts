@@ -32,6 +32,19 @@ describe('quotedSummaryOf', () => {
     )
   })
 
+  it('takes the caption of a quoted PDF or video the same way (same send path)', () => {
+    expect(
+      quotedSummaryOf(
+        replyTo({ documentMessage: { caption: '*Ficha técnica* — S/ 250\n· Detalle.' } }),
+      ),
+    ).toBe('*Ficha técnica* — S/ 250')
+    expect(
+      quotedSummaryOf(
+        replyTo({ videoMessage: { caption: '*Demo del equipo* — S/ 300\n· Detalle.' } }),
+      ),
+    ).toBe('*Demo del equipo* — S/ 300')
+  })
+
   it('reads a quoted plain text message', () => {
     expect(quotedSummaryOf(replyTo({ conversation: '¿Cuál te gustaría iniciar?' }))).toBe(
       '¿Cuál te gustaría iniciar?',

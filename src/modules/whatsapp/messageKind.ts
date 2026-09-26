@@ -150,7 +150,14 @@ export function quotedSummaryOf(msg: WAMessage): string | null {
   const quoted = extended?.contextInfo?.quotedMessage
   if (!quoted) return null
 
-  const caption = asText((quoted.imageMessage as { caption?: unknown } | undefined)?.caption)
+  // Imagen, PDF o video de un servicio se mandan los tres con el mismo pie de
+  // foto (`sendMediaToCustomer` en outbound.ts pasa el mismo `caption` a los
+  // tres) — así que los tres tienen que mirarse acá, no solo la imagen. Audio
+  // se salta a propósito: WhatsApp no le pone pie de foto, no hay nada que leer.
+  const caption =
+    asText((quoted.imageMessage as { caption?: unknown } | undefined)?.caption) ??
+    asText((quoted.documentMessage as { caption?: unknown } | undefined)?.caption) ??
+    asText((quoted.videoMessage as { caption?: unknown } | undefined)?.caption)
   const text =
     caption ??
     asText(quoted.conversation) ??
