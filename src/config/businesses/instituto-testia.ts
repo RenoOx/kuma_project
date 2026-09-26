@@ -31,6 +31,13 @@ export default defineBusinessConfig({
   greeting:
     '¡Hola! ¿Cómo estás? Para apoyarte necesito saber si tienes experiencia en maquinaria pesada.',
 
+  // Por ahora, sin precio en el listado (2026-09-26): cuando lista VARIAS
+  // opciones no dice el monto de cada una — solo cuando el cliente pregunta por
+  // UNA en particular, o cuando ya lo trae un mensaje fijo. Revertir borrando
+  // esto: el motor por defecto sí muestra precio en el listado.
+  instructions:
+    'Cuando LISTES varias opciones juntas (cursos o certificaciones), no digas el precio de cada una — solo el nombre. El precio se lo das recién cuando pregunta por UNA en particular, o cuando ya viene en un mensaje fijo.',
+
   // Lo que Emma pide y guarda en collect_data, en este orden.
   collectData: ['nombre completo', 'curso o certificación elegida'],
 
