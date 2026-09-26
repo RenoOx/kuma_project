@@ -53,6 +53,14 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
   instructions?: string
   /** Los datos que Emma pide en la captura, en orden. */
   collectData?: string[]
+  /**
+   * Apaga el adelanto para ESTE flujo, sin tocar la fila real de la base.
+   * Existe porque "Formas de pago y adelanto" está bloqueado en el panel
+   * (lo configura Vamvu) — así que el único lugar donde se puede decidir
+   * "este flujo cobra directo" es acá, no en un PATCH que el servidor rechaza.
+   * Solo apaga (`false`); no hay forma de prenderlo desde el archivo.
+   */
+  requiresDeposit?: false
   /** Mensajes que el código manda tal cual; la IA solo decide cuándo. */
   fixedMessages?: Record<M, FixedMessage>
   /** The conversation, in order. */
@@ -65,6 +73,7 @@ export interface BusinessSettingsOverlay {
   tone?: AssistantTone
   instructions?: string
   collectData?: string[]
+  requiresDeposit?: false
 }
 
 export interface BusinessConfig {
@@ -117,6 +126,7 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
       ...(input.tone !== undefined ? { tone: input.tone } : {}),
       ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
       ...(input.collectData !== undefined ? { collectData: input.collectData } : {}),
+      ...(input.requiresDeposit !== undefined ? { requiresDeposit: input.requiresDeposit } : {}),
     },
     fixedMessages: { ...(input.fixedMessages ?? {}) } as Record<string, FixedMessage>,
   }

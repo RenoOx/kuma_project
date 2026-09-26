@@ -921,10 +921,15 @@ Si falla alguna, el archivo **se salta**: corre lo guardado o el preset y queda
 un `logger.error` en cada turno. Un archivo roto no tumba el servidor ni a otros
 negocios. `business:show` dice cuál corre y por qué.
 
-Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions` y
-`collectData`** por encima de `messages.greeting`, `assistant.tone`,
-`assistant.customInstructions` y `collectDataFields`, y declarar los **mensajes
-fijos**. Lo aplica `flowSource.withFileSettings`, con la misma condición de
+Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions`,
+`collectData` y `requiresDeposit: false`** por encima de `messages.greeting`,
+`assistant.tone`, `assistant.customInstructions`, `collectDataFields` y
+`requiresDeposit`, y declarar los **mensajes fijos**. `requiresDeposit` solo
+apaga, nunca prende: existe para el caso real de Instituto Tecmin, cuyo
+adelanto de S/30 sigue prendido en la base porque "Formas de pago y adelanto"
+está bloqueado en el panel — el archivo es el único lugar donde Vamvu puede
+decidir que ESTE flujo cobra directo sin tocar esa fila. Lo aplica
+`flowSource.withFileSettings`, con la misma condición de
 `flowType`, en dos lectores: `businessService.getSettings` (todo lo que corre en
 vivo lee por ahí) y `readSettings` del panel (así el panel muestra lo que corre).
 Nunca se escribe en la base: se aplica en cada lectura. `business:show` lista qué
