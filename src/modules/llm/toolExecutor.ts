@@ -365,7 +365,7 @@ const NO_SERVICE_MEDIA_INSTRUCTION =
 // it still read if no file exists?" — with the examples kept only as
 // illustration of a rule that no longer depends on them.
 const SERVICE_MEDIA_SENT_INSTRUCTION =
-  'El material sale solo, como mensajes aparte de WhatsApp. REGLA: tu respuesta tiene que poder leerse completa como si ningún archivo existiera. Antes de enviarla, releéla tapando el archivo: si alguna frase queda coja, sobra o promete algo que no está en el texto, reescribila. Eso descarta cualquier mención al archivo, en cualquier persona y cualquier tiempo verbal — mandar, haber mandado, enviar, adjuntar, compartir, que le llegue, que lo mire, que ahí tiene más detalles. El cliente lo ve llegar solo; contárselo suena a error. ❌ "He enviado más información" ❌ "Recibiste el material" ❌ "Te adjunto la info". ✅ escribí sobre el servicio y nada más.'
+  'El material sale solo, como mensajes aparte de WhatsApp, y ya lleva el detalle completo (precio y descripción) en el pie de foto. Tu texto es SOLO una intro corta — una o dos líneas — que invite a seguir; no repitas ahí lo que ya va en la ficha. REGLA: tu respuesta tiene que poder leerse completa como si ningún archivo existiera. Antes de enviarla, releéla tapando el archivo: si alguna frase queda coja, sobra o promete algo que no está en el texto, reescribila. Eso descarta cualquier mención al archivo, en cualquier persona y cualquier tiempo verbal — mandar, haber mandado, enviar, adjuntar, compartir, que le llegue, que lo mire, que ahí tiene más detalles. El cliente lo ve llegar solo; contárselo suena a error. ❌ "He enviado más información" ❌ "Recibiste el material" ❌ "Te adjunto la info" ❌ repetir la descripción completa. ✅ una intro corta y nada más.'
 
 // Says it out loud, and that is the change: the old version suggested referring
 // to the file ("referite a lo que ya tiene más arriba"), the model skipped it,
@@ -864,11 +864,13 @@ export async function executeTool(
         result: JSON.stringify({
           status: 'media_sent',
           service: service.name,
-          // The business's own text, in full. Without this the model had only
-          // the abbreviated catalogue index to work from, so it filled the gap
-          // instead of asking — which is how "S/ 100" became "es gratuito".
+          // Precio sí, siempre — para que nunca lo invente si lo necesita en su
+          // intro. La descripción completa NO va acá: la ficha que se manda sola
+          // (abajo) ya la lleva en el pie de foto. Dársela en texto plano fue lo
+          // que producía el mismo párrafo dos veces — una del modelo, otra del
+          // pie de foto — porque "no la repitas" es más fácil de seguir cuando
+          // no está ahí para copiar.
           precio: formatServicePrice(service),
-          descripcion: service.description ?? null,
           sent: selected.length,
           instruction: SERVICE_MEDIA_SENT_INSTRUCTION,
         }),
@@ -1017,12 +1019,18 @@ export async function executeTool(
         result: JSON.stringify({
           status: 'listed',
           ...(category ? { category } : {}),
-          services: selected.map((s) => ({
-            nombre: s.name,
-            precio: formatServicePrice(s),
-            descripcion: s.description ?? null,
-            ficha: cards.some((c) => c.serviceId === s.id),
-          })),
+          services: selected.map((s) => {
+            const ficha = cards.some((c) => c.serviceId === s.id)
+            return {
+              nombre: s.name,
+              precio: formatServicePrice(s),
+              // Solo para los que NO traen ficha: los que sí ya llevan la
+              // descripción en el pie de foto, y dársela también en texto
+              // plano es lo que hacía que el modelo la escribiera dos veces.
+              ...(ficha ? {} : { descripcion: s.description ?? null }),
+              ficha,
+            }
+          }),
           instruction: SHOW_SERVICES_INSTRUCTION,
         }),
         ...(cards.length > 0
