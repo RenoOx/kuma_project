@@ -1,22 +1,14 @@
 import { useState } from 'react'
-import type { Niche, PanelSettings } from '../../api/types.js'
+import type { PanelSettings } from '../../api/types.js'
 import { useSectionSave } from '../../hooks/useSettings.js'
-import { NICHES } from '../../lib/constants.js'
 import { Input } from '../ui/input.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
 import { Field, SettingsCard } from './SettingsCard.js'
 
-// The five niches the backend actually accepts (nicheSchema in
-// business.settings.ts). Expanding this set is a schema change with live data
-// behind it — an existing business is stored as 'barberia' — so it is not done
-// from here.
-const NICHE_LABELS: Record<Niche, string> = {
-  dental: 'Clínica dental',
-  barberia: 'Barbería',
-  estetica: 'Centro estético / Spa',
-  salud: 'Salud y bienestar',
-  general: 'Otro',
-}
+// El tipo de negocio (nicho) ya no se edita acá: lo define Vamvu al crear el
+// negocio. Sigue vivo en settings y decide la voz, los ejemplos del prompt, los
+// límites clínicos de dental y salud y si el panel dice paciente o cliente. Este
+// formulario no lo manda, y el merge deja intacto lo guardado (patchable).
 
 // Peru is the only market Emma serves today, but the field is a select rather
 // than a fixed value so a business on a different offset is a config change
@@ -31,15 +23,13 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
   const [address, setAddress] = useState(data.address ?? '')
   const [googleMapsUrl, setGoogleMapsUrl] = useState(data.googleMapsUrl ?? '')
   const [timezone, setTimezone] = useState(data.timezone)
-  const [niche, setNiche] = useState<Niche>(data.settings?.niche ?? 'general')
 
   const dirty =
     name !== data.name ||
     ownerName !== (data.ownerName ?? '') ||
     address !== (data.address ?? '') ||
     googleMapsUrl !== (data.googleMapsUrl ?? '') ||
-    timezone !== data.timezone ||
-    niche !== (data.settings?.niche ?? 'general')
+    timezone !== data.timezone
 
   const onSave = (): void => {
     save({
@@ -50,7 +40,6 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
         address,
         googleMapsUrl,
         timezone,
-        niche,
       },
     })
   }
@@ -58,7 +47,7 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
   return (
     <SettingsCard
       title="Datos del negocio"
-      description="Cómo se presenta Emma y qué vocabulario usa al escribirle a tus clientes."
+      description="Cómo se llama tu negocio, dónde está y en qué zona horaria atiende."
       onSave={onSave}
       saving={saving}
       saved={saved}
@@ -81,25 +70,6 @@ export function GeneralSettings({ data }: { data: PanelSettings }): React.JSX.El
           onChange={(e) => setOwnerName(e.target.value)}
           maxLength={120}
         />
-      </Field>
-
-      <Field
-        label="Tipo de negocio"
-        hint="Define si Emma dice paciente o cliente."
-        htmlFor="cfg-niche"
-      >
-        <Select value={niche} onValueChange={(v) => setNiche(v as Niche)}>
-          <SelectTrigger id="cfg-niche">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {NICHES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {NICHE_LABELS[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </Field>
 
       <Field label="Zona horaria" htmlFor="cfg-tz">

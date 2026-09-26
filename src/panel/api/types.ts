@@ -605,6 +605,17 @@ export interface ConversationNodeOverride {
   extraInstructions?: string
   /** At most four: past a handful Emma stops choosing and starts guessing. */
   branches?: ConversationBranch[]
+  /** La invitación de cierre de este paso, tal cual. Hasta 120 caracteres. */
+  cta?: string
+  /** Qué hacer si el cliente manda una foto en este paso. */
+  onImage?: ConversationImageHandling
+}
+
+/** Espejo de ImageHandling (conversation/nodes/types.ts). */
+export interface ConversationImageHandling {
+  forward: boolean
+  pause: boolean
+  reply?: string
 }
 
 export interface ConversationFlow {
@@ -612,8 +623,72 @@ export interface ConversationFlow {
   overrides: Record<string, ConversationNodeOverride>
 }
 
+/** Un mensaje fijo que admite fotos, subidas por panel. */
+export interface ConversationFixedMessage {
+  id: string
+  /** Cuándo lo manda Emma, en palabras del negocio. Nunca el texto: eso es de Vamvu. */
+  when?: string
+}
+
 export interface ConversationCatalog {
   nodes: ConversationNodeOption[]
-  /** The flow running right now: the owner's composition, or the derived preset. */
+  /** The flow running right now: a repo file, the owner's composition, or the derived preset. */
   current: ConversationFlow
+  /** True when Vamvu manages this flow from a repo file: shown, never editable here. */
+  managedByFile: boolean
+  /** Solo los mensajes fijos que declararon `images: true` — los de puro texto no aparecen. */
+  fixedMessages: ConversationFixedMessage[]
+}
+
+// ── Simulador ────────────────────────────────────────────────────────────────
+//
+// Espejo de lo que sirve simulator.routes.ts. El simulador solo existe si el
+// servidor corre con SIMULATOR_ENABLED=true (nunca en prod).
+
+export interface SimulatorStatus {
+  enabled: boolean
+}
+
+export interface SimulatorToolCall {
+  name: string
+  args: unknown
+  /** Lo que la tool le devolvió a Emma, tal cual. */
+  result: string
+  error?: string
+}
+
+export interface SimulatorAttachment {
+  type: 'image' | 'pdf' | 'audio' | 'video'
+  filename: string
+  caption: string
+  /** Firmado por una hora; null si el almacenamiento no está configurado. */
+  url: string | null
+}
+
+/** Una imagen de una galería, subida por panel. */
+export interface SimulatorFixedImage {
+  /** Firmado por una hora; null si el almacenamiento no está configurado. */
+  url: string | null
+}
+
+/** Un mensaje fijo del negocio, tal como lo recibe el cliente. */
+export interface SimulatorFixedMessage {
+  text: string
+  /** La galería completa, en orden — puede ser vacía. */
+  images: SimulatorFixedImage[]
+}
+
+/** Un turno: lo que respondió Emma y todo lo que pasó para llegar ahí. */
+export interface SimulatorTurn {
+  /** Salen antes de la respuesta de Emma, tal cual. */
+  fixedMessages: SimulatorFixedMessage[]
+  reply: string
+  stateBefore: string
+  stateAfter: string
+  tools: SimulatorToolCall[]
+  /** Lo que en WhatsApp se habría enviado después del texto. Acá solo se muestra. */
+  attachments: SimulatorAttachment[]
+  escalated: boolean
+  maxIterationsHit: boolean
+  tokens: { input: number; output: number }
 }

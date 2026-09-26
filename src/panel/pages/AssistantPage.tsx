@@ -1,5 +1,6 @@
 import { TriangleAlert } from 'lucide-react'
 import { ConversationSettings } from '../components/assistant/ConversationSettings.js'
+import { FixedMessageMedia } from '../components/assistant/FixedMessageMedia.js'
 import { FlowSettings } from '../components/assistant/FlowSettings.js'
 import { IdentitySettings } from '../components/assistant/IdentitySettings.js'
 import { MessagesSettings } from '../components/assistant/MessagesSettings.js'
@@ -47,6 +48,7 @@ export function AssistantPage(): React.JSX.Element {
                 flow that is actually running, and a fallback shape would let
                 the owner edit a composition the server never served. */}
             {catalog.data && <ConversationSettings catalog={catalog.data} />}
+            {catalog.data && <FixedMessageMedia messages={catalog.data.fixedMessages} />}
           </>
         ) : (
           <Notice

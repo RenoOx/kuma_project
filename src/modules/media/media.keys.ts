@@ -80,6 +80,26 @@ export function buildNodeMediaKey(
   return ok(`${businessId}/nodes/${nodeId}/${mediaId}.${ext}`)
 }
 
+/**
+ * `{businessId}/fixed-messages/{messageId}/{mediaId}.{ext}`
+ *
+ * Prefijo propio, no el de `nodes/`: un id de mensaje fijo (declarado en el
+ * archivo del negocio) y un id de nodo son espacios de ids distintos y podrían
+ * coincidir por casualidad. "Borrar todo lo de este mensaje" tiene que ser un
+ * prefijo que nunca alcance la carpeta de un nodo.
+ */
+export function buildFixedMessageMediaKey(
+  businessId: string,
+  messageId: string,
+  mediaId: string,
+  ext: string,
+): Result<string> {
+  if (!isSafeId(businessId)) return err(rejectId('businessId', businessId))
+  if (!isSafeId(messageId)) return err(rejectId('messageId', messageId))
+  if (!isSafeId(mediaId)) return err(rejectId('mediaId', mediaId))
+  return ok(`${businessId}/fixed-messages/${messageId}/${mediaId}.${ext}`)
+}
+
 /** `{businessId}/payments/{conversationId}_{timestamp}.{ext}` */
 export function buildPaymentProofKey(
   businessId: string,
@@ -98,6 +118,9 @@ export function buildKey(target: MediaTarget, ext: string): Result<string> {
   }
   if (target.kind === 'node_media') {
     return buildNodeMediaKey(target.businessId, target.nodeId, target.mediaId, ext)
+  }
+  if (target.kind === 'fixed_message_media') {
+    return buildFixedMessageMediaKey(target.businessId, target.messageId, target.mediaId, ext)
   }
   return buildPaymentProofKey(
     target.businessId,

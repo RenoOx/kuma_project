@@ -13,6 +13,11 @@ import {
   assistantFunctionOf,
   businessSettingsSchema,
 } from '@/modules/business/business.settings.js'
+import {
+  compositionFor,
+  fileConfigFor,
+  withFileSettings,
+} from '@/modules/conversation/flowSource.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -477,13 +482,41 @@ export function flowNodeExists(business: Business, nodeId: string): Result<void>
     )
   }
 
-  const composition = parsed.data.conversationFlow ?? presetFor(parsed.data)
+  const resolved = compositionFor(business.id, parsed.data)
+  const composition =
+    resolved.source === 'file'
+      ? resolved.composition
+      : (parsed.data.conversationFlow ?? presetFor(parsed.data))
   if (!composition.nodes.includes(nodeId)) {
     return err(
       new NotFoundError({
         resource: 'conversation_node',
         userMessage: 'Ese paso no forma parte de tu conversacion.',
         logContext: { businessId: business.id, nodeId },
+      }),
+    )
+  }
+  return ok(undefined)
+}
+
+/**
+ * Confirms this business declared `images: true` for this mensaje fijo, before
+ * a file is hung off it.
+ *
+ * Distinto de `serviceExists`/`flowNodeExists`: el id no vive en la base, vive
+ * en el archivo TS del negocio (`fileConfigFor`). Sin archivo, sin ese id, o
+ * con el id declarado pero sin `images: true` — mismo error: ese mensaje no
+ * admite fotos. No alcanza con "existe": un mensaje de puro texto rechaza la
+ * subida acá, no solo la oculta en el panel.
+ */
+export function fixedMessageAcceptsMedia(business: Business, messageId: string): Result<void> {
+  const message = fileConfigFor(business.id)?.fixedMessages[messageId]
+  if (!message?.images) {
+    return err(
+      new NotFoundError({
+        resource: 'fixed_message',
+        userMessage: 'Ese mensaje no admite fotos.',
+        logContext: { businessId: business.id, messageId },
       }),
     )
   }
@@ -534,7 +567,7 @@ export function mergeSettingsSection(
   // A composition is a list of node ids, and the nodes that make sense depend on
   // the flow: a business that saved "Disponibilidad" while it booked appointments
   // keeps a runnable composition after switching to selling — validateFlow still
-  // accepts it, because its requirement is only that services exist. So resolveFlow
+  // accepts it, because its requirement is only that services exist. So resolveBusinessFlow
   // goes on running the booking flow, the owner sees no error at all, and Emma
   // keeps offering slots for a business that no longer has an agenda.
   //
@@ -599,7 +632,10 @@ export function readSettings(business: Business): PanelSettingsView {
     timezone: business.timezone,
     whatsappNumber: business.whatsappNumber,
     assistantFunction: parsed.success ? assistantFunctionOf(parsed.data) : null,
-    settings: parsed.success ? parsed.data : null,
+    // Lo que corre, no lo guardado: si el archivo del negocio pone el saludo, el
+    // panel muestra ese saludo. Esas secciones son de solo lectura (panelLocks),
+    // así que un guardado nunca devuelve estos valores a la base.
+    settings: parsed.success ? withFileSettings(business.id, parsed.data).settings : null,
     invalidFields: parsed.success
       ? []
       : parsed.error.issues.map((issue) =>

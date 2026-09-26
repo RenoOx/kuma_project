@@ -301,7 +301,7 @@ describe('servicesPatchSchema', () => {
 describe('switching what the assistant is for', () => {
   // A composition is a list of node ids, and which ones make sense depends on
   // the flow. "Disponibilidad" still satisfies validateFlow after the switch to
-  // selling — its only requirement is that services exist — so resolveFlow kept
+  // selling — its only requirement is that services exist — so resolveBusinessFlow kept
   // running the booking flow and Emma kept offering slots for a business with no
   // agenda, with nothing anywhere reporting an error.
   const withFlow: BusinessSettings = {

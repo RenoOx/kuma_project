@@ -35,7 +35,8 @@ export const serviceMedia = pgTable(
       .notNull()
       .references(() => businesses.id, { onDelete: 'cascade' }),
     /**
-     * What owns this file: a service, or a step of the conversation flow.
+     * What owns this file: a service, a step of the conversation flow, or a
+     * mensaje fijo (declared in the business's repo file, not in this table).
      *
      * Defaulted to 'service' so every row that predates conversation-step media
      * reads correctly without a backfill. It is not cosmetic — `removeOrphans`
@@ -46,8 +47,9 @@ export const serviceMedia = pgTable(
     ownerKind: text('owner_kind').notNull().default('service'),
     /**
      * The nanoid of whatever owns the file: a service inside
-     * `businesses.settings.services`, or a node id inside
-     * `settings.conversationFlow`. No FK — see above; neither one is a row.
+     * `businesses.settings.services`, a node id inside `settings.conversationFlow`,
+     * or a mensaje fijo's id from the business's repo file. No FK — see above;
+     * ninguno de los tres es una fila.
      *
      * The column keeps its original name because renaming it is a destructive
      * migration for a distinction the `owner_kind` column already carries.

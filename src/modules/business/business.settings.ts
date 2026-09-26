@@ -202,7 +202,7 @@ const collectDataFieldsSchema = z.array(z.string().min(1)).default([])
 // Node ids are NOT validated here: the catalogue lives in the conversation
 // module, and importing it would point the dependency the wrong way. The real
 // check is stateMachine.validateFlow, which the panel route runs before saving
-// and resolveFlow runs again before trusting what it read.
+// and resolveBusinessFlow runs again before trusting what it read.
 const conversationFlowSchema = z.object({
   nodes: z.array(z.string().min(1).max(64)).max(32),
   overrides: z
@@ -237,6 +237,18 @@ const conversationFlowSchema = z.object({
             }),
           )
           .max(4)
+          .optional(),
+        // La invitación de cierre de este paso, tal cual. Corta porque va al
+        // final de un mensaje de WhatsApp: una pregunta, no un párrafo.
+        cta: z.string().trim().max(120).optional(),
+        // Qué hacer si llega una foto en este paso (ver ImageHandling en
+        // conversation/nodes/types.ts). Ausente = lo de siempre.
+        onImage: z
+          .object({
+            forward: z.boolean().default(false),
+            pause: z.boolean().default(false),
+            reply: z.string().trim().max(600).optional(),
+          })
           .optional(),
       }),
     )

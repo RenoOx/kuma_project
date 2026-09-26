@@ -10,6 +10,7 @@ import { panelKnowledgeRoutes } from './modules/panel/knowledge.routes.js'
 import { panelRoutes } from './modules/panel/panel.routes.js'
 import { panelStaticRoutes } from './modules/panel/panelStatic.js'
 import { panelSettingsRoutes } from './modules/panel/settings.routes.js'
+import { panelSimulatorRoutes } from './modules/panel/simulator.routes.js'
 import { panelTagRoutes } from './modules/panel/tag.routes.js'
 import {
   getClient,
@@ -431,6 +432,7 @@ app.route('/', panelRoutes)
 app.route('/', panelSettingsRoutes)
 app.route('/', panelKnowledgeRoutes)
 app.route('/', panelTagRoutes)
+app.route('/', panelSimulatorRoutes)
 
 // LAST of the route mounts on purpose: the SPA fallback answers every
 // unmatched path under /panel, so anything that needs to win over it —

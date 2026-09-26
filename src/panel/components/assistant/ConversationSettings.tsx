@@ -4,6 +4,7 @@ import type {
   ConversationBranch,
   ConversationCatalog,
   ConversationFlow,
+  ConversationImageHandling,
   ConversationNodeOption,
   ConversationNodeOverride,
 } from '../../api/types.js'
@@ -16,6 +17,7 @@ import { Button } from '../ui/button.js'
 import { Input } from '../ui/input.js'
 import { Label } from '../ui/label.js'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select.js'
+import { Switch } from '../ui/switch.js'
 import { Textarea } from '../ui/textarea.js'
 
 // Pulled only when the owner asks for the diagram. @xyflow/react and dagre are
@@ -82,6 +84,11 @@ export function ConversationSettings({
 
   const byId = new Map(catalog.nodes.map((n) => [n.id, n]))
   const dirty = JSON.stringify(draft) !== servedKey
+  // Solo lectura para todos los negocios: la conversación la configura Vamvu en
+  // el repo (src/config/businesses/) y el servidor rechaza el guardado
+  // (panelLocks). Se queda como variable y no se borra la edición: es la misma
+  // tarjeta que se va a reabrir cuando el dueño vuelva a poder tocar algo.
+  const locked = true
 
   // A step is named by whatever the owner renamed it to, everywhere it appears —
   // including as the destination of somebody else's route.
@@ -134,12 +141,14 @@ export function ConversationSettings({
   return (
     <SettingsCard
       title="Conversación"
-      description="Los pasos que sigue Emma, en orden. De cada uno podés cambiarle el nombre, sumarle indicaciones tuyas y ajustar los casos especiales y el ejemplo."
+      description="Los pasos que sigue Emma, en orden. Tocá uno para ver qué hace."
       onSave={() => save({ section: 'conversation', conversationFlow: draft })}
       saving={saving}
       saved={saved}
       error={error}
       dirty={dirty}
+      readOnly={locked}
+      locksItself
     >
       {isDesktop && (
         <div className="flex items-center gap-1 self-start rounded-md border border-emma-border p-0.5">
@@ -164,15 +173,15 @@ export function ConversationSettings({
             <ConversationCanvas
               draft={draft}
               catalog={catalog}
-              onReorder={reorder}
+              onReorder={locked ? () => {} : reorder}
               onOpen={(id) => setOpen(open === id ? null : id)}
               openId={open}
             />
           </Suspense>
           <p className="text-muted-foreground text-xs">
-            Arrastrá un paso hacia arriba o abajo para cambiar el orden. La línea punteada es una
-            ruta tuya; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso
-            para editarlo abajo.
+            {locked
+              ? 'La línea punteada es una ruta; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso para ver su detalle abajo.'
+              : 'Arrastrá un paso hacia arriba o abajo para cambiar el orden. La línea punteada es una ruta tuya; la sólida, un paso que avanza solo cuando pasa algo concreto. Tocá un paso para editarlo abajo.'}
           </p>
         </div>
       )}
@@ -186,6 +195,7 @@ export function ConversationSettings({
               key={id}
               node={node}
               position={index + 1}
+              locked={locked}
               // In the diagram only the step the owner tapped stays expanded, so
               // the list below acts as its inspector instead of a second copy.
               expanded={open === id}
@@ -212,7 +222,7 @@ export function ConversationSettings({
         })}
       </div>
 
-      {missing.length > 0 && (
+      {!locked && missing.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-emma-border pt-3">
           <p className="text-muted-foreground text-xs">Pasos que no estás usando</p>
           <div className="flex flex-wrap gap-2">
@@ -261,9 +271,12 @@ function NodeRow({
   categories,
   firstListing = false,
   collapsed = false,
+  locked = false,
 }: {
   node: ConversationNodeOption
   position: number
+  /** Shown but not editable: the flow is managed from a repo file. */
+  locked?: boolean
   expanded: boolean
   /** Hidden entirely while the diagram is showing and this is not the open step. */
   collapsed?: boolean
@@ -314,7 +327,7 @@ function NodeRow({
             </Badge>
           )}
         </button>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className={locked ? 'hidden' : 'flex shrink-0 items-center gap-0.5'}>
           <IconButton label={`Subir ${title}`} onClick={onUp}>
             <ChevronUp size={14} aria-hidden />
           </IconButton>
@@ -337,97 +350,102 @@ function NodeRow({
 
       {expanded && (
         <div className="flex flex-col gap-3 border-t border-emma-border p-3">
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`label-${node.id}`} className="text-xs">
-              Nombre del paso
-            </Label>
-            <span className="text-muted-foreground text-xs">
-              Solo cambia como lo ves acá. Emma sigue corriendo el mismo paso.
-            </span>
-            <Input
-              id={`label-${node.id}`}
-              value={override.label ?? node.label}
-              maxLength={64}
-              onChange={(e) => onOverride({ label: e.target.value })}
-            />
-          </div>
+          {/* A native disabled fieldset turns off every input, textarea and
+              button inside it — the route editor's select and its add/remove
+              included — without threading `locked` through each control. */}
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`label-${node.id}`} className="text-xs">
+                Nombre del paso
+              </Label>
+              <span className="text-muted-foreground text-xs">
+                Solo cambia como lo ves acá. Emma sigue corriendo el mismo paso.
+              </span>
+              <Input
+                id={`label-${node.id}`}
+                value={override.label ?? node.label}
+                maxLength={64}
+                onChange={(e) => onOverride({ label: e.target.value })}
+              />
+            </div>
 
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">Objetivo</p>
-            <p className="mt-0.5 text-sm">{node.objective}</p>
-          </div>
+            <div>
+              <p className="text-muted-foreground text-xs font-medium">Objetivo</p>
+              <p className="mt-0.5 text-sm">{node.objective}</p>
+            </div>
 
-          <div>
-            <p className="text-muted-foreground text-xs font-medium">Pasos</p>
-            <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-sm">
-              {node.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`extra-${node.id}`} className="text-xs">
-              Tus indicaciones para este paso
-            </Label>
-            <span className="text-muted-foreground text-xs">
-              Se suman a los pasos de arriba, no los reemplazan. Acá va lo propio de tu negocio.
-            </span>
-            {categories.length > 0 && (
-              <p className="text-muted-foreground text-xs">
-                Categorías en tu catálogo:{' '}
-                {categories.map((category, index) => (
-                  <span key={category}>
-                    {index > 0 && ', '}
-                    <span className="text-emma-text font-medium">{category}</span>
-                  </span>
+            <div>
+              <p className="text-muted-foreground text-xs font-medium">Pasos</p>
+              <ol className="mt-0.5 flex list-decimal flex-col gap-0.5 pl-4 text-sm">
+                {node.steps.map((step) => (
+                  <li key={step}>{step}</li>
                 ))}
-                . Escribilas igual acá para que Emma las reconozca.
-                {/* The one thing an owner cannot guess: the rule has to be on
+              </ol>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`extra-${node.id}`} className="text-xs">
+                Tus indicaciones para este paso
+              </Label>
+              <span className="text-muted-foreground text-xs">
+                Se suman a los pasos de arriba, no los reemplazan. Acá va lo propio de tu negocio.
+              </span>
+              {categories.length > 0 && (
+                <p className="text-muted-foreground text-xs">
+                  Categorías en tu catálogo:{' '}
+                  {categories.map((category, index) => (
+                    <span key={category}>
+                      {index > 0 && ', '}
+                      <span className="text-emma-text font-medium">{category}</span>
+                    </span>
+                  ))}
+                  . Escribilas igual acá para que Emma las reconozca.
+                  {/* The one thing an owner cannot guess: the rule has to be on
                     the step where the listing HAPPENS, and Emma reads the block
                     of the step she was in when the turn started. Written on the
                     next step, it arrives a turn late — which is exactly how a
                     correctly written rule never ran. */}
-                {firstListing &&
-                  ' El primer listado suele pasar en este paso, así que si tu regla decide qué categoría mostrar, va acá.'}
-              </p>
-            )}
-            <Textarea
-              id={`extra-${node.id}`}
-              value={override.extraInstructions ?? ''}
-              rows={3}
-              maxLength={1500}
-              placeholder="Ej: si el alumno pregunta por convalidación, pedile primero el certificado previo."
-              onChange={(e) => onOverride({ extraInstructions: e.target.value })}
-            />
-          </div>
+                  {firstListing &&
+                    ' El primer listado suele pasar en este paso, así que si tu regla decide qué categoría mostrar, va acá.'}
+                </p>
+              )}
+              <Textarea
+                id={`extra-${node.id}`}
+                value={override.extraInstructions ?? ''}
+                rows={3}
+                maxLength={1500}
+                placeholder="Ej: si el alumno pregunta por convalidación, pedile primero el certificado previo."
+                onChange={(e) => onOverride({ extraInstructions: e.target.value })}
+              />
+            </div>
 
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={`edge-${node.id}`} className="text-xs">
-              Casos especiales
-            </Label>
-            <span className="text-muted-foreground text-xs">Uno por línea.</span>
-            <Textarea
-              id={`edge-${node.id}`}
-              value={edgeText}
-              rows={4}
-              onChange={(e) =>
-                onOverride({
-                  edgeCases: e.target.value
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter((line) => line !== ''),
-                })
-              }
-            />
-          </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor={`edge-${node.id}`} className="text-xs">
+                Casos especiales
+              </Label>
+              <span className="text-muted-foreground text-xs">Uno por línea.</span>
+              <Textarea
+                id={`edge-${node.id}`}
+                value={edgeText}
+                rows={4}
+                onChange={(e) =>
+                  onOverride({
+                    edgeCases: e.target.value
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter((line) => line !== ''),
+                  })
+                }
+              />
+            </div>
 
-          <BranchEditor
-            nodeId={node.id}
-            branches={override.branches ?? []}
-            targets={targets}
-            onChange={(branches) => onOverride({ branches })}
-          />
+            <BranchEditor
+              nodeId={node.id}
+              branches={override.branches ?? []}
+              targets={targets}
+              onChange={(branches) => onOverride({ branches })}
+            />
+          </fieldset>
 
           {/* Last, and with its own persistence: everything above is a draft
               until Guardar, while a file is written the moment it is picked.
@@ -439,7 +457,7 @@ function NodeRow({
             unsavedHint="Guardá la conversación primero y volvé para subirle archivos."
           />
 
-          <div className="flex flex-col gap-1">
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
             <Label htmlFor={`example-${node.id}`} className="text-xs">
               Ejemplo de respuesta
             </Label>
@@ -453,10 +471,107 @@ function NodeRow({
               maxLength={1000}
               onChange={(e) => onOverride({ example: e.target.value })}
             />
-          </div>
+          </fieldset>
+
+          <fieldset disabled={locked} className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
+            <Label htmlFor={`cta-${node.id}`} className="text-xs">
+              Invitación de cierre
+            </Label>
+            <span className="text-muted-foreground text-xs">
+              La pregunta con la que Emma cierra en este paso, tal cual. Vacío: usa las de siempre.
+            </span>
+            <Input
+              id={`cta-${node.id}`}
+              value={override.cta ?? ''}
+              maxLength={120}
+              placeholder="Ej: ¿Cuál te gustaría iniciar?"
+              onChange={(e) => onOverride({ cta: e.target.value })}
+            />
+          </fieldset>
+
+          <ImageHandlingEditor
+            nodeId={node.id}
+            locked={locked}
+            value={override.onImage}
+            onChange={(onImage) => onOverride({ onImage })}
+          />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Qué pasa si el cliente manda una foto en este paso.
+ *
+ * Emma nunca ve la foto: esto lo resuelve el código. Pensado para el paso en que
+ * el cliente ya eligió y manda su documento o su comprobante — ahí el dueño
+ * quiere recibirla y seguir él la conversación.
+ */
+function ImageHandlingEditor({
+  nodeId,
+  locked,
+  value,
+  onChange,
+}: {
+  nodeId: string
+  locked: boolean
+  value: ConversationImageHandling | undefined
+  onChange: (next: ConversationImageHandling) => void
+}): React.JSX.Element {
+  const current: ConversationImageHandling = {
+    forward: value?.forward ?? false,
+    pause: value?.pause ?? false,
+    ...(value?.reply !== undefined ? { reply: value.reply } : {}),
+  }
+
+  return (
+    <fieldset
+      disabled={locked}
+      className="m-0 flex min-w-0 flex-col gap-2 rounded-md border border-emma-border bg-emma-elevated p-3"
+    >
+      <legend className="sr-only">Si el cliente manda una foto en este paso</legend>
+      <p className="text-xs font-medium">Si el cliente manda una foto en este paso</p>
+      <label className="flex items-start gap-2 text-sm" htmlFor={`img-fwd-${nodeId}`}>
+        <Switch
+          id={`img-fwd-${nodeId}`}
+          checked={current.forward}
+          onCheckedChange={(forward) => onChange({ ...current, forward })}
+        />
+        <span>
+          Reenviársela al dueño
+          <span className="text-muted-foreground block text-xs">
+            Con el nombre, el teléfono, la hora y el curso que eligió.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-sm" htmlFor={`img-pause-${nodeId}`}>
+        <Switch
+          id={`img-pause-${nodeId}`}
+          checked={current.pause}
+          onCheckedChange={(pause) => onChange({ ...current, pause })}
+        />
+        <span>
+          Pausar a Emma en este chat
+          <span className="text-muted-foreground block text-xs">
+            Seguís vos. La volvés a prender desde el Inbox.
+          </span>
+        </span>
+      </label>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor={`img-reply-${nodeId}`} className="text-xs">
+          Mensaje al cliente
+        </Label>
+        <Textarea
+          id={`img-reply-${nodeId}`}
+          value={current.reply ?? ''}
+          rows={2}
+          maxLength={600}
+          placeholder="Ej: ¡Recibido! Un asesor revisa tus datos y te escribe por acá en breve."
+          onChange={(e) => onChange({ ...current, reply: e.target.value })}
+        />
+      </div>
+    </fieldset>
   )
 }
 

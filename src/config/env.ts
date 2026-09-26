@@ -3,6 +3,14 @@ import { z } from 'zod'
 
 loadDotenv()
 
+// Un flag de entorno es texto. z.coerce.boolean() trata "false" como true (todo
+// texto no vacío lo es), así que se parsea explícito y cualquier otro valor falla.
+const flag = (fallback: boolean) =>
+  z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? fallback : v === 'true'))
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -65,6 +73,14 @@ const envSchema = z.object({
     (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
     z.string().min(1).optional(),
   ),
+  // Prendido por defecto: prod y Railway arrancan igual que siempre. Apagarlo
+  // sirve para levantar el servidor en local contra la base de dev sin que
+  // intente vincular ni reconectar ningún número (cada intento gasta el
+  // presupuesto de vinculación de WhatsApp).
+  WHATSAPP_BOOT_ENABLED: flag(true),
+  // Apagado por defecto: el simulador escribe clientes, mensajes y hasta citas
+  // de prueba en la base. En prod eso ensuciaría los datos y el Inbox del dueño.
+  SIMULATOR_ENABLED: flag(false),
 })
 
 export type Env = z.infer<typeof envSchema>

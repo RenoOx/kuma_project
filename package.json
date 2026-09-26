@@ -35,6 +35,8 @@
     "smoke:notifications": "tsx scripts/smoke-notifications.ts",
     "create:business": "tsx scripts/create-test-business.ts",
     "backfill:service-ids": "tsx scripts/backfill-service-ids.ts",
+    "business:show:dev": "node scripts/guard-db-env.mjs --expect dev -- tsx scripts/business-show.ts",
+    "business:show:prod": "dotenv -e .env -v DATABASE_URL_FROM=PROD_DATABASE_URL -- node scripts/run-with-db.mjs node scripts/guard-db-env.mjs --expect prod -- tsx scripts/business-show.ts",
     "smoke:reminders": "tsx scripts/smoke-reminders.ts",
     "admin": "tsx scripts/admin.ts"
   },

@@ -42,6 +42,92 @@ export interface ForwardImageParams {
    * cancellation instead of costing nothing.
    */
   awaitsVerification: boolean
+  /**
+   * El aviso ya armado para una foto que llegó en un paso con reenvío
+   * configurado. Si viene, reemplaza al aviso de siempre.
+   */
+  stepCaption?: string
+}
+
+// Para comparar nombres sin que una tilde o una mayúscula cambien el resultado.
+function normalizeName(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * El servicio que eligió el cliente, buscado con reglas fijas y sin IA.
+ *
+ * Primero en lo que Emma ya guardó (el valor que coincide con un nombre de
+ * servicio). Si todavía no guardó nada —la foto del DNI puede llegar antes que el
+ * resto de los datos—, en los mensajes de Emma, del más nuevo al más viejo: el
+ * primero que nombra UN solo servicio. Un mensaje que lista varios no dice cuál
+ * eligió, así que se saltea.
+ */
+export function findChosenService<S extends { name: string }>(
+  services: readonly S[],
+  collected: Record<string, string>,
+  assistantMessagesNewestFirst: readonly string[],
+): S | null {
+  const named = services
+    .map((service) => ({ service, key: normalizeName(service.name) }))
+    .filter((s) => s.key !== '')
+
+  for (const value of Object.values(collected)) {
+    const v = normalizeName(value)
+    if (v.length < 3) continue
+    const hit = named
+      .filter((s) => v === s.key || v.includes(s.key) || s.key.includes(v))
+      .sort((a, b) => b.key.length - a.key.length)[0]
+    if (hit) return hit.service
+  }
+
+  for (const message of assistantMessagesNewestFirst) {
+    const m = normalizeName(message)
+    const mentioned = named.filter((s) => m.includes(s.key))
+    if (mentioned.length === 1 && mentioned[0]) return mentioned[0].service
+  }
+  return null
+}
+
+/**
+ * El aviso al dueño cuando llega una foto en un paso con reenvío configurado.
+ *
+ * El resumen es la descripción del servicio elegido, copiada tal cual: el dueño
+ * pidió que no la interprete nadie, así que el código la pega sin tocarla.
+ */
+export function buildStepImageCaption(params: {
+  stepLabel: string
+  customer: Pick<Customer, 'name' | 'phone'>
+  receivedAt: Date
+  timezone: string
+  summary: string | null
+  said: string | null
+  paused: boolean
+}): string {
+  const who = formatPersonName(params.customer.name)
+  const said = params.said?.trim()
+  const lines = [
+    `📷 *Foto recibida en «${params.stepLabel}»*`,
+    '',
+    who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
+    `🕒 ${formatDateTimeForDisplay(params.receivedAt, params.timezone)}`,
+    params.summary?.trim()
+      ? `📋 Resumen: ${params.summary.trim()}`
+      : '📋 Resumen: no se pudo identificar qué eligió',
+  ]
+  if (said) lines.push('', `💬 "${said}"`)
+  lines.push(
+    '',
+    params.paused
+      ? 'Emma quedó pausada en este chat: seguí la conversación vos. La volvés a prender desde el Inbox del panel.'
+      : '¿Qué le respondo?',
+  )
+  return lines.join('\n')
 }
 
 /**
@@ -159,15 +245,17 @@ export async function forwardImageToOwner(
   }
 
   const jid = ownerJidFromPhone(business.ownerWhatsappNumber)
-  const caption = buildOwnerCaption({
-    customer: params.customer,
-    timezone: business.timezone,
-    caption: params.caption,
-    pendingAppointment: params.pendingAppointment,
-    purpose: params.purpose,
-    payment: params.payment,
-    awaitsVerification: params.awaitsVerification,
-  })
+  const caption =
+    params.stepCaption ??
+    buildOwnerCaption({
+      customer: params.customer,
+      timezone: business.timezone,
+      caption: params.caption,
+      pendingAppointment: params.pendingAppointment,
+      purpose: params.purpose,
+      payment: params.payment,
+      awaitsVerification: params.awaitsVerification,
+    })
 
   try {
     await enqueueSend(business.id, 'owner', () =>

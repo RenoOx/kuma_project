@@ -55,6 +55,7 @@ export function PaymentMethods({
       saved={saved}
       error={error}
       dirty={dirty}
+      readOnly
     >
       {methods.length === 0 ? (
         <p className="text-muted-foreground text-sm">

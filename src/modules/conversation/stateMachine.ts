@@ -1,12 +1,15 @@
 import { logger } from '@/config/logger.js'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import {
+  blueprintFor,
   type ConversationNode,
   EMITTED_TRIGGERS,
   type ExitTarget,
+  FIXED_MESSAGE_TOOL,
   IDLE_TRIGGER,
+  type ImageHandling,
   NODE_BY_ID,
   type NodeBlueprint,
   type NodeBranch,
@@ -14,6 +17,9 @@ import {
   ROUTE_TRIGGER,
   requirementMet,
 } from './nodeCatalog.js'
+import { PRESET_APPOINTMENTS, PRESET_APPOINTMENTS_DEPOSIT } from './nodes/appointments.nodes.js'
+import { PRESET_INFO_ONLY } from './nodes/core.nodes.js'
+import { PRESET_SALES, SALES_ENTRY_BRANCH } from './nodes/sales.nodes.js'
 
 // The conversation flow is owned by the code, not by the model — and now it is
 // COMPOSED rather than written. A business picks nodes from nodeCatalog, in
@@ -72,6 +78,12 @@ export interface StateConfig {
   branches: NodeBranch[]
   // Refuses entry unless the trigger arrives with evidence that satisfies this.
   entryGuard?: EntryGuard
+  /** La invitación de cierre fija de este paso; reemplaza a la rotativa. */
+  cta?: string
+  /** Qué hacer si llega una foto en este paso; ausente = lo de siempre. */
+  onImage?: ImageHandling
+  /** Los ids de mensajes fijos que Emma puede mandar en este paso. */
+  fixedMessages?: string[]
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -83,9 +95,9 @@ export const INITIAL_STATE = 'idle'
 /**
  * What the owner overrode for one node. An absent key means "use the default".
  *
- * Every field here is wording. Nothing that decides behaviour — tools, exits,
- * guards — is overridable, and that boundary is applied in compileFlow rather
- * than declared anywhere else, so there is exactly one place to read it.
+ * Todo es texto salvo `onImage`, que decide qué pasa con una foto que el modelo
+ * igual no ve. Nada del motor —tools, salidas, guards— es personalizable, y ese
+ * límite se aplica en compileFlow y en ningún otro lugar.
  */
 export interface NodeOverride {
   /** What the panel calls this step. Cosmetic: the id is what the flow runs on. */
@@ -103,6 +115,15 @@ export interface NodeOverride {
    * arrow" stays inside the same guarantee as everything else.
    */
   branches?: NodeBranch[]
+  /** La invitación de cierre de este paso, tal cual. */
+  cta?: string
+  /** Qué hacer si llega una foto en este paso. */
+  onImage?: ImageHandling
+  /**
+   * Los mensajes fijos que Emma puede mandar en este paso, por id. Solo los
+   * declara el archivo del negocio, que es donde vive el texto.
+   */
+  fixedMessages?: string[]
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -115,60 +136,7 @@ export interface FlowComposition {
 //
 // A business type is a composition, not a branch. Adding "informational only"
 // used to mean a new flowType, a new literal flow and a new ternary; here it is
-// four node ids.
-
-const PRESET_APPOINTMENTS = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'show_availability',
-  'confirmed',
-]
-
-const PRESET_APPOINTMENTS_DEPOSIT = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'show_availability',
-  'await_payment',
-  'await_payment_verification',
-  'confirmed',
-]
-
-/** Nothing to book and nothing to charge: the business only answers questions. */
-const PRESET_INFO_ONLY = ['idle', 'greeting', 'informing', 'listado_servicios']
-
-// The selling flow, which for months was an alias of the informational one.
-//
-// What was missing was never the closing nodes — collect_data, confirmacion and
-// correccion_datos have always been complete, with real emitters. It was the way
-// IN: nothing in the code fired a trigger that led from the catalogue to the
-// capture, and validateFlow rightly refused to pretend otherwise.
-//
-// ROUTE_TOOL is that way in. "The customer chose course X" has no slot in it, so
-// it never needed the FrozenBooking that blocked this — which is why the exit
-// out of listado_servicios is a route the model judges and not an event.
-const PRESET_SALES = [
-  'idle',
-  'greeting',
-  'informing',
-  'listado_servicios',
-  'collect_data',
-  'confirmacion',
-  'correccion_datos',
-  'confirmed',
-]
-
-// Shipped WITH the preset rather than left for the owner to draw: a selling
-// business that opens the panel for the first time should already close, and a
-// route is the one part of a flow they have no way to guess is missing.
-const SALES_ENTRY_BRANCH: NodeBranch = {
-  id: 'ruta-cierre',
-  when: 'El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.',
-  to: 'collect_data',
-}
+// four node ids. Each list lives next to the nodes of its flow type.
 
 /**
  * The composition a business gets when it has not customised one.
@@ -229,14 +197,18 @@ function resolveExit(
  * Total by construction: an unknown node id is skipped and an unresolvable exit
  * is dropped, so a composition that somehow got past validateFlow still yields
  * a flow that runs rather than a crash in the middle of a conversation.
+ *
+ * El `flowType` es obligatorio a propósito: decide qué tools y salidas recibe
+ * cada nodo core. Un valor por defecto le daría la agenda a un instituto sin que
+ * nadie lo note. Un nodo del otro tipo se descarta, igual que un id desconocido.
  */
-export function compileFlow(composition: FlowComposition): FlowDefinition {
-  const nodes = composition.nodes.filter((id) => NODE_BY_ID.has(id))
+export function compileFlow(composition: FlowComposition, flowType: FlowType): FlowDefinition {
+  const nodes = composition.nodes.filter((id) => blueprintFor(id, flowType) !== undefined)
   const present = new Set(nodes)
   const flow: FlowDefinition = {}
 
   nodes.forEach((id, index) => {
-    const bp = NODE_BY_ID.get(id) as NodeBlueprint
+    const bp = blueprintFor(id, flowType) as NodeBlueprint
     const transitions: Record<string, string> = {}
 
     for (const [trigger, target] of Object.entries(bp.exits)) {
@@ -252,6 +224,9 @@ export function compileFlow(composition: FlowComposition): FlowDefinition {
 
     const override = composition.overrides[id]
     const extra = override?.extraInstructions?.trim()
+    const cta = override?.cta?.trim()
+    const onImage = imageHandlingOf(override)
+    const fixedMessages = (override?.fixedMessages ?? []).filter((id) => id.trim() !== '')
     // Same rule as a blueprint's fixed jump: a route to a step the owner did not
     // include is dropped rather than an error, so removing a step never breaks
     // the ones pointing at it.
@@ -262,7 +237,12 @@ export function compileFlow(composition: FlowComposition): FlowDefinition {
       // The routing tool is granted BY having a route, never by the owner
       // picking it: a step with nothing to route to would offer the model a
       // tool whose every argument the executor must reject.
-      tools: branches.length > 0 ? [...bp.tools, ROUTE_TOOL] : bp.tools,
+      tools: [
+        ...bp.tools,
+        ...(branches.length > 0 ? [ROUTE_TOOL] : []),
+        // Igual que la ruta: la herramienta viene con tener algo que mandar.
+        ...(fixedMessages.length > 0 ? [FIXED_MESSAGE_TOOL] : []),
+      ],
       node: {
         // Objective and steps are the motor and are never the owner's: what
         // moves is the wording that steers the model, not the contract the code
@@ -277,10 +257,24 @@ export function compileFlow(composition: FlowComposition): FlowDefinition {
       transitions,
       branches,
       ...(bp.entryGuard ? { entryGuard: bp.entryGuard } : {}),
+      // Solo si hay algo: un paso sin estos campos compila idéntico a antes, y
+      // eso es lo que mantienen los snapshots de todos los negocios.
+      ...(cta ? { cta } : {}),
+      ...(onImage ? { onImage } : {}),
+      ...(fixedMessages.length > 0 ? { fixedMessages } : {}),
     }
   })
 
   return flow
+}
+
+/** El manejo de fotos de un paso, o undefined si no pide nada distinto a lo de siempre. */
+function imageHandlingOf(override: NodeOverride | undefined): ImageHandling | undefined {
+  const raw = override?.onImage
+  if (!raw) return undefined
+  const reply = raw.reply?.trim()
+  if (!raw.forward && !raw.pause && !reply) return undefined
+  return { forward: raw.forward, pause: raw.pause, ...(reply ? { reply } : {}) }
 }
 
 // ── Validator ────────────────────────────────────────────────────────────────
@@ -300,6 +294,7 @@ const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   'confirm_summary',
   'correct_field',
   'advance_flow',
+  'send_fixed_message',
 ])
 
 export interface FlowProblem {
@@ -322,9 +317,16 @@ export function validateFlow(
   const problems: FlowProblem[] = []
   const { nodes } = composition
 
+  // A node of the other flow type is refused here and not merely hidden in the
+  // panel: a hand-built PATCH could otherwise put collect_data in a clinic.
+  const flowType: FlowType = settings?.flowType ?? 'appointments'
+
   const seen = new Set<string>()
   for (const id of nodes) {
     if (!NODE_BY_ID.has(id)) problems.push({ node: id, reason: 'no existe en el catálogo' })
+    else if (!blueprintFor(id, flowType)) {
+      problems.push({ node: id, reason: 'no corresponde a este tipo de negocio' })
+    }
     if (seen.has(id)) problems.push({ node: id, reason: 'está repetido' })
     seen.add(id)
   }
@@ -339,7 +341,9 @@ export function validateFlow(
   }
 
   for (const id of nodes) {
-    const bp = NODE_BY_ID.get(id)
+    // El nodo como lo corre ESTE tipo de flujo: las tools que hay que validar son
+    // las extendidas, no las del core a secas.
+    const bp = blueprintFor(id, flowType)
     if (!bp) continue
     for (const req of bp.requires ?? []) {
       if (!requirementMet(req, settings)) {
@@ -367,7 +371,7 @@ export function validateFlow(
     }
   }
 
-  const flow = compileFlow(composition)
+  const flow = compileFlow(composition, flowType)
   const ids = Object.keys(flow)
 
   // Every exit a node keeps has to be one something in the code can actually
@@ -440,29 +444,8 @@ export function validateFlow(
 
 const EMPTY_NODE: ConversationNode = { objective: '', steps: [], edgeCases: [], example: '' }
 
-/**
- * The flow a business is actually running.
- *
- * Falls back to the preset when the owner has not composed one, and ALSO when
- * what they composed no longer validates — a flow that stopped being runnable
- * because the deposit was switched off must not take the conversation down with
- * it. The fallback is logged, because it means the panel is showing the owner
- * something different from what Emma is doing.
- */
-export function resolveFlow(settings: BusinessSettings | null): FlowDefinition {
-  const stored = settings?.conversationFlow
-  if (!stored) return compileFlow(presetFor(settings))
-
-  const checked = validateFlow(stored, settings)
-  if (!checked.ok) {
-    logger.warn(
-      { component: 'stateMachine', code: checked.error.code, ...checked.error.logContext },
-      'stored conversation flow does not validate, falling back to preset',
-    )
-    return compileFlow(presetFor(settings))
-  }
-  return compileFlow(stored)
-}
+// Qué flujo corre un negocio (archivo del repo → guardado en el panel → preset)
+// lo decide conversation/flowSource.ts: resolveBusinessFlow.
 
 /**
  * Where a trigger leads from here. A trigger the state does not list means

@@ -25,6 +25,20 @@ export function normalizePhone(raw: string | null | undefined): string | null {
 }
 
 /**
+ * Un número de prueba: un negocio (o un cliente del simulador) que nunca tiene
+ * WhatsApp. El arranque no le levanta sesión y "Conectar" se niega.
+ *
+ * +999 no es un código de país asignado. Se exigen 9 dígitos o más después del
+ * prefijo porque un celular peruano cargado sin +51 puede empezar con 999
+ * ("999 123 456" → +999123456, 9 dígitos en total) y eso NO es un número de
+ * prueba: es un error de carga que tiene que seguir viéndose como tal.
+ */
+export function isSandboxNumber(raw: string | null | undefined): boolean {
+  const normalized = normalizePhone(raw)
+  return normalized !== null && /^\+999\d{9,}$/.test(normalized)
+}
+
+/**
  * True when both values denote the same number, whatever shape each arrived in.
  *
  * Null/empty never matches — "no owner configured" must not compare equal to

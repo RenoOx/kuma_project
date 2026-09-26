@@ -11,11 +11,8 @@ import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import {
-  getStateConfig,
-  resolveFlow,
-  type TransitionEvidence,
-} from '@/modules/conversation/stateMachine.js'
+import { fileConfigFor, resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
+import { getStateConfig, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
@@ -25,6 +22,7 @@ import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
+import type { FixedOutbound, StepFixedMessage } from './fixedMessage.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
@@ -145,7 +143,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // Compiled once per turn and threaded through: every transition of this turn
   // has to be judged against the same flow, and recompiling per trigger would
   // let a mid-turn settings change split the conversation across two flows.
-  const flow = resolveFlow(settings)
+  const flow = resolveBusinessFlow(params.businessId, settings)
 
   // Every trigger of this turn goes through here. A failed write costs the
   // transition, never the reply: we log it and carry on from where we were.
@@ -187,6 +185,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // guard is here because OpenAI rejects `tools: []` with a 400 — a state added
   // later without tools should degrade to a plain completion, not an error.
   const toolsParam = stateTools.length > 0 ? stateTools : undefined
+
+  // Los mensajes fijos de este paso: el id lo da el paso compilado, el texto el
+  // archivo del negocio. Un id sin texto se descarta en vez de ofrecer una
+  // herramienta que después no tiene qué mandar.
+  const fileMessages = fileConfigFor(params.businessId)?.fixedMessages ?? {}
+  const stepFixedMessages: StepFixedMessage[] = (stateConfig.fixedMessages ?? []).flatMap((id) => {
+    const message = fileMessages[id]
+    return message ? [{ id, ...message }] : []
+  })
   const toolChoiceParam = stateTools.length > 0 ? ('auto' as const) : undefined
 
   log.debug(
@@ -238,6 +245,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // model. Resolving them again here could disagree if the owner saved
     // mid-turn.
     branches: stateConfig.branches,
+    fixedMessages: stepFixedMessages,
   }
 
   // 6. Anything this customer still has open. The proposal text is already in
@@ -306,12 +314,17 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     pending,
     servicesWithMedia,
     customerFacts,
+    stateConfig.cta,
   )
   // The node goes last, after the variable tail — the static body has to stay
   // first for the prompt cache, and the final position is where an instruction
   // weighs most. A node with no objective ('idle') renders to nothing at all,
   // not even the header.
-  const nodeBlock = renderNodeBlock(stateConfig.node, stateConfig.branches)
+  const nodeBlock = renderNodeBlock(
+    stateConfig.node,
+    stateConfig.branches,
+    stepFixedMessages.map((m) => ({ id: m.id, when: m.when ?? '' })),
+  )
   const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
@@ -327,6 +340,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // it already committed to rather than cutting itself off mid-reply.
   let attachmentBudget = MAX_ATTACHMENTS_PER_TURN
   let escalated = false
+  // Uno por turno: cada mensaje fijo es un mensaje saliente (más su imagen), y
+  // dos ofertas en la misma respuesta no son una oferta más clara.
+  const fixedOut: FixedOutbound[] = []
+  let fixedPersisted = 0
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
@@ -449,6 +466,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         escalated,
         maxIterationsHit: false,
         attachments,
+        fixedMessages: fixedOut,
       })
     }
 
@@ -505,6 +523,14 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       attachmentBudget = Math.max(attachmentBudget, toolResult.maxAttachments ?? 0)
       queueAttachments(attachments, toolResult.attachments ?? [], attachmentBudget)
 
+      for (const fixed of toolResult.fixedMessages ?? []) {
+        if (fixedOut.length > 0) {
+          log.warn({ tool: call.function.name }, 'second fixed message in one turn ignored')
+          continue
+        }
+        fixedOut.push(fixed)
+      }
+
       // Folded over the turn's own variable rather than re-read from the row:
       // when the model calls two tools in one iteration, the second has to be
       // evaluated against the state the first one left behind. Persisted at the
@@ -539,6 +565,22 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         content: toolResult.result,
       })
     }
+
+    // El mensaje fijo queda en el historial como dicho por Emma: así el próximo
+    // turno sabe que la oferta ya salió y no la repite, y el dueño la ve en el
+    // Inbox tal como la recibió el cliente. Recién acá, después de TODOS los
+    // resultados de esta vuelta: OpenAI exige que cada resultado siga a su
+    // pedido, y un mensaje en el medio rompería el historial del turno siguiente.
+    for (const fixed of fixedOut.slice(fixedPersisted)) {
+      const persistFixed = await messageService.append({
+        businessId: params.businessId,
+        conversationId: params.conversationId,
+        role: 'assistant',
+        content: fixed.text,
+      })
+      if (!persistFixed.ok) return persistFixed
+    }
+    fixedPersisted = fixedOut.length
   }
 
   // Safety net: too many iterations. Auto-escalate and return a canned reply.
@@ -582,6 +624,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // text and escalates, and a service photo arriving next to "te conecto con
     // alguien" would be noise at the worst moment.
     attachments: [],
+    // Estos sí: ya quedaron en el historial como dichos, y no mandarlos dejaría
+    // al dueño leyendo en el Inbox una oferta que el cliente nunca recibió.
+    fixedMessages: fixedOut,
   })
 }
 

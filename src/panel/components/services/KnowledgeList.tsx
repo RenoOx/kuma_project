@@ -1,4 +1,4 @@
-import { Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { Lock, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import type { KbCategory, KnowledgeEntry, KnowledgeInput } from '../../api/types.js'
 import { useKnowledgeMutation } from '../../hooks/useKnowledge.js'
@@ -9,6 +9,7 @@ import {
   MAX_KB_ENTRIES_PER_CATEGORY,
 } from '../../lib/constants.js'
 import { cn, truncate } from '../../lib/utils.js'
+import { READ_ONLY_NOTICE } from '../config/SettingsCard.js'
 import { Badge } from '../ui/badge.js'
 import { Button } from '../ui/button.js'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card.js'
@@ -21,7 +22,14 @@ import { KbEntryForm } from './KbEntryForm.js'
  * these are table rows with real ids, not an array that has to be replaced
  * whole, so there is nothing to batch behind a save button.
  */
-export function KnowledgeList({ entries }: { entries: KnowledgeEntry[] }): React.JSX.Element {
+export function KnowledgeList({
+  entries,
+  readOnly = false,
+}: {
+  entries: KnowledgeEntry[]
+  /** Se ve pero no se edita: lo configura Vamvu (el servidor también lo rechaza). */
+  readOnly?: boolean
+}): React.JSX.Element {
   const [editing, setEditing] = useState<{ entry: KnowledgeEntry | null } | null>(null)
   const { mutate, saving, error } = useKnowledgeMutation(() => setEditing(null))
 
@@ -52,7 +60,7 @@ export function KnowledgeList({ entries }: { entries: KnowledgeEntry[] }): React
                 key={category}
                 category={category}
                 entries={entries.filter((e) => e.category === category)}
-                onEdit={(entry) => setEditing({ entry })}
+                onEdit={readOnly ? null : (entry) => setEditing({ entry })}
                 onDelete={(id) => mutate({ action: 'delete', id })}
               />
             ))
@@ -60,12 +68,19 @@ export function KnowledgeList({ entries }: { entries: KnowledgeEntry[] }): React
 
           {error && <p className="text-destructive text-sm">{error}</p>}
 
-          <div>
-            <Button variant="outline" size="sm" onClick={() => setEditing({ entry: null })}>
-              <Plus size={14} aria-hidden />
-              Agregar información
-            </Button>
-          </div>
+          {readOnly ? (
+            <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
+              <Lock size={14} aria-hidden />
+              {READ_ONLY_NOTICE}
+            </p>
+          ) : (
+            <div>
+              <Button variant="outline" size="sm" onClick={() => setEditing({ entry: null })}>
+                <Plus size={14} aria-hidden />
+                Agregar información
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -93,7 +108,8 @@ function CategoryGroup({
 }: {
   category: KbCategory
   entries: KnowledgeEntry[]
-  onEdit: (entry: KnowledgeEntry) => void
+  /** null: solo lectura, la fila no ofrece editar ni borrar. */
+  onEdit: ((entry: KnowledgeEntry) => void) | null
   onDelete: (id: string) => void
 }): React.JSX.Element | null {
   if (entries.length === 0) return null
@@ -138,7 +154,7 @@ function EntryRow({
   onDelete,
 }: {
   entry: KnowledgeEntry
-  onEdit: (entry: KnowledgeEntry) => void
+  onEdit: ((entry: KnowledgeEntry) => void) | null
   onDelete: (id: string) => void
 }): React.JSX.Element {
   return (
@@ -158,24 +174,26 @@ function EntryRow({
         <p className="text-muted-foreground mt-0.5 text-xs">{truncate(entry.content, 140)}</p>
       </div>
 
-      <div className="flex shrink-0 items-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onEdit(entry)}
-          aria-label={`Editar ${entry.title}`}
-        >
-          <Pencil size={16} aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onDelete(entry.id)}
-          aria-label={`Eliminar ${entry.title}`}
-        >
-          <Trash2 size={16} aria-hidden />
-        </Button>
-      </div>
+      {onEdit && (
+        <div className="flex shrink-0 items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onEdit(entry)}
+            aria-label={`Editar ${entry.title}`}
+          >
+            <Pencil size={16} aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onDelete(entry.id)}
+            aria-label={`Eliminar ${entry.title}`}
+          >
+            <Trash2 size={16} aria-hidden />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

@@ -32,10 +32,11 @@ const LIMITS =
 /**
  * The files one owner carries: photos, a price list, a voice note, a demo.
  *
- * One component for both owners. A service's files answer a question the
+ * One component for the three owners. A service's files answer a question the
  * customer asked; a step's files are what the business shows on reaching that
- * point of the conversation. Everything below that distinction — the limits, the
- * order, the immediate write — is the same, and two components would drift.
+ * point of the conversation; a fixed message's files are the gallery it sends
+ * after its text. Everything below that distinction — the limits, the order,
+ * the immediate write — is the same, and separate components would drift.
  *
  * Unlike every other field around it, this one writes immediately: the file goes
  * to storage and its row to the database the moment it is picked, rather than
@@ -51,11 +52,18 @@ export function MediaField({
   owner,
   label,
   unsavedHint,
+  orderNotice = 'Emma manda los dos primeros de la lista. Usá las flechas para elegir cuáles.',
 }: {
   /** Undefined while the owner is being created — it has no id yet. */
   owner: MediaOwner | undefined
   label: string
   unsavedHint: string
+  /**
+   * Qué le pasa al orden al mandarse. Default: el tope de 2 por turno, que
+   * rige para servicio y nodo. Los mensajes fijos no tienen ese tope — mandan
+   * la galería entera — así que ese caller pasa su propio texto.
+   */
+  orderNotice?: string | null
 }): React.JSX.Element {
   const settings = useSettings()
   const media = useOwnerMedia(owner)
@@ -110,12 +118,9 @@ export function MediaField({
         <span className="text-muted-foreground text-xs">{media.busy ? 'Guardando…' : hint}</span>
       </div>
 
-      {media.items.length > 1 && (
-        // Said out loud because the order is not decorative: a reply carries at
-        // most two files in total, and the cut is taken from the top.
-        <p className="text-muted-foreground text-xs">
-          Emma manda los dos primeros de la lista. Usá las flechas para elegir cuáles.
-        </p>
+      {media.items.length > 1 && orderNotice && (
+        // Said out loud because the order is not decorative.
+        <p className="text-muted-foreground text-xs">{orderNotice}</p>
       )}
 
       <input

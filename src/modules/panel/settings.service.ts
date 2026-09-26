@@ -3,6 +3,7 @@ import { db } from '@/db/client.js'
 import type { Business } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import { fileConfigFor } from '@/modules/conversation/flowSource.js'
 import { presetFor, validateFlow } from '@/modules/conversation/stateMachine.js'
 import * as googleCredentialsRepo from '@/modules/google/googleCredentials.repo.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
@@ -157,13 +158,34 @@ export function updatePayments(
   return persistSettings(businessId, patch)
 }
 
-export function updateIdentity(
+/**
+ * The refusal a business with a repo config file gets for anything that would
+ * change which flow it runs. The file would win anyway — saving would show
+ * "guardado" and then do nothing.
+ */
+function managedByFile(businessId: string, what: string): ValidationError {
+  return new ValidationError({
+    code: 'flow_managed_by_file',
+    message: `business ${businessId} has a repo config file, refusing to change ${what} from the panel`,
+    userMessage: 'Este flujo lo administra Vamvu. Si necesitás cambiarlo, escribinos.',
+    logContext: { businessId, what },
+  })
+}
+
+export async function updateIdentity(
   businessId: string,
   patch: IdentityPatch,
 ): Promise<Result<BusinessSettings>> {
   // Expanded before it reaches the merge: the form sends one "Función" and the
   // stored shape has two fields for it.
-  return persistSettings(businessId, identitySettingsPatch(patch))
+  const fields = identitySettingsPatch(patch)
+  // Switching Vende/Agenda would leave the file's flowType disagreeing with the
+  // database, and the file would stop applying without anyone noticing.
+  const file = fileConfigFor(businessId)
+  if (file && fields.flowType !== undefined && fields.flowType !== file.flowType) {
+    return err(managedByFile(businessId, 'flowType'))
+  }
+  return persistSettings(businessId, fields)
 }
 
 export function updateMessages(
@@ -197,6 +219,7 @@ export async function updateConversationFlow(
   businessId: string,
   patch: ConversationPatch,
 ): Promise<Result<BusinessSettings>> {
+  if (fileConfigFor(businessId)) return err(managedByFile(businessId, 'conversationFlow'))
   try {
     const saved = await db.transaction(async (tx) => {
       const business = await businessRepo.findById(businessId, tx)

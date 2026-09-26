@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { BusinessSettings } from '@/modules/business/business.settings.js'
+import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { EMITTED_TRIGGERS, IDLE_TRIGGER, NODE_CATALOG } from './nodeCatalog.js'
+import { EMITTED_TRIGGERS, IDLE_TRIGGER, NODE_CATALOG, nodesForFlow } from './nodeCatalog.js'
 import {
   compileFlow,
   type FlowComposition,
@@ -42,8 +42,8 @@ const WITH_DEPOSIT = {
 }
 
 /** Every node the flow can actually be walked into, starting from idle. */
-function reachable(composition: FlowComposition): Set<string> {
-  const flow = compileFlow(composition)
+function reachable(composition: FlowComposition, flowType: FlowType): Set<string> {
+  const flow = compileFlow(composition, flowType)
   const seen = new Set([INITIAL_STATE])
   const queue = [INITIAL_STATE]
   while (queue.length > 0) {
@@ -64,7 +64,9 @@ describe('the node catalogue', () => {
     // either add the emitter or drop the exit — a declared route nobody can
     // take is worse than no route, because it reads as working.
     const orphans: string[] = []
-    for (const bp of NODE_CATALOG) {
+    // Cada tipo de flujo con sus extensiones: las salidas de agenda de los nodos
+    // core viven ahí, no en NODE_CATALOG.
+    for (const bp of [...nodesForFlow('appointments'), ...nodesForFlow('sales')]) {
       for (const trigger of Object.keys(bp.exits)) {
         if (!EMITTED_TRIGGERS.has(trigger)) orphans.push(`${bp.id} → ${trigger}`)
       }
@@ -75,7 +77,7 @@ describe('the node catalogue', () => {
   it('never jumps to a node that is not in the catalogue', () => {
     const ids = new Set(NODE_CATALOG.map((n) => n.id))
     const broken: string[] = []
-    for (const bp of NODE_CATALOG) {
+    for (const bp of [...nodesForFlow('appointments'), ...nodesForFlow('sales')]) {
       for (const [trigger, target] of Object.entries(bp.exits)) {
         if (target !== 'next' && !ids.has(target.node)) {
           broken.push(`${bp.id} → ${trigger} → ${target.node}`)
@@ -124,7 +126,7 @@ describe('presetFor', () => {
       const preset = presetFor(s)
       const checked = validateFlow(preset, s)
       expect(checked.ok, `${label}: ${checked.ok ? '' : checked.error.userMessage}`).toBe(true)
-      const reached = reachable(preset)
+      const reached = reachable(preset, s.flowType)
       for (const id of preset.nodes) {
         expect(reached.has(id), `${label}: "${id}" es inalcanzable`).toBe(true)
       }
@@ -134,10 +136,10 @@ describe('presetFor', () => {
 
 describe('compileFlow', () => {
   it("resolves 'next' to whatever the owner put after the node", () => {
-    const flow = compileFlow({
-      nodes: ['idle', 'greeting', 'informing', 'listado_servicios'],
-      overrides: {},
-    })
+    const flow = compileFlow(
+      { nodes: ['idle', 'greeting', 'informing', 'listado_servicios'], overrides: {} },
+      'appointments',
+    )
     // greeting advances on the customer's next message; the target is the node
     // that follows it in the list, not one named in the blueprint.
     expect(flow.greeting?.transitions.customer_message).toBe('informing')
@@ -145,14 +147,16 @@ describe('compileFlow', () => {
   })
 
   it('drops a jump whose target the owner did not include', () => {
-    const flow = compileFlow({ nodes: ['idle', 'greeting', 'confirmed'], overrides: {} })
+    const flow = compileFlow(
+      { nodes: ['idle', 'greeting', 'confirmed'], overrides: {} },
+      'appointments',
+    )
     // greeting declares a jump to show_availability, which is not composed here.
     expect(flow.greeting?.transitions.asks_availability).toBeUndefined()
     expect(flow.greeting?.transitions.appointment_booked).toBe('confirmed')
   })
-
   it('gives every node but idle a way back to idle, and no blueprint can opt out', () => {
-    const flow = compileFlow(presetFor(settings()))
+    const flow = compileFlow(presetFor(settings()), 'appointments')
     for (const [id, config] of Object.entries(flow)) {
       if (id === INITIAL_STATE) continue
       expect(config.transitions[IDLE_TRIGGER], `${id}`).toBe(INITIAL_STATE)
@@ -160,10 +164,13 @@ describe('compileFlow', () => {
   })
 
   it('lets the owner override the example and the edge cases', () => {
-    const flow = compileFlow({
-      nodes: ['idle', 'greeting'],
-      overrides: { greeting: { example: 'Buenas, soy Emma.', edgeCases: ['Cliente apurado.'] } },
-    })
+    const flow = compileFlow(
+      {
+        nodes: ['idle', 'greeting'],
+        overrides: { greeting: { example: 'Buenas, soy Emma.', edgeCases: ['Cliente apurado.'] } },
+      },
+      'appointments',
+    )
     expect(flow.greeting?.node.example).toBe('Buenas, soy Emma.')
     expect(flow.greeting?.node.edgeCases).toEqual(['Cliente apurado.'])
   })
@@ -171,18 +178,24 @@ describe('compileFlow', () => {
   it('never lets an override reach the objective or the steps', () => {
     // The motor is not the owner's. An override that could rewrite the steps
     // would let the panel silently disable a rule the code depends on.
-    const base = compileFlow({ nodes: ['idle', 'greeting'], overrides: {} })
-    const overridden = compileFlow({
-      nodes: ['idle', 'greeting'],
-      // biome-ignore lint/suspicious/noExplicitAny: forcing a shape the type forbids is the point
-      overrides: { greeting: { objective: 'otra cosa', steps: [] } as any },
-    })
+    const base = compileFlow({ nodes: ['idle', 'greeting'], overrides: {} }, 'appointments')
+    const overridden = compileFlow(
+      {
+        nodes: ['idle', 'greeting'],
+        // biome-ignore lint/suspicious/noExplicitAny: forcing a shape the type forbids is the point
+        overrides: { greeting: { objective: 'otra cosa', steps: [] } as any },
+      },
+      'appointments',
+    )
     expect(overridden.greeting?.node.objective).toBe(base.greeting?.node.objective)
     expect(overridden.greeting?.node.steps).toEqual(base.greeting?.node.steps)
   })
 
   it('skips an unknown node id instead of throwing mid-conversation', () => {
-    const flow = compileFlow({ nodes: ['idle', 'greeting', 'nodo_fantasma'], overrides: {} })
+    const flow = compileFlow(
+      { nodes: ['idle', 'greeting', 'nodo_fantasma'], overrides: {} },
+      'appointments',
+    )
     expect(Object.keys(flow)).toEqual(['idle', 'greeting'])
   })
 })
@@ -210,9 +223,11 @@ describe('validateFlow', () => {
   })
 
   it('refuses an unreachable node', () => {
+    // En un negocio de venta: correccion_datos es de venta, y en una clínica el
+    // validador lo rechazaría antes por ser del otro tipo, no por inalcanzable.
     const r = validateFlow(
       { nodes: ['idle', 'greeting', 'confirmed', 'correccion_datos'], overrides: {} },
-      settings(),
+      settings({ flowType: 'sales', collectDataFields: ['nombre'] }),
     )
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error.userMessage).toContain('inalcanzable')
@@ -249,7 +264,7 @@ describe('validateFlow', () => {
 })
 
 describe('the deposit guard', () => {
-  const flow = compileFlow(presetFor(settings(WITH_DEPOSIT)))
+  const flow = compileFlow(presetFor(settings(WITH_DEPOSIT)), 'appointments')
 
   it('refuses entry to await_payment without proof of a frozen booking', () => {
     const next = getNextState(flow, 'show_availability', 'deposit_required')
@@ -280,7 +295,7 @@ describe('the deposit guard', () => {
 })
 
 describe('getNextState', () => {
-  const flow = compileFlow(presetFor(settings()))
+  const flow = compileFlow(presetFor(settings()), 'appointments')
 
   it('stays put on a trigger the node does not list', () => {
     expect(getNextState(flow, 'greeting', 'payment_approved')).toBe('greeting')
@@ -296,7 +311,7 @@ describe('getNextState', () => {
 })
 
 describe('getStateConfig', () => {
-  const flow = compileFlow(presetFor(settings()))
+  const flow = compileFlow(presetFor(settings()), 'appointments')
 
   it('falls back to idle for a state the flow no longer defines', () => {
     // Happens for real: the owner removes a step while a conversation sits in

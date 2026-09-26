@@ -48,6 +48,12 @@ const FUNCTION_HINTS: Record<AssistantFunction, string> = {
   ambas: 'Atiende por orden de llegada y también reserva horarios.',
 }
 
+// Solo se ofrecen dos. 'ambas' (agenda + atiende sin cita) sigue existiendo en el
+// backend y se muestra únicamente si un negocio ya la tiene guardada: sacarla de
+// la lista dejaría el selector vacío y el próximo guardado la cambiaría sin que
+// nadie lo decida.
+const OFFERED_FUNCTIONS: AssistantFunction[] = ['agenda', 'vende']
+
 const FALLBACK_ASSISTANT: AssistantSettings = {
   name: 'Emma',
   gender: 'femenino',
@@ -123,6 +129,7 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
       saved={saved}
       error={error}
       dirty={dirty && name.trim().length > 0}
+      readOnly
     >
       <Field
         label="Nombre del asistente"
@@ -155,7 +162,7 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
 
       <Field
         label="Tono"
-        hint="Manda sobre el tono que trae el tipo de negocio."
+        hint="Cómo les habla a tus clientes: de tú o de usted."
         htmlFor="asst-tone"
       >
         <Select value={tone} onValueChange={(v) => setTone(v as AssistantTone)}>
@@ -178,7 +185,10 @@ export function IdentitySettings({ data }: { data: PanelSettings }): React.JSX.E
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {(Object.keys(FUNCTION_LABELS) as AssistantFunction[]).map((value) => (
+            {(OFFERED_FUNCTIONS.includes(storedFunction)
+              ? OFFERED_FUNCTIONS
+              : [...OFFERED_FUNCTIONS, storedFunction]
+            ).map((value) => (
               <SelectItem key={value} value={value}>
                 {FUNCTION_LABELS[value]}
               </SelectItem>

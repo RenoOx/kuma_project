@@ -1,6 +1,15 @@
-import { Bot, CalendarDays, LayoutDashboard, MessageSquare, Settings, Wrench } from 'lucide-react'
+import {
+  Bot,
+  CalendarDays,
+  FlaskConical,
+  LayoutDashboard,
+  MessageSquare,
+  Settings,
+  Wrench,
+} from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { usePendingAppointmentCount } from '../../hooks/useAppointments.js'
+import { useSimulatorStatus } from '../../hooks/useSimulator.js'
 import { type NicheCopy, nicheCopy } from '../../lib/constants.js'
 import { PanelLink } from '../../lib/session.js'
 import { cn } from '../../lib/utils.js'
@@ -23,6 +32,9 @@ const NAV: NavItem[] = [
   { to: '/configuracion', label: () => 'Configuración', icon: Settings },
 ]
 
+// Solo aparece si el servidor tiene SIMULATOR_ENABLED: en prod no existe.
+const SIMULATOR_ITEM: NavItem = { to: '/probar', label: () => 'Probar Emma', icon: FlaskConical }
+
 export function Sidebar({
   niche,
   booksAppointments = true,
@@ -32,7 +44,9 @@ export function Sidebar({
   booksAppointments?: boolean
 }): React.JSX.Element {
   const copy = nicheCopy(niche)
-  const items = booksAppointments ? NAV : NAV.filter((item) => item.to !== '/citas')
+  const simulator = useSimulatorStatus()
+  const base = booksAppointments ? NAV : NAV.filter((item) => item.to !== '/citas')
+  const items = simulator.data?.enabled ? [...base, SIMULATOR_ITEM] : base
   const { pathname } = useLocation()
   const pending = usePendingAppointmentCount()
 

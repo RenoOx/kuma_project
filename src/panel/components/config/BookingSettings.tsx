@@ -66,6 +66,7 @@ export function BookingSettings({
       saved={saved}
       error={error}
       dirty={dirty}
+      readOnly
     >
       <Field label="Modo de reserva" htmlFor="cfg-booking-mode">
         <Select value={bookingMode} onValueChange={(v) => setBookingMode(v as BookingMode)}>
