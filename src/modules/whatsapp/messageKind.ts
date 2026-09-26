@@ -128,6 +128,48 @@ export function classifyIncoming(msg: WAMessage): IncomingKind {
   return { kind: 'ignorable', reason: 'unknown', keys }
 }
 
+/**
+ * Si el mensaje es una respuesta ("reply") de WhatsApp a otro, el resumen de
+ * ESE otro mensaje — la primera línea si era la ficha de un servicio (nombre
+ * y precio, antes de la lista de puntos), o el texto si era texto plano.
+ * `null` si no es una respuesta, o si lo citado no es algo legible (una nota
+ * de voz, un sticker, etc.).
+ *
+ * Baileys ya trae esto en `contextInfo.quotedMessage` — nadie lo leía. Sin
+ * esto, "este" respondiendo a la ficha del tercer curso le llegaba a Emma
+ * como un "este" pelado, sin ninguna pista de a cuál se refería.
+ */
+export function quotedSummaryOf(msg: WAMessage): string | null {
+  const root = msg.message as MessageNode | null | undefined
+  if (!root) return null
+  const node = unwrap(root)
+
+  const extended = node.extendedTextMessage as
+    | { contextInfo?: { quotedMessage?: MessageNode } }
+    | undefined
+  const quoted = extended?.contextInfo?.quotedMessage
+  if (!quoted) return null
+
+  // Imagen, PDF o video de un servicio se mandan los tres con el mismo pie de
+  // foto (`sendMediaToCustomer` en outbound.ts pasa el mismo `caption` a los
+  // tres) — así que los tres tienen que mirarse acá, no solo la imagen. Audio
+  // se salta a propósito: WhatsApp no le pone pie de foto, no hay nada que leer.
+  const caption =
+    asText((quoted.imageMessage as { caption?: unknown } | undefined)?.caption) ??
+    asText((quoted.documentMessage as { caption?: unknown } | undefined)?.caption) ??
+    asText((quoted.videoMessage as { caption?: unknown } | undefined)?.caption)
+  const text =
+    caption ??
+    asText(quoted.conversation) ??
+    asText((quoted.extendedTextMessage as { text?: unknown } | undefined)?.text)
+  if (!text) return null
+
+  // Solo la primera línea: para una ficha es "nombre — precio", que es justo
+  // el dato que identifica cuál — la lista de puntos de abajo no aporta nada
+  // para saber A CUÁL se refiere y solo infla el historial.
+  return text.split('\n')[0]?.trim() || null
+}
+
 const FORMAT_LABELS: Record<UnsupportedFormat, string> = {
   video: 'un video',
   audio: 'un audio',

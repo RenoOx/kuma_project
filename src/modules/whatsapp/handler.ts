@@ -44,6 +44,7 @@ import {
   PAYMENT_BOOKED_PENDING_REPLY,
   PAYMENT_IMAGE_REPLY,
   PAYMENT_VERIFICATION_REPLY,
+  quotedSummaryOf,
   replyForFormat,
   type UnsupportedFormat,
 } from '@/modules/whatsapp/messageKind.js'
@@ -1560,10 +1561,18 @@ export function handleIncomingMessage(
     )
   }
 
+  // Si el cliente usó "responder" de WhatsApp sobre una ficha, esa cita se
+  // pierde apenas se junta con el resto en el buffer de abajo — para cuando
+  // se procesa, el `raw` a mano es el ÚLTIMO mensaje de la ráfaga, no el que
+  // citó nada. Por eso se adjunta ACÁ, antes de bufferMessage, para que viaje
+  // dentro del texto que se junta y persiste.
+  const quoted = quotedSummaryOf(raw)
+  const text = quoted ? `[Sobre: "${quoted}"] ${incoming.text}` : incoming.text
+
   // Debounce sits AFTER dedup (so repeats never enter a burst) and BEFORE the
   // lock (holding the lock while waiting would serialise the very messages we
   // are trying to group).
-  return bufferMessage(senderKey, incoming.text).then((joined) => {
+  return bufferMessage(senderKey, text).then((joined) => {
     if (joined === null) {
       log.info({ phone }, 'handler: message folded into a later burst from the same sender')
       return
