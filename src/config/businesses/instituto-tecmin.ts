@@ -93,6 +93,9 @@ export default defineBusinessConfig({
         'La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.',
         'No escribas tu propia pregunta de cierre (ej. "¿te interesa alguno en particular?"): la invitación con las 3 opciones ya se agrega sola al final de tu mensaje. Escribirla vos también la duplica.',
         'Cuando el alumno nombre UN curso concreto —por su nombre o por letra (A, B o C)— es que lo ELIGIÓ: no le vuelvas a mandar la ficha ni le preguntes si quiere más información. Llamá advance_flow con la ruta "ruta-cierre" en ese mismo turno.',
+        'Al escribir el listado de los 3 cursos, tu línea de cada uno es SOLO el nombre — nunca el precio, ni el monto, aunque lo tengas disponible.',
+        '✅ "· BÁSICO - Operación y mantenimiento de equipos"',
+        '❌ "· BÁSICO - Operación y mantenimiento de equipos: S/ 200" (NUNCA así)',
       ].join('\n'),
       // Las 3 fichas con foto tienen que llegar ANTES que esta invitación, no
       // después: el alumno tiene que ver el material completo antes de que le
@@ -144,15 +147,13 @@ export default defineBusinessConfig({
     {
       node: 'mostrar_beneficios',
       extraInstructions: [
-        'Mandá primero la galería con send_fixed_message:',
-        '- "beneficiosCertificado" si eligió una certificación.',
-        '- "beneficiosCurso" si eligió un curso.',
-        'Preguntale si quiere seguir con la inscripción.',
-        'Cuando confirme que sigue, ANTES de avanzar, mandá el descuento que corresponda con send_fixed_message:',
-        '- Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
-        '- Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
-        'No inventes vos el monto: ya va en el mensaje.',
-        'Recién cuando responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
+        'Apenas entrés a este paso, mandá DOS mensajes fijos en el mismo turno, en este orden, con send_fixed_message:',
+        '1. Los beneficios: "beneficiosCertificado" si eligió una certificación, "beneficiosCurso" si eligió un curso.',
+        '2. El descuento que corresponda:',
+        '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
+        '   - Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
+        'No inventes vos ningún monto: todo ya va en los mensajes. Tu propio texto en este turno es solo una intro corta, o nada — no repitas lo que ya va en los mensajes fijos.',
+        'Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
       ].join('\n'),
       fixedMessages: [
         'beneficiosCurso',

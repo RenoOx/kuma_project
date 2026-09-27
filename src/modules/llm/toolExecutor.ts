@@ -1023,11 +1023,14 @@ export async function executeTool(
             const ficha = cards.some((c) => c.serviceId === s.id)
             return {
               nombre: s.name,
-              precio: formatServicePrice(s),
-              // Solo para los que NO traen ficha: los que sí ya llevan la
-              // descripción en el pie de foto, y dársela también en texto
-              // plano es lo que hacía que el modelo la escribiera dos veces.
-              ...(ficha ? {} : { descripcion: s.description ?? null }),
+              // Solo para los que NO traen ficha: los que sí ya llevan el
+              // precio Y la descripción en el pie de foto (buildCardCaption),
+              // y dárselos también en el JSON es lo que hacía que el modelo
+              // los repitiera en su propio texto — no alcanzaba con pedirle
+              // que no lo hiciera si el dato seguía ahí para usar.
+              ...(ficha
+                ? {}
+                : { precio: formatServicePrice(s), descripcion: s.description ?? null }),
               ficha,
             }
           }),
