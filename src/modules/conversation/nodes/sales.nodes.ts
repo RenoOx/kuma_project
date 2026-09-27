@@ -79,7 +79,7 @@ export const SALES_NODES = [
         'Mostrarle lo que va a recibir al terminar lo que eligió, y confirmar que quiere seguir antes de pedirle sus datos.',
       steps: [
         'Mandá la galería de beneficios que corresponda con send_fixed_message.',
-        'Preguntale si quiere continuar con la inscripción.',
+        'Si ese mensaje fijo ya trae su propia pregunta de cierre, no preguntes nada más de tu parte — dejá tu texto vacío. Si no la trae, preguntale si quiere continuar con la inscripción.',
       ],
       edgeCases: [
         'Si todavía no eligió nada concreto, volvé a preguntarle cuál quiere.',
@@ -108,6 +108,38 @@ export const SALES_NODES = [
         'Dato con formato inválido: pedilo de nuevo con amabilidad, explicando qué falta.',
       ],
       example: '¡Perfecto! ¿A nombre de quién lo registro?',
+    },
+    exits: { data_complete: 'next' },
+  }),
+
+  // Nació de un caso real (Instituto Tecmin, 2026-09-27): un negocio que no
+  // necesita pedir NINGÚN dato al cliente en este punto (ya los sabe por la
+  // conversación, o directamente no le importan) pero sí necesita la captura
+  // del pago. `collect_data` no sirve para esto: su objetivo es "recolectar
+  // campos", y aunque tenga uno solo configurado, ese objetivo genérico le
+  // daba pie al modelo a inventar que hacía falta un nombre. Este nodo no
+  // tiene ese objetivo en ningún lado — solo pedir la captura.
+  //
+  // Mismo molde que mostrar_beneficios/asesoria_perfil: opt-in por archivo,
+  // no entra a PRESET_SALES.
+  defineNode({
+    id: 'solicitar_pago',
+    label: 'Solicitar pago',
+    hint: 'Pide la captura del comprobante de pago. No recolecta ningún dato del cliente.',
+    requires: ['collect_fields_configured'],
+    tools: [SAVE_DATA, ESCALATE],
+    node: {
+      objective: 'Pedir la captura del comprobante de pago. Nada más.',
+      steps: [
+        'Dale las instrucciones de pago que te configuró el negocio, tal cual.',
+        'Pedile la captura del comprobante.',
+        'Guardá lo que ya sabés de la conversación con save_customer_data, SIN preguntarle nada al cliente para eso — ya lo tenés (por ejemplo, el curso o certificación que eligió).',
+        'No le pidas NINGÚN otro dato —ni nombre, ni correo, ni teléfono— salvo que el negocio te lo haya pedido explícitamente arriba.',
+      ],
+      edgeCases: [
+        'Cliente que pregunta algo más antes de mandar la captura: respondé y volvé a pedirle la captura.',
+      ],
+      example: '¡Perfecto! Envíame la captura del pago para confirmar.',
     },
     exits: { data_complete: 'next' },
   }),
