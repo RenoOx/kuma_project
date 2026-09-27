@@ -77,6 +77,8 @@ export default defineBusinessConfig({
       extraInstructions: [
         'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes.',
         'La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.',
+        'No escribas tu propia pregunta de cierre (ej. "¿te interesa alguno en particular?"): la invitación con las 3 opciones ya se agrega sola al final de tu mensaje. Escribirla vos también la duplica.',
+        'Cuando el alumno nombre UN curso concreto —por su nombre o por letra (A, B o C)— es que lo ELIGIÓ: no le vuelvas a mandar la ficha ni le preguntes si quiere más información. Llamá advance_flow con la ruta "ruta-cierre" en ese mismo turno.',
         '',
         PRECIOS_CURSOS,
       ].join('\n'),
@@ -104,6 +106,7 @@ export default defineBusinessConfig({
         '- A o "1 a 2" → Certificación - 1 a 2 máquinas',
         '- B o "3 a 4" → Certificación - 3 a 4 máquinas',
         '- C o "5 o más" → Certificación - 5 máquinas o más',
+        'No escribas tu propia pregunta de cierre: la invitación con las 3 opciones ya se agrega sola al final de tu mensaje.',
         'Mandá la oferta con send_fixed_message (mensaje "ofertaCertificacion" y esa certificación). No escribas el precio vos: ya va en el mensaje.',
         'Después del mensaje fijo, solo preguntale si quiere avanzar con su certificación.',
         'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
