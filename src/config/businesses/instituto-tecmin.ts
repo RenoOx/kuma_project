@@ -91,10 +91,12 @@ export default defineBusinessConfig({
       extraInstructions: [
         'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. Tu texto es solo una intro corta: el precio y el detalle ya van en cada ficha, no los repitas vos.',
         'La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.',
-        'Cuando el alumno elija un curso concreto, ANTES de avanzar mandá el descuento de ESE curso con send_fixed_message: "descuentoBasico" para BÁSICO, "descuentoAvanzado" para AVANZADO, "descuentoMultiple" para OPERACIÓN MÚLTIPLE. No inventes vos el monto: ya va en el mensaje. Recién cuando confirme que quiere seguir, avanzá.',
       ].join('\n'),
+      // Las 3 fichas con foto tienen que llegar ANTES que esta invitación, no
+      // después: el alumno tiene que ver el material completo antes de que le
+      // pregunten cuál elige.
+      mediaFirst: true,
       cta: '¿En qué curso estás interesado?\nA. Básico\nB. Avanzado\nC. Operación Múltiple',
-      fixedMessages: ['descuentoBasico', 'descuentoAvanzado', 'descuentoMultiple'],
       routes: [
         {
           id: 'ruta-cierre',
@@ -139,15 +141,30 @@ export default defineBusinessConfig({
     {
       node: 'mostrar_beneficios',
       extraInstructions: [
-        'Mandá la galería con send_fixed_message:',
+        'Mandá primero la galería con send_fixed_message:',
         '- "beneficiosCertificado" si eligió una certificación.',
         '- "beneficiosCurso" si eligió un curso.',
+        'Preguntale si quiere seguir con la inscripción.',
+        'Cuando confirme que sigue, ANTES de avanzar, mandá el descuento que corresponda con send_fixed_message:',
+        '- Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
+        '- Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
+        'No inventes vos el monto: ya va en el mensaje.',
+        'Recién cuando responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
       ].join('\n'),
-      fixedMessages: ['beneficiosCurso', 'beneficiosCertificado'],
+      fixedMessages: [
+        'beneficiosCurso',
+        'beneficiosCertificado',
+        'descuentoBasico',
+        'descuentoAvanzado',
+        'descuentoMultiple',
+        'descuentoCert1a2',
+        'descuentoCert3a4',
+        'descuentoCert5oMas',
+      ],
       routes: [
         {
           id: 'continua',
-          when: 'El alumno quiere seguir con la inscripción después de ver la galería.',
+          when: 'El alumno ya respondió sobre el descuento (lo quiera aplicar o no) y quiere seguir con la inscripción.',
           to: 'collect_data',
         },
       ],
@@ -230,6 +247,21 @@ export default defineBusinessConfig({
     descuentoMultiple: {
       when: 'Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.',
       text: 'Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 800, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
+    },
+    // Descuento por certificación, montos reales (2026-09-27). Sin la línea de
+    // "cada 1er lunes": ese cronograma es de los cursos, las certificaciones no
+    // arrancan por cohorte mensual.
+    descuentoCert1a2: {
+      when: 'Eligió la certificación de 1 a 2 máquinas, antes de avanzar.',
+      text: 'Tenemos el descuento para tu certificación de S/ 30, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
+    },
+    descuentoCert3a4: {
+      when: 'Eligió la certificación de 3 a 4 máquinas, antes de avanzar.',
+      text: 'Tenemos el descuento para tu certificación de S/ 40, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
+    },
+    descuentoCert5oMas: {
+      when: 'Eligió la certificación de 5 máquinas o más, antes de avanzar.',
+      text: 'Tenemos el descuento para tu certificación de S/ 50, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
     },
   },
 })

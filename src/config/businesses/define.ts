@@ -37,6 +37,13 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * salen de `fixedMessages`, así que nombrar uno que no existe no compila.
    */
   fixedMessages?: NoInfer<M>[]
+  /**
+   * Manda las fotos/fichas de este paso ANTES del texto de Emma, en vez de
+   * después (el orden de siempre). Pensado para un paso que LISTA varias
+   * opciones con foto y cierra con una invitación: el cliente tiene que ver
+   * todo el material antes de que le pregunten cuál elige, no al revés.
+   */
+  mediaFirst?: boolean
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -97,6 +104,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.cta !== undefined ? { cta: step.cta } : {}),
     ...(step.onImage !== undefined ? { onImage: step.onImage } : {}),
     ...(step.fixedMessages !== undefined ? { fixedMessages: step.fixedMessages } : {}),
+    ...(step.mediaFirst !== undefined ? { mediaFirst: step.mediaFirst } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }

@@ -80,6 +80,10 @@ export default defineBusinessConfig({
         '',
         PRECIOS_CURSOS,
       ].join('\n'),
+      // Las 3 fichas con foto tienen que llegar ANTES que esta invitación, no
+      // después: el alumno tiene que ver el material completo antes de que le
+      // pregunten cuál elige.
+      mediaFirst: true,
       cta: '¿En qué curso estás interesado?\nA. Básico\nB. Avanzado\nC. Operación Múltiple',
       routes: [
         {

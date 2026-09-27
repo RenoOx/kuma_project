@@ -84,6 +84,8 @@ export interface StateConfig {
   onImage?: ImageHandling
   /** Los ids de mensajes fijos que Emma puede mandar en este paso. */
   fixedMessages?: string[]
+  /** Manda las fotos de este paso ANTES del texto de Emma, en vez de después. */
+  mediaFirst?: boolean
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -124,6 +126,8 @@ export interface NodeOverride {
    * declara el archivo del negocio, que es donde vive el texto.
    */
   fixedMessages?: string[]
+  /** Manda las fotos de este paso ANTES del texto de Emma, en vez de después. */
+  mediaFirst?: boolean
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -262,6 +266,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(cta ? { cta } : {}),
       ...(onImage ? { onImage } : {}),
       ...(fixedMessages.length > 0 ? { fixedMessages } : {}),
+      ...(override?.mediaFirst ? { mediaFirst: true } : {}),
     }
   })
 
