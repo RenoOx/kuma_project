@@ -152,7 +152,8 @@ export default defineBusinessConfig({
         '2. El descuento que corresponda:',
         '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
         '   - Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
-        'No inventes vos ningún monto: todo ya va en los mensajes. Tu propio texto en este turno es solo una intro corta, o nada — no repitas lo que ya va en los mensajes fijos.',
+        'No inventes vos ningún monto: todo ya va en los mensajes.',
+        'Después de mandar esos 2 mensajes, NO escribas NADA más de tu parte en este turno —ni una intro, ni una pregunta de cierre propia. El segundo mensaje ya termina con "¿Te gustaría aplicar el descuento?"; agregar tu propia pregunta lo duplica.',
         'Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
       ].join('\n'),
       fixedMessages: [
@@ -179,7 +180,10 @@ export default defineBusinessConfig({
       extraInstructions: [
         'Según lo que eligió:',
         '- Si eligió una CERTIFICACIÓN, dale los requisitos tal cual: 1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos. 2. Te enviaré los certificados para que verifiques que tus datos son correctos. 3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.',
-        '- Si eligió un CURSO: pedile que te mande la captura del pago del curso por Yape al 986547823 (Alexis Instituto Tecmin), con el precio que ya le diste.',
+        '- Si eligió un CURSO: pedile que te mande la captura del pago de INSCRIPCIÓN (no la inversión semanal, no el descuento — es un monto distinto) por Yape al 986547823 (Alexis Instituto Tecmin), con el monto exacto de su curso:',
+        '  - BÁSICO: S/ 100',
+        '  - AVANZADO: S/ 150',
+        '  - OPERACIÓN MÚLTIPLE: S/ 200',
         'Guardá el curso o la certificación elegida con su nombre exacto de la lista.',
       ].join('\n'),
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
