@@ -215,6 +215,26 @@ describe('la invitación de cierre de un paso', () => {
     )
     expect(prompt).toContain(`"${CTA}"`)
   })
+
+  it('con cta: false no cierra con ninguna invitación, ni la rotativa', () => {
+    // Antes un paso sin cta propio caía siempre en la rotativa, y el paso de
+    // pago terminaba con "¿Te interesa alguno en particular?".
+    const prompt = buildSystemPrompt(
+      fakeBusiness(),
+      [],
+      fakeSettings({ flowType: 'sales' }),
+      [message('user', 'hola')],
+      null,
+      new Set(),
+      {},
+      false,
+    )
+    expect(prompt).toContain('NO cierres con ninguna invitación')
+    // No se busca cada variante suelta: el bloque de "NO cierres" cita una
+    // ("¿Te ayudo con algo más?") como ejemplo de lo prohibido. Lo que no
+    // tiene que estar es la ORDEN de cerrar con una.
+    expect(prompt).not.toContain('Terminá tu respuesta con esta invitación exacta')
+  })
 })
 
 describe('a business that sells is never told how to book', () => {

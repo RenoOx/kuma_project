@@ -465,12 +465,27 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         )
       }
 
-      if (assistantContent) {
+      // `fixedOnly` (config del paso): si salió un mensaje fijo, ése es la
+      // respuesta completa y el texto propio del modelo se tira. Lo decide el
+      // código y no una instrucción, porque pedirle al modelo que no agregue
+      // nada después de un mensaje fijo no funcionó nunca: siempre escribía
+      // una frase de cierre ("Esto es lo que vas a tener. ¿…?"). Se lee el
+      // paso vigente al cerrar el turno, igual que el CTA y `mediaFirst`.
+      const discardText = stateConfig.fixedOnly === true && fixedOut.length > 0
+      const finalContent = discardText ? '' : assistantContent
+      if (discardText && assistantContent) {
+        log.debug(
+          { state: effectiveState, discarded: preview(assistantContent, 120) },
+          'fixedOnly step: model text discarded after a fixed message',
+        )
+      }
+
+      if (finalContent) {
         const persistResult = await messageService.append({
           businessId: params.businessId,
           conversationId: params.conversationId,
           role: 'assistant',
-          content: assistantContent,
+          content: finalContent,
         })
         if (!persistResult.ok) return persistResult
       }
@@ -507,7 +522,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       }
 
       return ok({
-        content: assistantContent,
+        content: finalContent,
         tokensInput: totalTokensInput,
         tokensOutput: totalTokensOutput,
         toolCallsExecuted: executedTools,

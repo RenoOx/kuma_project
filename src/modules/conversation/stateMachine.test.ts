@@ -198,6 +198,21 @@ describe('compileFlow', () => {
     )
     expect(Object.keys(flow)).toEqual(['idle', 'greeting'])
   })
+
+  it('carries "no invitation" and "fixed message only" through, and nothing when absent', () => {
+    const flow = compileFlow(
+      {
+        nodes: ['idle', 'greeting', 'informing'],
+        overrides: { informing: { cta: false, fixedOnly: true } },
+      },
+      'sales',
+    )
+    expect(flow.informing?.cta).toBe(false)
+    expect(flow.informing?.fixedOnly).toBe(true)
+    // Ausentes no aparecen: así un paso sin ellos compila idéntico a antes.
+    expect(flow.greeting && 'cta' in flow.greeting).toBe(false)
+    expect(flow.greeting && 'fixedOnly' in flow.greeting).toBe(false)
+  })
 })
 
 describe('validateFlow', () => {

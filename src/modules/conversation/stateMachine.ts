@@ -78,14 +78,19 @@ export interface StateConfig {
   branches: NodeBranch[]
   // Refuses entry unless the trigger arrives with evidence that satisfies this.
   entryGuard?: EntryGuard
-  /** La invitación de cierre fija de este paso; reemplaza a la rotativa. */
-  cta?: string
+  /**
+   * La invitación de cierre fija de este paso; reemplaza a la rotativa.
+   * `false`: ninguna invitación en este paso.
+   */
+  cta?: string | false
   /** Qué hacer si llega una foto en este paso; ausente = lo de siempre. */
   onImage?: ImageHandling
   /** Los ids de mensajes fijos que Emma puede mandar en este paso. */
   fixedMessages?: string[]
   /** Manda las fotos de este paso ANTES del texto de Emma, en vez de después. */
   mediaFirst?: boolean
+  /** Si salió un mensaje fijo, es la respuesta completa: el texto de Emma se descarta. */
+  fixedOnly?: boolean
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -117,8 +122,8 @@ export interface NodeOverride {
    * arrow" stays inside the same guarantee as everything else.
    */
   branches?: NodeBranch[]
-  /** La invitación de cierre de este paso, tal cual. */
-  cta?: string
+  /** La invitación de cierre de este paso, tal cual. `false`: ninguna. */
+  cta?: string | false
   /** Qué hacer si llega una foto en este paso. */
   onImage?: ImageHandling
   /**
@@ -128,6 +133,8 @@ export interface NodeOverride {
   fixedMessages?: string[]
   /** Manda las fotos de este paso ANTES del texto de Emma, en vez de después. */
   mediaFirst?: boolean
+  /** Si salió un mensaje fijo, es la respuesta completa: el texto de Emma se descarta. */
+  fixedOnly?: boolean
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -228,7 +235,9 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
 
     const override = composition.overrides[id]
     const extra = override?.extraInstructions?.trim()
-    const cta = override?.cta?.trim()
+    // `false` pasa tal cual (el paso eligió "ninguna invitación"); un texto
+    // vacío o solo espacios cuenta como ausente, igual que antes.
+    const cta = override?.cta === false ? false : override?.cta?.trim()
     const onImage = imageHandlingOf(override)
     const fixedMessages = (override?.fixedMessages ?? []).filter((id) => id.trim() !== '')
     // Same rule as a blueprint's fixed jump: a route to a step the owner did not
@@ -263,10 +272,11 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(bp.entryGuard ? { entryGuard: bp.entryGuard } : {}),
       // Solo si hay algo: un paso sin estos campos compila idéntico a antes, y
       // eso es lo que mantienen los snapshots de todos los negocios.
-      ...(cta ? { cta } : {}),
+      ...(cta || cta === false ? { cta } : {}),
       ...(onImage ? { onImage } : {}),
       ...(fixedMessages.length > 0 ? { fixedMessages } : {}),
       ...(override?.mediaFirst ? { mediaFirst: true } : {}),
+      ...(override?.fixedOnly ? { fixedOnly: true } : {}),
     }
   })
 

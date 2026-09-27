@@ -605,8 +605,12 @@ export interface ConversationNodeOverride {
   extraInstructions?: string
   /** At most four: past a handful Emma stops choosing and starts guessing. */
   branches?: ConversationBranch[]
-  /** La invitación de cierre de este paso, tal cual. Hasta 120 caracteres. */
-  cta?: string
+  /**
+   * La invitación de cierre de este paso, tal cual. Hasta 120 caracteres.
+   * `false` solo llega desde un archivo de negocio: el paso no cierra con
+   * ninguna invitación.
+   */
+  cta?: string | false
   /** Qué hacer si el cliente manda una foto en este paso. */
   onImage?: ConversationImageHandling
 }

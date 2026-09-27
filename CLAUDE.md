@@ -345,9 +345,25 @@ ocultarlo en el panel, un PATCH armado a mano lo metería igual.
 
 Texto: `label`, `edgeCases`, `example`, `extraInstructions`, `routes` y **`cta`**
 (la invitación de cierre del paso, tal cual; reemplaza a la rotativa y va una vez
-por paso: `decideStepCallToAction` en `prompts.ts`).
+por paso: `decideStepCallToAction` en `prompts.ts`). **`cta: false`** (solo desde
+archivo) = el paso no cierra con ninguna invitación, ni la fija ni la rotativa.
+Hacía falta: sin `cta`, la rotativa de venta (`SALES_CTA_VARIANTS`) le ORDENABA al
+modelo cerrar el mensaje de pago con "¿Te interesa alguno en particular?".
 
-La única excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
+Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
+
+- **`mediaFirst: true`** — las fotos del turno salen ANTES del texto de Emma (por
+  defecto van después). Para un paso que lista opciones con foto y cierra con una
+  invitación: el cliente ve el material antes de que le pregunten cuál elige.
+  `LLMResponse.mediaFirst` → `handler.ts`.
+- **`fixedOnly: true`** — si en el turno salió un mensaje fijo, ése ES la respuesta:
+  `llm.service.ts` descarta el texto propio del modelo antes de persistirlo y
+  enviarlo. Existe porque pedirle por instrucción "no agregues nada después del
+  mensaje fijo" falló en 4 intentos seguidos (Instituto Tecmin, 2026-09-27): el
+  modelo, después de ejecutar tools, casi siempre escribe una frase de cierre. Si
+  en el turno NO salió mensaje fijo, el texto sale normal.
+
+La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
 chat, y el mensaje al cliente. No toca el motor (tools, salidas, guards); decide
 el destino de una foto que el modelo igual nunca ve. Lo aplica
