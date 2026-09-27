@@ -38,6 +38,12 @@ const TEMPERATURE = 0.4
 const MAX_TOKENS = 600
 const HISTORY_LIMIT = 20
 const MAX_TOOL_ITERATIONS = 5
+// Antes 1: dos mensajes fijos en el mismo turno solo se topaban para no
+// apilar dos OFERTAS que compitan entre sí, pero un paso puede necesitar
+// mandar algo informativo (beneficios) seguido del gancho de venta
+// (descuento) — complementarios, no competidores. Sigue acotado, no es
+// "sin límite".
+const MAX_FIXED_MESSAGES_PER_TURN = 2
 const OPENAI_TIMEOUT_MS = 30_000
 const MAX_ITERATIONS_FALLBACK_TEXT =
   'No me quedó claro cómo ayudarte con eso. Un encargado te va a contactar para orientarte mejor.'
@@ -372,8 +378,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // it already committed to rather than cutting itself off mid-reply.
   let attachmentBudget = MAX_ATTACHMENTS_PER_TURN
   let escalated = false
-  // Uno por turno: cada mensaje fijo es un mensaje saliente (más su imagen), y
-  // dos ofertas en la misma respuesta no son una oferta más clara.
+  // Topado a MAX_FIXED_MESSAGES_PER_TURN: cada mensaje fijo es un mensaje
+  // saliente (más su imagen), y apilar demasiadas ofertas en la misma
+  // respuesta no las hace más claras.
   const fixedOut: FixedOutbound[] = []
   let fixedPersisted = 0
 
@@ -559,8 +566,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       queueAttachments(attachments, toolResult.attachments ?? [], attachmentBudget)
 
       for (const fixed of toolResult.fixedMessages ?? []) {
-        if (fixedOut.length > 0) {
-          log.warn({ tool: call.function.name }, 'second fixed message in one turn ignored')
+        if (fixedOut.length >= MAX_FIXED_MESSAGES_PER_TURN) {
+          log.warn({ tool: call.function.name }, 'fixed message beyond per-turn cap ignored')
           continue
         }
         fixedOut.push(fixed)

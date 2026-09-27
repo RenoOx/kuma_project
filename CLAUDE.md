@@ -382,11 +382,15 @@ negocio nunca dio.
   `{precio}`. **`{precio}` exige precio fijo** (`priceMin === priceMax`, sin
   evaluación): con un rango se niega, la tool devuelve error y el modelo escala.
   Un marcador desconocido también se niega antes de llegar al cliente.
-- Máximo uno por turno (el mensaje en sí, no las fotos que lleva). Sale ANTES
-  de la respuesta de Emma, por `enqueueSend` (`sendFixedMessages` en
-  `handler.ts`), y se guarda en el historial como mensaje de assistant DESPUÉS
-  de todos los resultados de tools de la vuelta: meterlo entre `tool_calls` y
-  su resultado rompe el formato de OpenAI.
+- Máximo `MAX_FIXED_MESSAGES_PER_TURN` (2) por turno — los mensajes en sí, no
+  las fotos que llevan. Empezó en 1, pero un paso puede necesitar mandar algo
+  informativo (ej. beneficios) seguido del gancho de venta (ej. descuento):
+  complementarios, no dos ofertas compitiendo, así que 2 alcanza sin volver a
+  "sin límite". Salen ANTES de la respuesta de Emma, por `enqueueSend`
+  (`sendFixedMessages` en `handler.ts`), en el orden en que el modelo los pidió,
+  y se guardan en el historial como mensajes de assistant DESPUÉS de todos los
+  resultados de tools de la vuelta: meterlos entre `tool_calls` y su resultado
+  rompe el formato de OpenAI.
 - **`images?: boolean` es un flag de intención, no la lista de fotos.** Un
   mensaje que lo declara puede llevar una galería; uno que no, es puro texto y
   ni se consulta contra el almacenamiento al mandarse — no tiene sentido
