@@ -173,13 +173,13 @@ export default defineBusinessConfig({
         {
           id: 'continua',
           when: 'El alumno ya respondió sobre el descuento (lo quiera aplicar o no) y quiere seguir con la inscripción.',
-          to: 'collect_data',
+          to: 'solicitar_pago',
         },
       ],
     },
 
     {
-      node: 'collect_data',
+      node: 'solicitar_pago',
       extraInstructions: [
         'Según lo que eligió:',
         '- Si eligió una CERTIFICACIÓN, dale los requisitos tal cual: 1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos. 2. Te enviaré los certificados para que verifiques que tus datos son correctos. 3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.',
@@ -187,8 +187,6 @@ export default defineBusinessConfig({
         '  - BÁSICO: S/ 100',
         '  - AVANZADO: S/ 150',
         '  - OPERACIÓN MÚLTIPLE: S/ 200',
-        'Ese mensaje de instrucciones de pago termina ahí — no agregues ninguna otra pregunta (nombre, ni nada) en el mismo mensaje.',
-        'Guardá el curso o la certificación elegida con su nombre exacto de la lista.',
       ].join('\n'),
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
       // pausa en ese chat. El dueño la vuelve a prender desde el Inbox.
