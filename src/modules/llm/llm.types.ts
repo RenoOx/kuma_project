@@ -42,4 +42,10 @@ export interface LLMResponse {
    * primero la oferta tal cual, después su pregunta para seguir.
    */
   fixedMessages: FixedOutbound[]
+  /**
+   * Si es true, el handler manda `attachments` ANTES del texto de Emma, en
+   * vez de después (el orden de siempre). Viene del `mediaFirst` del paso
+   * compilado — ver stateMachine.ts.
+   */
+  mediaFirst: boolean
 }

@@ -499,6 +499,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         maxIterationsHit: false,
         attachments,
         fixedMessages: fixedOut,
+        // Del paso vigente al CERRAR el turno: es el mismo criterio que usa el
+        // CTA (stateConfig ya refleja cualquier advance_flow de esta vuelta).
+        mediaFirst: stateConfig.mediaFirst ?? false,
       })
     }
 
@@ -667,6 +670,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // Estos sí: ya quedaron en el historial como dichos, y no mandarlos dejaría
     // al dueño leyendo en el Inbox una oferta que el cliente nunca recibió.
     fixedMessages: fixedOut,
+    // Sin attachments en este camino, el orden no importa.
+    mediaFirst: false,
   })
 }
 

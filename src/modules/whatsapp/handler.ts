@@ -1353,6 +1353,24 @@ async function processMessage(
     })
   }
 
+  // Por defecto la foto va DESPUÉS del texto: ilustra lo que Emma acaba de
+  // decir, y una que llega antes lee como un non sequitur. `mediaFirst`
+  // (config del paso, ver stateMachine.ts) invierte esto para un paso que
+  // LISTA varias opciones con foto y cierra con una invitación — ahí el
+  // cliente tiene que ver todo el material antes de que le pregunten cuál
+  // elige, no al revés.
+  const mediaFirst = llmResult.ok && llmResult.data.mediaFirst
+
+  if (mediaFirst && llmResult.ok && llmResult.data.attachments.length > 0) {
+    await sendServiceImages({
+      businessId,
+      conversationId: conversation.id,
+      jid,
+      attachments: llmResult.data.attachments,
+      log,
+    })
+  }
+
   log.info(
     { jid, replyLen: replyText.length, replyPreview: preview(replyText) },
     'about to send reply over whatsapp',
@@ -1364,9 +1382,7 @@ async function processMessage(
     log.error({ err, jid }, 'failed to send reply over whatsapp')
   }
 
-  // After the text and never before: the photo illustrates what Emma just said,
-  // and one that arrives first reads as a non sequitur.
-  if (llmResult.ok && llmResult.data.attachments.length > 0) {
+  if (!mediaFirst && llmResult.ok && llmResult.data.attachments.length > 0) {
     await sendServiceImages({
       businessId,
       conversationId: conversation.id,
