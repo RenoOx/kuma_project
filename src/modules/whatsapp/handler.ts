@@ -1371,15 +1371,21 @@ async function processMessage(
     })
   }
 
-  log.info(
-    { jid, replyLen: replyText.length, replyPreview: preview(replyText) },
-    'about to send reply over whatsapp',
-  )
-  try {
-    await sendWithPresence({ businessId, jid, text: replyText, send, readKey: raw.key })
-    log.info({ jid }, 'reply sent successfully')
-  } catch (err) {
-    log.error({ err, jid }, 'failed to send reply over whatsapp')
+  // Vacío es válido: un turno que solo mandó mensajes fijos puede cerrar sin
+  // texto propio (ver el comentario de mediaFirst/fixedOut en llm.service.ts).
+  // Mandar un mensaje de WhatsApp en blanco no tiene sentido, así que se
+  // salta directo — no es un error, no hay nada que loguear como fallo.
+  if (replyText.trim() !== '') {
+    log.info(
+      { jid, replyLen: replyText.length, replyPreview: preview(replyText) },
+      'about to send reply over whatsapp',
+    )
+    try {
+      await sendWithPresence({ businessId, jid, text: replyText, send, readKey: raw.key })
+      log.info({ jid }, 'reply sent successfully')
+    } catch (err) {
+      log.error({ err, jid }, 'failed to send reply over whatsapp')
+    }
   }
 
   if (!mediaFirst && llmResult.ok && llmResult.data.attachments.length > 0) {
