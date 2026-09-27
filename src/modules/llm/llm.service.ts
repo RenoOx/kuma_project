@@ -443,7 +443,14 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
     // Final answer: model decided not to call any tools.
     if (!toolCalls || toolCalls.length === 0) {
-      if (!assistantContent) {
+      // Vacío es un error solo si además no se mandó nada fijo esta vuelta:
+      // sin fixedOut, un content vacío es una respuesta que no le dijo nada
+      // al cliente. Con fixedOut, el mensaje fijo YA le dijo algo (y ya se
+      // persistió más arriba en el loop) — un cierre sin texto propio es una
+      // respuesta válida, no un fallo. Antes esto no existía: el modelo no
+      // tenía forma de "no decir nada", así que agregaba una frase de cierre
+      // aunque se le pidiera lo contrario.
+      if (!assistantContent && fixedOut.length === 0) {
         return err(
           new AppError({
             code: 'llm_empty_response',
@@ -458,13 +465,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         )
       }
 
-      const persistResult = await messageService.append({
-        businessId: params.businessId,
-        conversationId: params.conversationId,
-        role: 'assistant',
-        content: assistantContent,
-      })
-      if (!persistResult.ok) return persistResult
+      if (assistantContent) {
+        const persistResult = await messageService.append({
+          businessId: params.businessId,
+          conversationId: params.conversationId,
+          role: 'assistant',
+          content: assistantContent,
+        })
+        if (!persistResult.ok) return persistResult
+      }
 
       log.info(
         {

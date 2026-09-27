@@ -47,8 +47,11 @@ export default defineBusinessConfig({
   instructions:
     'Cuando LISTES varias opciones juntas (cursos o certificaciones), no digas el precio de cada una — solo el nombre. El precio se lo das recién cuando pregunta por UNA en particular, o cuando ya viene en un mensaje fijo.',
 
-  // Lo que Emma pide y guarda en collect_data, en este orden.
-  collectData: ['nombre completo', 'curso o certificación elegida'],
+  // Lo que Emma pide y guarda en collect_data. Sin 'nombre completo' a
+  // propósito (2026-09-27): el dueño no lo quiere pedir en este paso — el
+  // mensaje de pago tiene que terminar en la instrucción de pago, sin nada
+  // más pegado.
+  collectData: ['curso o certificación elegida'],
 
   // El flujo nuevo cobra directo: sin esto, la fila real de Tecmin (adelanto
   // de S/30 por Yape) le agregaría al prompt un bloque de "para separar el
@@ -143,7 +146,7 @@ export default defineBusinessConfig({
     },
 
     // Entre "ya eligió" y "dame tus datos": le muestra lo que recibe al
-    // terminar antes de pedirle el nombre. Cruzan los dos caminos.
+    // terminar antes de pedir la captura del pago. Cruzan los dos caminos.
     {
       node: 'mostrar_beneficios',
       extraInstructions: [
@@ -153,7 +156,7 @@ export default defineBusinessConfig({
         '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
         '   - Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
         'No inventes vos ningún monto: todo ya va en los mensajes.',
-        'Después de mandar esos 2 mensajes, NO escribas NADA más de tu parte en este turno —ni una intro, ni una pregunta de cierre propia. El segundo mensaje ya termina con "¿Te gustaría aplicar el descuento?"; agregar tu propia pregunta lo duplica.',
+        'Después de mandar esos 2 mensajes, tu propio texto en este turno puede quedar VACÍO — no hace falta que agregues nada. El segundo mensaje ya termina con "¿Te gustaría aplicar el descuento?"; cualquier frase tuya de más lo duplica.',
         'Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
       ].join('\n'),
       fixedMessages: [
@@ -184,6 +187,7 @@ export default defineBusinessConfig({
         '  - BÁSICO: S/ 100',
         '  - AVANZADO: S/ 150',
         '  - OPERACIÓN MÚLTIPLE: S/ 200',
+        'Ese mensaje de instrucciones de pago termina ahí — no agregues ninguna otra pregunta (nombre, ni nada) en el mismo mensaje.',
         'Guardá el curso o la certificación elegida con su nombre exacto de la lista.',
       ].join('\n'),
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
