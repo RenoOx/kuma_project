@@ -313,6 +313,7 @@ export type CallToActionDecision =
         | 'booking_done'
         | 'step_already_said'
         | 'greeting_asks'
+        | 'step_none'
     }
 
 /**
@@ -1401,8 +1402,9 @@ export function buildSystemPrompt(
   // working and simply renders nothing.
   customerFacts: Record<string, string> = {},
   // La invitación fija del paso actual, si el dueño escribió una. Al final y
-  // opcional por lo mismo que los dos anteriores.
-  stepCta?: string,
+  // opcional por lo mismo que los dos anteriores. `false`: el paso eligió no
+  // cerrar con ninguna invitación.
+  stepCta?: string | false,
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
@@ -1418,9 +1420,15 @@ export function buildSystemPrompt(
     : pickGreeting(business.name)
   // Cualquier pregunta alcanza: el saludo ya invita a responder.
   const greetingAsks = configuredGreeting?.includes('?') ?? false
-  const cta = stepCta
-    ? decideStepCallToAction(history, stepCta)
-    : decideCallToAction(history, ctaFlavourFor(settings), Math.random, greetingAsks)
+  // Tres casos: el paso no quiere ninguna invitación (`false` — sin esto, la
+  // rotativa le ordenaba cerrar con "¿Te interesa alguno en particular?"
+  // incluso en el paso de pago), tiene la suya fija, o usa la rotativa.
+  const cta: CallToActionDecision =
+    stepCta === false
+      ? { include: false, reason: 'step_none' }
+      : stepCta
+        ? decideStepCallToAction(history, stepCta)
+        : decideCallToAction(history, ctaFlavourFor(settings), Math.random, greetingAsks)
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),

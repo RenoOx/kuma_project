@@ -28,8 +28,12 @@ export interface BusinessStep<F extends FlowType, M extends string> {
   extraInstructions?: string
   /** Owner-written ways out of this step, on top of its fixed exits. */
   routes?: Array<{ id: string; when: string; to: NodeIdFor<F> }>
-  /** La invitación de cierre de este paso, tal cual. */
-  cta?: string
+  /**
+   * La invitación de cierre de este paso, tal cual. `false`: este paso no
+   * cierra con ninguna invitación (ni la fija ni la rotativa). Ausente: la
+   * rotativa de siempre.
+   */
+  cta?: string | false
   /** Qué hacer si el cliente manda una foto en este paso. */
   onImage?: ImageHandling
   /**
@@ -44,6 +48,13 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * todo el material antes de que le pregunten cuál elige, no al revés.
    */
   mediaFirst?: boolean
+  /**
+   * Si en un turno de este paso sale un mensaje fijo, ESE mensaje es la
+   * respuesta completa: el texto propio de Emma se descarta antes de enviarse.
+   * Existe porque pedirle al modelo que no agregue nada después de un mensaje
+   * fijo no funciona — casi siempre escribe una frase de cierre igual.
+   */
+  fixedOnly?: boolean
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -105,6 +116,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.onImage !== undefined ? { onImage: step.onImage } : {}),
     ...(step.fixedMessages !== undefined ? { fixedMessages: step.fixedMessages } : {}),
     ...(step.mediaFirst !== undefined ? { mediaFirst: step.mediaFirst } : {}),
+    ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }

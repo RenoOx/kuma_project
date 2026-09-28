@@ -482,9 +482,13 @@ function NodeRow({
             </span>
             <Input
               id={`cta-${node.id}`}
-              value={override.cta ?? ''}
+              value={override.cta || ''}
               maxLength={120}
-              placeholder="Ej: ¿Cuál te gustaría iniciar?"
+              placeholder={
+                override.cta === false
+                  ? 'Sin invitación: este paso no cierra con ninguna'
+                  : 'Ej: ¿Cuál te gustaría iniciar?'
+              }
               onChange={(e) => onOverride({ cta: e.target.value })}
             />
           </fieldset>

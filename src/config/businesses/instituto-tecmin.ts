@@ -156,9 +156,13 @@ export default defineBusinessConfig({
         '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
         '   - Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
         'No inventes vos ningún monto: todo ya va en los mensajes.',
-        'Después de mandar esos 2 mensajes, tu propio texto en este turno puede quedar VACÍO — no hace falta que agregues nada. El segundo mensaje ya termina con "¿Te gustaría aplicar el descuento?"; cualquier frase tuya de más lo duplica.',
         'Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.',
       ].join('\n'),
+      // Los 2 mensajes fijos SON la respuesta: el descuento ya termina con su
+      // pregunta. Cualquier texto propio de Emma en ese turno se descarta en
+      // código — pedírselo por instrucción falló 4 veces seguidas.
+      fixedOnly: true,
+      cta: false,
       fixedMessages: [
         'beneficiosCurso',
         'beneficiosCertificado',
@@ -181,13 +185,18 @@ export default defineBusinessConfig({
     {
       node: 'solicitar_pago',
       extraInstructions: [
-        'Según lo que eligió:',
-        '- Si eligió una CERTIFICACIÓN, dale los requisitos tal cual: 1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos. 2. Te enviaré los certificados para que verifiques que tus datos son correctos. 3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.',
-        '- Si eligió un CURSO: pedile que te mande la captura del pago de INSCRIPCIÓN (no la inversión semanal, no el descuento — es un monto distinto) por Yape al 986547823 (Alexis Instituto Tecmin), con el monto exacto de su curso:',
-        '  - BÁSICO: S/ 100',
-        '  - AVANZADO: S/ 150',
-        '  - OPERACIÓN MÚLTIPLE: S/ 200',
+        'Apenas entrés a este paso, mandá con send_fixed_message el mensaje de pago de lo que eligió:',
+        '- Curso: "pagoBasico" (BÁSICO), "pagoAvanzado" (AVANZADO), "pagoMultiple" (OPERACIÓN MÚLTIPLE).',
+        '- Certificación: "pagoCertificacion", con la certificación que eligió.',
+        'No escribas vos el monto ni los datos de pago: ya van en el mensaje.',
       ].join('\n'),
+      // El monto va en un mensaje fijo por curso, no en una lista dentro de
+      // las instrucciones: con la lista, el modelo le cobró S/ 100 (BÁSICO) a
+      // un alumno de OPERACIÓN MÚLTIPLE (S/ 200). Y ese mensaje es la
+      // respuesta entera: termina en "me mandas la captura", sin nada atrás.
+      fixedOnly: true,
+      cta: false,
+      fixedMessages: ['pagoBasico', 'pagoAvanzado', 'pagoMultiple', 'pagoCertificacion'],
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
       // pausa en ese chat. El dueño la vuelve a prender desde el Inbox.
       onImage: { forward: true, pause: true },
@@ -272,6 +281,30 @@ export default defineBusinessConfig({
     descuentoCert5oMas: {
       when: 'Eligió la certificación de 5 máquinas o más, antes de avanzar.',
       text: 'Tenemos el descuento para tu certificación de S/ 50, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?',
+    },
+    // Pago de INSCRIPCIÓN por curso, montos reales (2026-09-27). Es un monto
+    // distinto de la inversión semanal y del descuento. Uno por curso para que
+    // el monto lo ponga el código: con los tres en una lista, el modelo mezcló
+    // cuál era de quién.
+    pagoBasico: {
+      when: 'Eligió el curso BÁSICO y quiere seguir con la inscripción.',
+      text: 'Para confirmar tu inscripción, realiza el pago de S/ 100 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.',
+    },
+    pagoAvanzado: {
+      when: 'Eligió el curso AVANZADO y quiere seguir con la inscripción.',
+      text: 'Para confirmar tu inscripción, realiza el pago de S/ 150 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.',
+    },
+    pagoMultiple: {
+      when: 'Eligió el curso OPERACIÓN MÚLTIPLE y quiere seguir con la inscripción.',
+      text: 'Para confirmar tu inscripción, realiza el pago de S/ 200 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.',
+    },
+    pagoCertificacion: {
+      when: 'Eligió una CERTIFICACIÓN y quiere seguir con la inscripción.',
+      text: [
+        '1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos.',
+        '2. Te enviaré los certificados para que verifiques que tus datos son correctos.',
+        '3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.',
+      ].join('\n'),
     },
   },
 })
