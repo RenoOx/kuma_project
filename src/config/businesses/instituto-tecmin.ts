@@ -130,7 +130,7 @@ export default defineBusinessConfig({
         'No le OFREZCAS los cursos vos primero. Pero si el alumno pregunta por ellos o dice que prefiere uno, respondele bien (send_service_media para el detalle) y avanzalo con esa elección.',
       ].join('\n'),
       cta: '¿Cuántas máquinas operas?\nA. 1 a 2 máquinas\nB. 3 a 4 máquinas\nC. 5 máquinas o más',
-      fixedMessages: ['ofertaCertificacion'],
+    /*   fixedMessages: ['ofertaCertificacion'], */
       routes: [
         {
           id: 'quiere-certificarse',
