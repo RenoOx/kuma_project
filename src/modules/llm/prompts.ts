@@ -1374,6 +1374,14 @@ function buildVariableTail(
         : 'Separala del resto con una línea en blanco. Podés acompañarla con 😊.',
       `  Ejemplo: "Los tratamientos faciales cuestan de *S/ 60* a *S/ 90* e incluyen limpieza e hidratación.\\n\\n${cta.text}${carriesEmoji ? '' : ' 😊'}"`,
     )
+    // Solo con la invitación fija de un paso: el modelo sumaba una pregunta
+    // propia antes ("¿Te interesa avanzar con alguna…?") y quedaban dos. La
+    // rotativa no la lleva, así el prompt de los presets no cambia.
+    if (cta.reason === 'step') {
+      lines.push(
+        'Esa es la ÚNICA pregunta de cierre del mensaje: no agregues otra antes (ni "¿Te interesa…?", ni "¿Querés avanzar…?"). Tu texto va sin pregunta y termina con esa invitación.',
+      )
+    }
   } else {
     lines.push(
       'NO cierres con ninguna invitación, pregunta de cortesía ni ofrecimiento de agendar.',

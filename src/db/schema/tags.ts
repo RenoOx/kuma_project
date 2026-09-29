@@ -11,6 +11,12 @@ import { conversations } from './conversations.js'
  * enough to name what matters in it — "VIP", "Reclamo", "Debe seña" — and no
  * enum shipped from here was going to guess those.
  *
+ * Una excepción, a propósito: la calificación de leads (QUALIFICATION_TAGS en
+ * modules/tag/tag.types.ts). "Por validar" la pone el código cuando Emma se
+ * pausa porque llegó la captura o el DNI, y "Pagó" / "No pagó" las pone el
+ * dueño con los botones del chat. Son etiquetas comunes: el dueño puede
+ * renombrarlas o borrarlas, y se vuelven a crear por nombre cuando hacen falta.
+ *
  * `color` holds a palette key, not a hex value: the panel renders it through
  * TAG_COLORS so every label is guaranteed to read against the dark background,
  * and changing a shade later is one edit rather than a data migration.

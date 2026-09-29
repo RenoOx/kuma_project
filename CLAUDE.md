@@ -394,6 +394,29 @@ el destino de una foto que el modelo igual nunca ve. Lo aplica
   `handleCustomerImage` solo agrega otra cuando es de pago: esas llevan
   instrucciones para el modelo ("NO llames book_appointment…").
 
+### Qué responde Emma a cada formato (clientes, desde 2026-09-28)
+
+Regla del negocio: la multimedia no se responde ni influye en lo que Emma dice.
+Todo se sigue **guardando** (el dueño lo ve en el Inbox); lo que cambia es la
+respuesta y lo que lee el modelo. El chat del dueño no cambia.
+
+| Llega | Emma |
+|---|---|
+| Solo emojis (`isEmojiOnly`: "👍", "😂", "🇵🇪") | silencio, ni como "sí" |
+| Sticker, video (y GIF), documento, ubicación, contacto (`IGNORED_CUSTOMER_FORMATS`) | silencio |
+| Audio / nota de voz | "solo puedo leer mensajes escritos…" (`AUDIO_REPLY_VARIANTS`, 1 vez cada 10 min) |
+| Foto en un paso con `onImage`, o con pago esperado / cita pendiente / adelanto | se atiende (reenvío, respuesta) |
+| Foto fuera de eso | silencio |
+
+El corte va en `processMessage` justo después de guardar el mensaje y ANTES de
+los gates: un sticker durante la pausa del bot no escala ni avisa al dueño. Lo
+ignorado sale del historial que ve el modelo (`isIgnoredForModel` en
+`convertHistoryToChatMessages`) — sin eso, "no influye" era mentira. Las fotos y
+el audio sí quedan en el historial: el modelo necesita saber que llegaron.
+
+Con un CTA propio del paso, el bloque de cierre agrega "Esa es la ÚNICA pregunta de
+cierre del mensaje": el modelo sumaba su propia pregunta antes del CTA.
+
 ### Mensajes fijos (solo desde archivo)
 
 Texto que el negocio escribió y que el **código** manda tal cual. La IA decide
@@ -787,7 +810,7 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 | `type`              | ¿quién está del otro lado?   | `conversation.service`     |
 | `status`            | ¿abierta, cerrada, escalada? | `conversation.service`     |
 | `state`             | ¿en qué paso del flujo?      | SOLO vía `stateMachine.ts` |
-| etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel   |
+| etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel; el handler pone "Por validar" al pausar por foto |
 | `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) |
 | `human_takeover_at` | ¿el dueño tomó el control?   | `panel.service` / worker   |
 
@@ -796,6 +819,26 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 enum de siete valores que escribían el LLM y un worker ya no existe: lo
 reemplazaron las etiquetas libres. No hay `classify_interest` ni
 `updateQualificationIfNotPinned`.
+
+### Calificación de leads (desde 2026-09-28)
+
+Todo por el panel, nada por WhatsApp. Cuando Emma se pausa porque llegó la
+captura o el DNI (`onImage.pause`), el handler le pone al chat la etiqueta
+**"Por validar"** (`tagService.markPendingValidation`, sin tocar las otras). En
+el chat, mientras la tenga, la cabecera muestra **[✅ Pagó] [❌ No pagó]**
+(`QualifyButtons.tsx` → `POST /conversations/:id/qualify` →
+`tagService.qualify`): en una transacción sale "Por validar" y el resultado
+contrario, y queda el elegido.
+
+- Son etiquetas comunes (`QUALIFICATION_TAGS` en `tag.types.ts`, espejo de
+  nombres en `panel/lib/constants.ts`): se crean solas la primera vez, cuentan
+  para el límite de 10 y se buscan por NOMBRE — si el dueño renombra una, la
+  próxima vez se crea de nuevo.
+- Si el negocio ya tiene 10 etiquetas, "Por validar" no se pone (warn en el log;
+  la pausa y el reenvío salen igual) y los botones muestran el error de límite.
+- Apagar a Emma a mano desde el Inbox NO pone la etiqueta: solo la pausa por foto.
+- `ensureTag` crea FUERA de la transacción a propósito: un choque con el UNIQUE
+  adentro de una transacción la aborta y ya no se puede volver a buscar.
 
 ### Human takeover
 

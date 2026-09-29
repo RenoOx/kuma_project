@@ -27,6 +27,7 @@ import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
+import * as tagService from '@/modules/tag/tag.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import { bufferImage, flushImagesNow } from '@/modules/whatsapp/imageBuffer.js'
 import {
@@ -39,12 +40,16 @@ import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
   classifyIncoming,
   describeFormat,
+  IGNORED_CUSTOMER_FORMATS,
   IMAGE_FORWARDED_REPLY,
   IMAGE_RECEIVED_REPLY,
+  isAudioFormat,
+  isEmojiOnly,
   PAYMENT_BOOKED_CONFIRMED_REPLY,
   PAYMENT_BOOKED_PENDING_REPLY,
   PAYMENT_IMAGE_REPLY,
   PAYMENT_VERIFICATION_REPLY,
+  pickAudioReply,
   quotedSummaryOf,
   replyForFormat,
   type UnsupportedFormat,
@@ -315,6 +320,12 @@ async function respondUnsupportedFormat(params: {
   log: HandlerLogger
   humanize: boolean
   readKey: WAMessageKey
+  /**
+   * El texto a mandar, si el que llama ya lo eligió (el cliente que mandó un
+   * audio). Sin esto, el de siempre según el formato — lo que sigue usando el
+   * chat del dueño.
+   */
+  text?: string
 }): Promise<void> {
   const { businessId, conversationId, format, jid, send, log, humanize, readKey } = params
 
@@ -323,7 +334,7 @@ async function respondUnsupportedFormat(params: {
     return
   }
 
-  const reply = format === 'image' ? IMAGE_RECEIVED_REPLY : replyForFormat(format)
+  const reply = params.text ?? (format === 'image' ? IMAGE_RECEIVED_REPLY : replyForFormat(format))
   const persisted = await messageService.append({
     businessId,
     conversationId,
@@ -437,6 +448,19 @@ async function handleCustomerImage(params: {
   // necesita un negocio de venta, que no tiene cita ni captura esperada.
   const onImage = conversation ? getStateConfig(flow, conversation.state).onImage : undefined
 
+  // Regla del negocio (2026-09-28): una foto se atiende solo si el paso pide
+  // requisitos o pagos (`onImage`) o si hay un pago esperado, una cita pendiente
+  // o adelanto (`wanted`). Fuera de eso, silencio: antes Emma contestaba "¡Recibí
+  // tu foto! Ya la comparto…" y no la compartía con nadie. El placeholder y el
+  // evento de arriba se guardan igual, así el dueño la ve en el Inbox.
+  if (!onImage && !wanted) {
+    log.info(
+      { conversationId, state: conversation?.state },
+      'customer image ignored: this step does not ask for photos',
+    )
+    return
+  }
+
   // Downloaded at most once, and only when something will actually use the bytes:
   // the owner's relay, the S3 archive, or both. With forwarding off and no
   // deposit to archive there is nothing worth spending the bandwidth on.
@@ -529,6 +553,18 @@ async function handleCustomerImage(params: {
         { conversationId, state: pausedIn, photos: burst?.total ?? 1 },
         'emma paused after customer image',
       )
+
+      // El lead queda "Por validar" para que el dueño lo califique desde el
+      // panel (botones Pagó / No pagó en el chat). Solo si la pausa se aplicó, y
+      // sin poder costarla: si falla —por ejemplo, el negocio ya tiene 10
+      // etiquetas— solo se loguea.
+      const marked = await tagService.markPendingValidation(businessId, conversationId)
+      if (!marked.ok) {
+        log.warn(
+          { code: marked.error.code, conversationId },
+          'could not tag the conversation as pending validation',
+        )
+      }
     } catch (err) {
       log.error({ err, conversationId }, 'failed to pause emma after customer image')
     }
@@ -1200,6 +1236,25 @@ async function processMessage(
     await recordUnsupportedEvent(businessId, conversation.id, format, phone, log)
   }
 
+  // Multimedia que Emma ignora (regla del negocio, 2026-09-28): solo emojis,
+  // stickers, videos, documentos, ubicación y contactos. Ya quedaron guardados
+  // arriba —el dueño los ve en el Inbox— y el modelo no los lee
+  // (isIgnoredForModel en llm.service). Va ANTES de los gates: un sticker durante
+  // la pausa del bot no tiene que disparar la escalada ni el aviso al dueño.
+  const ignored =
+    (payload.kind === 'text' && isEmojiOnly(payload.text)) ||
+    (payload.kind === 'unsupported' && IGNORED_CUSTOMER_FORMATS.has(payload.format))
+  if (ignored) {
+    log.info(
+      {
+        conversationId: conversation.id,
+        kind: payload.kind === 'unsupported' ? payload.format : 'emoji',
+      },
+      'customer message ignored: emoji-only or media Emma does not answer',
+    )
+    return
+  }
+
   // EMMA SWITCHED OFF FOR THIS THREAD — the owner flipped the per-chat toggle
   // in the panel. Unlike the takeover below, nothing expires this: it holds
   // until the owner switches it back on.
@@ -1319,6 +1374,8 @@ async function processMessage(
   }
 
   // Nothing to reason about — acknowledge the format and stop before the LLM.
+  // A esta altura solo llega audio o nota de voz: el resto de lo que no se puede
+  // leer ya se ignoró arriba. El audio sí se contesta, pidiendo que escriba.
   if (payload.kind === 'unsupported') {
     await respondUnsupportedFormat({
       businessId,
@@ -1329,6 +1386,7 @@ async function processMessage(
       log,
       humanize: true,
       readKey: raw.key,
+      ...(isAudioFormat(payload.format) ? { text: pickAudioReply() } : {}),
     })
     return
   }

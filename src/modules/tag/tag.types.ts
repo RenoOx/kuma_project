@@ -58,3 +58,23 @@ export const assignTagsSchema = z.object({
 export type CreateTagInput = z.infer<typeof createTagSchema>
 export type UpdateTagInput = z.infer<typeof updateTagSchema>
 export type AssignTagsInput = z.infer<typeof assignTagsSchema>
+
+/**
+ * Las tres etiquetas de calificación de un lead, las únicas que pone el código.
+ *
+ * "Por validar" la pone el handler cuando Emma se pausa porque el cliente mandó
+ * la captura o el DNI (`onImage.pause`); "Pagó" / "No pagó" las pone el dueño
+ * con los botones del chat en el panel. Se crean solas la primera vez que hacen
+ * falta, y se buscan por NOMBRE: si el dueño renombra una, la próxima vez se
+ * crea de nuevo con este nombre. El panel tiene una copia de los nombres en
+ * `panel/lib/constants.ts`.
+ */
+export const QUALIFICATION_TAGS = {
+  pending: { name: 'Por validar', color: 'amber' },
+  paid: { name: 'Pagó', color: 'emerald' },
+  not_paid: { name: 'No pagó', color: 'rose' },
+} as const satisfies Record<string, { name: string; color: TagColor }>
+
+export const qualifySchema = z.object({ outcome: z.enum(['paid', 'not_paid']) })
+
+export type QualificationOutcome = z.infer<typeof qualifySchema>['outcome']

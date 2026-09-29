@@ -1,6 +1,52 @@
 import type { WAMessage } from '@whiskeysockets/baileys'
 import { describe, expect, it } from 'vitest'
-import { quotedSummaryOf } from './messageKind.js'
+import {
+  AUDIO_REPLY_VARIANTS,
+  isEmojiOnly,
+  isIgnoredForModel,
+  pickAudioReply,
+  quotedSummaryOf,
+} from './messageKind.js'
+
+describe('isEmojiOnly', () => {
+  it('reconoce mensajes hechos solo de emojis', () => {
+    for (const text of ['👍', '😂😂', '❤️', '👍🏽', '🇵🇪', ' 🙏 😊 ', '👨‍👩‍👧']) {
+      expect(isEmojiOnly(text), text).toBe(true)
+    }
+  })
+
+  it('no toca nada que traiga letras o números: esas son respuestas', () => {
+    // "1" y "A" contestan las opciones con letra; "sí 👍" es un sí.
+    for (const text of ['1', 'A', 'sí 👍', 'ok', '', '   ']) {
+      expect(isEmojiOnly(text), JSON.stringify(text)).toBe(false)
+    }
+  })
+})
+
+describe('isIgnoredForModel', () => {
+  it('saca los emojis sueltos y los placeholders de formatos ignorados', () => {
+    expect(isIgnoredForModel('😂')).toBe(true)
+    expect(isIgnoredForModel('[El cliente envió un sticker que no puedo procesar]')).toBe(true)
+    expect(isIgnoredForModel('[El cliente envió un video que no puedo procesar]')).toBe(true)
+  })
+
+  it('deja lo que el modelo sí tiene que ver: texto, audio y fotos', () => {
+    expect(isIgnoredForModel('quiero el básico')).toBe(false)
+    // El audio recibió respuesta ("escribime"): sin esta fila, esa respuesta
+    // quedaría sin nada antes en el historial.
+    expect(isIgnoredForModel('[El cliente envió una nota de voz que no puedo procesar]')).toBe(
+      false,
+    )
+    expect(isIgnoredForModel('[El cliente envió una imagen. No puedo verla]')).toBe(false)
+  })
+})
+
+describe('pickAudioReply', () => {
+  it('devuelve una de las variantes de audio', () => {
+    expect(AUDIO_REPLY_VARIANTS).toContain(pickAudioReply(() => 0))
+    expect(AUDIO_REPLY_VARIANTS).toContain(pickAudioReply(() => 0.99))
+  })
+})
 
 // Fixture mínima: solo lo que quotedSummaryOf lee. El resto del payload real
 // de Baileys (key, messageTimestamp, etc.) no le importa a esta función.

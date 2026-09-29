@@ -48,7 +48,10 @@ export const SALES_NODES = [
         'Si todavía no tenés el dato que define la opción, preguntalo: las indicaciones de este paso dicen cuál es.',
         'Con ese dato, elegí UNA opción de la lista de servicios. Es una elección, no una cuenta: no sumes ni combines opciones.',
         'Ofrecé esa opción. Si este paso tiene un mensaje fijo para la oferta, mandalo con esa opción en lugar de escribirla con tus palabras.',
-        'Preguntá si quiere avanzar.',
+        // Condicional: con un CTA propio del paso (Tecmin: "¿Cuántas máquinas
+        // operas? A/B/C"), esta pregunta salía ENCIMA del CTA — "¿Te interesa
+        // avanzar con alguna de estas certificaciones?" + las letras.
+        'Preguntá si quiere avanzar, salvo que este paso ya cierre con su propia invitación: ahí esa es la única pregunta, no agregues otra.',
       ],
       edgeCases: [
         'Si no sabe el dato exacto, pedile una estimación.',

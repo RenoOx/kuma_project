@@ -133,7 +133,9 @@ function showBusiness(business: Business, promptState: string | null): void {
     out()
     out(`════ Prompt en el estado "${promptState}" (KB vacía: se elige mensaje a mensaje) ════`)
     const config = getStateConfig(flow, promptState)
-    const body = buildSystemPrompt(business, [], settings)
+    // Con el CTA del paso: sin él, el bloque de cierre que se mostraba era el de
+    // la rotativa y no el que corre en ese paso.
+    const body = buildSystemPrompt(business, [], settings, [], null, new Set(), {}, config.cta)
     const fixed = (config.fixedMessages ?? []).flatMap((id) => {
       const message = fileMessages[id]
       return message ? [{ id, when: message.when ?? '' }] : []

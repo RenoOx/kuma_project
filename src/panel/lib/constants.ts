@@ -48,6 +48,20 @@ export const TAG_COLOR_META: Record<TagColor, TagColorMeta> = {
 /** Mirrors MAX_TAGS_PER_BUSINESS on the server. */
 export const MAX_TAGS = 10
 
+/**
+ * Las etiquetas de calificación de un lead, espejo de QUALIFICATION_TAGS en el
+ * server (que es la autoridad: las crea y las busca por nombre). El panel las
+ * reconoce por nombre para mostrar los botones Pagó / No pagó solo en un chat
+ * "Por validar".
+ */
+export const QUALIFICATION_TAG_NAMES = {
+  pending: 'Por validar',
+  paid: 'Pagó',
+  not_paid: 'No pagó',
+} as const
+
+export type QualificationOutcome = 'paid' | 'not_paid'
+
 // Mirrors appointmentStatuses in the Drizzle schema. 'pending' is what a
 // business on bookingMode 'requires_approval' produces and is the only status
 // with actions waiting on a human.

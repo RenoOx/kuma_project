@@ -250,6 +250,71 @@ export function replyForFormat(
   return pickUnsupportedReply(randomFn)
 }
 
+// ── Qué ignora Emma con un cliente (2026-09-28) ──────────────────────────────
+//
+// Regla del negocio: la multimedia no se responde ni influye en lo que Emma
+// dice. La única excepción es el audio — el cliente sí quiso decir algo, y el
+// silencio lo dejaría esperando — que recibe un pedido de que escriba. Las
+// fotos se deciden aparte, por paso (handleCustomerImage). El chat del dueño no
+// usa nada de esto: sigue con replyForFormat.
+
+/** Formatos que un cliente manda y Emma ignora: sin respuesta y fuera del historial del modelo. */
+export const IGNORED_CUSTOMER_FORMATS: ReadonlySet<UnsupportedFormat> = new Set([
+  'video',
+  'sticker',
+  'document',
+  'location',
+  'contact',
+])
+
+/** Formatos que reciben el pedido de "escribime" en vez de silencio. */
+export function isAudioFormat(format: UnsupportedFormat): boolean {
+  return format === 'audio' || format === 'voice_note'
+}
+
+export const AUDIO_REPLY_VARIANTS: ReadonlyArray<string> = [
+  'Por ahora solo puedo leer mensajes escritos 😊 ¿Me lo podrías escribir? Así te respondo mejor.',
+  'Todavía no puedo escuchar audios 😊 ¿Me escribes tu consulta por aquí? Te lo agradecería mucho.',
+  'Solo puedo contestarte leyéndote 😊 ¿Me lo podrías escribir? Así te ayudo mejor.',
+]
+
+// randomFn inyectable para tests deterministas; rota por lo mismo que las otras
+// variantes: el mismo texto exacto en muchos chats es patrón de bot.
+export function pickAudioReply(randomFn: () => number = Math.random): string {
+  const index = Math.floor(randomFn() * AUDIO_REPLY_VARIANTS.length)
+  const variant = AUDIO_REPLY_VARIANTS[index] ?? AUDIO_REPLY_VARIANTS[0]
+  if (!variant) throw new Error('AUDIO_REPLY_VARIANTS must not be empty')
+  return variant
+}
+
+// Lo que no es emoji una vez sacados pictogramas, tonos de piel, banderas, el
+// "pegamento" de los emojis compuestos (ZWJ, selector de variación, keycap) y
+// los espacios. Los dígitos y letras quedan: "1" o "A" son respuestas de verdad.
+const EMOJI_PARTS = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\s]|‍|️|⃣/gu
+
+/** Un mensaje hecho SOLO de emojis ("👍", "😂😂", "❤️", "🇵🇪"). Con cualquier letra o número, no. */
+export function isEmojiOnly(text: string): boolean {
+  const trimmed = text.trim()
+  if (trimmed === '') return false
+  return trimmed.replace(EMOJI_PARTS, '') === ''
+}
+
+const IGNORED_PLACEHOLDERS: ReadonlySet<string> = new Set(
+  [...IGNORED_CUSTOMER_FORMATS].map(
+    (format) => `[El cliente envió ${describeFormat(format)} que no puedo procesar]`,
+  ),
+)
+
+/**
+ * Una fila del historial que el modelo no tiene que ver: un mensaje de solo
+ * emojis o el placeholder de un formato ignorado. Se guardan igual (el dueño las
+ * ve en el Inbox); sacarlas de lo que lee el modelo es lo que hace que "no
+ * influyan", no solo que no se respondan.
+ */
+export function isIgnoredForModel(content: string): boolean {
+  return isEmojiOnly(content) || IGNORED_PLACEHOLDERS.has(content.trim())
+}
+
 export const CALL_REJECTED_VARIANTS: ReadonlyArray<string> = [
   'Hola 😊 No puedo atender llamadas, pero por acá te ayudo al toque. ¿Me escribes tu consulta?',
   '¡Hola! Por este número la atención es solo por chat escrito 😊 Cuéntame en qué te puedo ayudar.',

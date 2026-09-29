@@ -1,9 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildStepImageCaption,
+  clampSummary,
   findChosenService,
   fixedMessageServicesOf,
 } from './mediaForwarder.js'
+
+describe('clampSummary', () => {
+  it('deja hasta 5 líneas y marca el corte con "…"', () => {
+    const seven = ['· 1', '· 2', '', '· 3', '· 4', '· 5', '· 6', '· 7'].join('\n')
+    expect(clampSummary(seven)).toBe('· 1\n· 2\n· 3\n· 4\n· 5…')
+  })
+
+  it('una descripción corta sale tal cual', () => {
+    expect(clampSummary('CERTIFICADO')).toBe('CERTIFICADO')
+  })
+
+  it('corta un párrafo larguísimo en un espacio, sin partir palabras', () => {
+    const long = `${'palabra '.repeat(80)}fin`
+    const out = clampSummary(long)
+    expect(out.endsWith('…')).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(301)
+    expect(out).not.toMatch(/palab…$/)
+  })
+})
 
 // El aviso que recibe el dueño cuando llega una foto en un paso con reenvío, y la
 // búsqueda del curso que eligió el cliente. Las dos las arma el código, sin IA: el

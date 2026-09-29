@@ -45,8 +45,10 @@ export default defineBusinessConfig({
     { node: 'idle' },
 
     // El saludo es el mensaje configurado ("¿tienes experiencia en maquinaria
-    // pesada?"), que Emma manda tal cual en el primer mensaje.
-    { node: 'greeting' },
+    // pesada?"), que Emma manda tal cual en el primer mensaje. El video de
+    // presentación (panel → Conversación → "Saludo inicial") sale ANTES del
+    // texto, así la pregunta queda al final.
+    { node: 'greeting', mediaFirst: true },
 
     // La bifurcación del diagrama: acá solo se decide el camino. Lo que se le
     // ofrece a cada uno vive en su propio paso.
@@ -57,6 +59,7 @@ export default defineBusinessConfig({
         '- Si TIENE experiencia: pasá al paso de certificación. No le ofrezcas cursos.',
         '- Si NO tiene experiencia: pasá al paso de cursos.',
         '- Si la respuesta no es clara, preguntale de nuevo si tiene experiencia manejando maquinaria pesada.',
+        '- Si antes de contestar pregunta por la ubicación o cómo llegar, dale la dirección y el link de Google Maps de arriba en una línea, y volvé a preguntarle si tiene experiencia.',
       ].join('\n'),
       routes: [
         {
