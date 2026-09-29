@@ -190,7 +190,8 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
 
 1. **Filtrado** (handler.ts): deduplicación (`claimMessageId`), extracción
    de teléfono (`extractPhone`), clasificación de tipo, debounce de mensajes
-   rápidos (`bufferMessage`), serialización por remitente (`withSenderLock`)
+   rápidos (`bufferMessage`) y de fotos seguidas (`bufferImage`), serialización
+   por remitente (`withSenderLock`)
 2. **Enrutamiento** (handler.ts): `samePhone()` compara con
    `business.ownerWhatsappNumber` → flujo owner o flujo customer
 3. **Flujo cliente** (handler.ts): compuertas en orden: ¿Emma apagada en este
@@ -371,14 +372,27 @@ el destino de una foto que el modelo igual nunca ve. Lo aplica
 
 - Con `forward`, reenvía aunque el negocio no pida adelanto, con el aviso de
   `buildStepImageCaption`: paso, cliente, hora y **Resumen = descripción del
-  servicio elegido, tal cual** (sin IA; `findChosenService` lo busca primero en
-  los datos capturados y si no, en el último mensaje de Emma que nombra UN solo
-  servicio).
+  servicio elegido, tal cual** (sin IA, 0 tokens). `findChosenService` lo busca,
+  en orden: el `service` de los `send_fixed_message` del historial
+  (`fixedMessageServicesOf` — la tool ya lo validó contra el catálogo, y en un
+  flujo armado con mensajes fijos es el ÚNICO lugar donde está el nombre), los
+  datos capturados, y el último mensaje de Emma que nombra UN solo servicio.
+- **Las fotos seguidas se procesan en grupo** (`imageBuffer.ts`, ventana
+  `IMAGE_DEBOUNCE_MS`, default 10s, `0` = de a una): el DNI de frente y de reverso
+  llegan juntos. En grupo se reenvían todas (la primera con el aviso completo, las
+  demás con "📷 Foto 2 de 3"), la pausa se aplica UNA vez al final y el cliente
+  recibe UNA respuesta (la más importante del grupo). Un texto del mismo cliente
+  cierra el grupo en el acto. Los reenvíos siguen pasando por `enqueueSend`: el
+  espaciado anti-ban es el de la cola, no el del grupo.
 - Con `pause`, apaga a Emma con `conversationRepo.setEmmaEnabled` (el mismo
   interruptor del Inbox). Si también pedía reenviar y el reenvío falló, NO pausa:
   el dueño no se enteró y el cliente quedaría hablándole a nadie. Como el gate
-  "¿Emma apagada?" corre antes que el de fotos, las fotos siguientes ya no se
-  reenvían: solo la primera.
+  "¿Emma apagada?" corre antes que el de fotos, las fotos que lleguen DESPUÉS del
+  primer grupo ya no se reenvían (decisión del 2026-09-28: el dueño ya sigue ese
+  chat).
+- Una foto deja UNA fila en el historial (el placeholder de `processMessage`).
+  `handleCustomerImage` solo agrega otra cuando es de pago: esas llevan
+  instrucciones para el modelo ("NO llames book_appointment…").
 
 ### Mensajes fijos (solo desde archivo)
 
