@@ -37,6 +37,11 @@ const envSchema = z.object({
   // tuning against real conversations — hence an env var rather than a constant,
   // so it can be changed on the platform without a redeploy. 0 disables it.
   MESSAGE_DEBOUNCE_MS: z.coerce.number().int().min(0).max(30_000).default(4000),
+  // Lo mismo para fotos: cuánto esperar a que el cliente deje de mandar fotos
+  // antes de procesarlas como un grupo (DNI frente + reverso + captura). Más
+  // largo que el de texto porque dos fotos sacadas con la cámara llegan más
+  // separadas que dos mensajes escritos. 0 = cada foto sola, como antes.
+  IMAGE_DEBOUNCE_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
   // Admin endpoints (QR page, etc.). If unset the endpoints return 501.
   ADMIN_SECRET: z.preprocess(
     (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),

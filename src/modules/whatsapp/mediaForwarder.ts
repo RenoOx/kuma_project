@@ -60,24 +60,68 @@ function normalizeName(text: string): string {
 }
 
 /**
+ * Los servicios con los que Emma mandó un mensaje fijo, del más nuevo al más
+ * viejo, sacados del argumento `service` de cada `send_fixed_message`.
+ *
+ * Es la señal más confiable de qué eligió el cliente: la tool solo acepta un
+ * nombre que exista en el catálogo, y en un flujo armado con mensajes fijos (el
+ * de Tecmin) ningún texto de Emma lo nombra — el nombre vive solo acá.
+ * Tolerante: un `toolCalls` con otra forma o un JSON roto se saltea.
+ */
+export function fixedMessageServicesOf(
+  messagesOldestFirst: ReadonlyArray<{ role: string; toolCalls: unknown }>,
+): string[] {
+  const out: string[] = []
+  for (let i = messagesOldestFirst.length - 1; i >= 0; i--) {
+    const message = messagesOldestFirst[i]
+    if (message?.role !== 'assistant' || !Array.isArray(message.toolCalls)) continue
+    // Dentro de un mismo mensaje también del último al primero: con beneficios +
+    // descuento en la misma vuelta, el último es el más reciente.
+    for (let j = message.toolCalls.length - 1; j >= 0; j--) {
+      const service = fixedMessageServiceOf(message.toolCalls[j])
+      if (service) out.push(service)
+    }
+  }
+  return out
+}
+
+function fixedMessageServiceOf(call: unknown): string | null {
+  if (typeof call !== 'object' || call === null) return null
+  const fn = (call as { function?: unknown }).function
+  if (typeof fn !== 'object' || fn === null) return null
+  const { name, arguments: args } = fn as { name?: unknown; arguments?: unknown }
+  if (name !== 'send_fixed_message' || typeof args !== 'string') return null
+  try {
+    const parsed: unknown = JSON.parse(args)
+    const service = (parsed as { service?: unknown } | null)?.service
+    return typeof service === 'string' && service.trim() !== '' ? service : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * El servicio que eligió el cliente, buscado con reglas fijas y sin IA.
  *
- * Primero en lo que Emma ya guardó (el valor que coincide con un nombre de
- * servicio). Si todavía no guardó nada —la foto del DNI puede llegar antes que el
- * resto de los datos—, en los mensajes de Emma, del más nuevo al más viejo: el
- * primero que nombra UN solo servicio. Un mensaje que lista varios no dice cuál
- * eligió, así que se saltea.
+ * En este orden, del dato más confiable al menos:
+ * 1. Los servicios con que Emma mandó un mensaje fijo (`offered`, ver
+ *    `fixedMessageServicesOf`): la tool ya los validó contra el catálogo.
+ * 2. Lo que Emma guardó con save_customer_data (el valor que coincide con un
+ *    nombre de servicio). Puede estar vacío: la foto del DNI puede llegar antes.
+ * 3. Los mensajes de Emma, del más nuevo al más viejo: el primero que nombra UN
+ *    solo servicio. Un mensaje que lista varios no dice cuál eligió.
  */
 export function findChosenService<S extends { name: string }>(
   services: readonly S[],
   collected: Record<string, string>,
   assistantMessagesNewestFirst: readonly string[],
+  offered: readonly string[] = [],
 ): S | null {
   const named = services
     .map((service) => ({ service, key: normalizeName(service.name) }))
     .filter((s) => s.key !== '')
 
-  for (const value of Object.values(collected)) {
+  for (const value of [...offered, ...Object.values(collected)]) {
     const v = normalizeName(value)
     if (v.length < 3) continue
     const hit = named
@@ -108,11 +152,28 @@ export function buildStepImageCaption(params: {
   summary: string | null
   said: string | null
   paused: boolean
+  /**
+   * Posición de esta foto en el grupo que mandó el cliente junto. Sin grupo (o
+   * de a una), el aviso de siempre. En un grupo, la primera lleva el aviso
+   * completo y las demás uno corto: repetir cliente, hora y resumen en cada
+   * foto es ruido para el dueño y más texto saliente del número.
+   */
+  photo?: { index: number; total: number }
 }): string {
   const who = formatPersonName(params.customer.name)
   const said = params.said?.trim()
+  const photo = params.photo
+  if (photo && photo.total > 1 && photo.index > 0) {
+    const short = [`📷 Foto ${photo.index + 1} de ${photo.total} · ${who ?? params.customer.phone}`]
+    if (said) short.push(`💬 "${said}"`)
+    return short.join('\n')
+  }
+  const title =
+    photo && photo.total > 1
+      ? `📷 *${photo.total} fotos recibidas en «${params.stepLabel}»*`
+      : `📷 *Foto recibida en «${params.stepLabel}»*`
   const lines = [
-    `📷 *Foto recibida en «${params.stepLabel}»*`,
+    title,
     '',
     who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
     `🕒 ${formatDateTimeForDisplay(params.receivedAt, params.timezone)}`,
@@ -121,12 +182,7 @@ export function buildStepImageCaption(params: {
       : '📋 Resumen: no se pudo identificar qué eligió',
   ]
   if (said) lines.push('', `💬 "${said}"`)
-  lines.push(
-    '',
-    params.paused
-      ? 'Emma quedó pausada en este chat: seguí la conversación vos. La volvés a prender desde el Inbox del panel.'
-      : '¿Qué le respondo?',
-  )
+  lines.push('', params.paused ? 'El asistente quedó pausado en este chat.' : '¿Qué le respondo?')
   return lines.join('\n')
 }
 
@@ -165,7 +221,7 @@ export function buildOwnerCaption(params: {
   )
 
   const lines = [
-    payment ? '💰 *Captura de pago recibida*' : '📷 *Imagen del paciente*',
+    payment ? '💰 *Captura de pago recibida*' : '📷 *Imagen del cliente*',
     '',
     // No name worth showing is better than a push name the owner cannot place:
     // the phone is the one identifier that is always true.

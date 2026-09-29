@@ -31,7 +31,7 @@ export async function notifyCustomer(
       new AppError({
         code: 'whatsapp_client_unavailable',
         message: `no whatsapp client registered for business ${businessId}`,
-        userMessage: 'No pude enviarle el mensaje al paciente: WhatsApp no está conectado.',
+        userMessage: 'No pude enviarle el mensaje al cliente: WhatsApp no está conectado.',
         logContext: { businessId },
       }),
     )
@@ -45,7 +45,7 @@ export async function notifyCustomer(
       new AppError({
         code: 'customer_not_found',
         message: `no customer with phone ${phone} in business ${businessId}`,
-        userMessage: 'No encontré a ese paciente en este negocio, así que no le escribí.',
+        userMessage: 'No encontré a ese cliente en este negocio, así que no le escribí.',
         logContext: { businessId },
       }),
     )
@@ -78,7 +78,7 @@ export async function notifyCustomer(
       new AppError({
         code: 'notify_customer_failed',
         message: cause instanceof Error ? cause.message : 'unknown error',
-        userMessage: 'No pude enviarle el mensaje al paciente por WhatsApp.',
+        userMessage: 'No pude enviarle el mensaje al cliente por WhatsApp.',
         logContext: { businessId, jid },
         cause,
       }),

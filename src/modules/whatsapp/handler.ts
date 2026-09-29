@@ -28,6 +28,7 @@ import * as messageService from '@/modules/message/message.service.js'
 import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import { bufferImage, flushImagesNow } from '@/modules/whatsapp/imageBuffer.js'
 import {
   consumeImageExpectation,
   type ImagePurpose,
@@ -367,8 +368,11 @@ async function handleCustomerImage(params: {
   jid: string
   send: SendFn
   log: HandlerLogger
+  /** Si la foto vino en un grupo: la pausa y la respuesta se dejan para la última. */
+  burst?: ImageBurst
 }): Promise<void> {
-  const { raw, business, customer, conversationId, caption, jid, send, log } = params
+  const { raw, business, customer, conversationId, caption, jid, send, log, burst } = params
+  const lastOfBurst = !burst || burst.index === burst.total - 1
   const businessId = business.id
 
   // Consumed unconditionally: one request buys one forward, whether or not the
@@ -474,6 +478,7 @@ async function handleCustomerImage(params: {
             state: conversation.state,
             caption,
             paused: onImage.pause,
+            ...(burst ? { photo: { index: burst.index, total: burst.total } } : {}),
             log,
           })
         : undefined
@@ -500,16 +505,30 @@ async function handleCustomerImage(params: {
   // el Inbox, así el dueño la ve apagada y la vuelve a prender desde ahí. Si el
   // paso también pedía reenviar y el reenvío falló, NO se pausa: el dueño no se
   // enteró de nada y el cliente quedaría hablándole a nadie.
-  if (onImage?.pause && (!onImage.forward || forwarded)) {
+  //
+  // En un grupo de fotos se decide foto por foto pero se aplica UNA vez, al
+  // final: pausar con la primera hacía que las siguientes chocaran con "¿Emma
+  // apagada?" y nunca le llegaran al dueño.
+  const wantsPause = onImage?.pause === true && (!onImage.forward || forwarded)
+  if (burst && wantsPause && !burst.shared.shouldPause) {
+    burst.shared.shouldPause = true
+    burst.shared.pauseState = conversation?.state ?? null
+  }
+  const pauseNow = burst ? lastOfBurst && burst.shared.shouldPause : wantsPause
+  if (pauseNow) {
+    const pausedIn = burst ? burst.shared.pauseState : (conversation?.state ?? null)
     try {
       await conversationRepo.setEmmaEnabled(businessId, conversationId, false)
       await eventsRepo.create({
         businessId,
         conversationId,
         type: 'emma_paused_on_image',
-        payload: { state: conversation?.state ?? null },
+        payload: { state: pausedIn, photos: burst?.total ?? 1 },
       })
-      log.info({ conversationId, state: conversation?.state }, 'emma paused after customer image')
+      log.info(
+        { conversationId, state: pausedIn, photos: burst?.total ?? 1 },
+        'emma paused after customer image',
+      )
     } catch (err) {
       log.error({ err, conversationId }, 'failed to pause emma after customer image')
     }
@@ -585,14 +604,19 @@ async function handleCustomerImage(params: {
   // Every payment variant forbids book_appointment, for two different reasons:
   // once the booking exists, calling it again files the same appointment twice;
   // while the capture is under review, calling it books what nobody approved.
+  //
+  // Una foto común no lleva marcador propio: processMessage ya guardó
+  // "[El cliente envió una imagen… No puedo verla]", y repetirlo dejaba dos filas
+  // por foto (en el historial del modelo y en el Inbox). Los de pago sí van:
+  // llevan instrucciones que el placeholder no tiene.
   const marker = intent
     ? awaitingVerification
-      ? `[El paciente envió la captura de pago para ${intent.service}. La cita NO está creada: el pago está en verificación. NO llames book_appointment ni le confirmes la cita.]`
+      ? `[El cliente envió la captura de pago para ${intent.service}. La cita NO está creada: el pago está en verificación. NO llames book_appointment ni le confirmes la cita.]`
       : booked
-        ? `[El paciente envió la captura de pago para ${intent.service} y su cita ya quedó ${
+        ? `[El cliente envió la captura de pago para ${intent.service} y su cita ya quedó ${
             booked.status === 'pending' ? 'registrada como solicitud pendiente' : 'agendada'
           }. NO llames book_appointment de nuevo para ese horario.]`
-        : `[El paciente envió una captura de pago para ${intent.service}${
+        : `[El cliente envió una captura de pago para ${intent.service}${
             intent.amount ? ` (adelanto de ${intent.amount})` : ''
           }, pero no pude registrarla. NO llames book_appointment ni le confirmes la cita: decile que la estás revisando.]`
     : // No frozen intent, and the business asks for a deposit: almost always a
@@ -605,52 +629,75 @@ async function handleCustomerImage(params: {
       // 'reference' is excluded because a reference photo lands here too, with
       // the same null intent, and it is not a payment at all.
       requiresDeposit && purpose !== 'reference'
-      ? '[El paciente envió una imagen que parece un comprobante de pago, pero no hay ninguna reserva registrada a la que asociarla. Pedile el horario y el nombre (los que falten) para poder registrarla. NO des el pago por recibido, NO le confirmes ninguna cita y NO llames book_appointment hasta tener esos datos.]'
-      : '[El paciente envió una imagen.]'
-  const markerPersisted = await messageService.append({
-    businessId,
-    conversationId,
-    role: 'user',
-    content: marker,
-    senderType: 'customer',
-  })
-  if (!markerPersisted.ok) {
-    log.error({ code: markerPersisted.error.code }, 'append image marker failed')
+      ? '[El cliente envió una imagen que parece un comprobante de pago, pero no hay ninguna reserva registrada a la que asociarla. Pedile el horario y el nombre (los que falten) para poder registrarla. NO des el pago por recibido, NO le confirmes ninguna cita y NO llames book_appointment hasta tener esos datos.]'
+      : null
+  if (marker) {
+    const markerPersisted = await messageService.append({
+      businessId,
+      conversationId,
+      role: 'user',
+      content: marker,
+      senderType: 'customer',
+    })
+    if (!markerPersisted.ok) {
+      log.error({ code: markerPersisted.error.code }, 'append image marker failed')
+    }
   }
 
   // A failed open or a failed booking falls back to the old wording on purpose:
   // it promises nothing, which is the only honest thing to say when we do not
   // know whether this capture is going anywhere.
   // El mensaje que el dueño escribió para este paso gana sobre los de siempre.
-  const reply = onImage?.reply
-    ? onImage.reply
+  //
+  // `rank` sigue el mismo orden de la cadena: en un grupo de fotos se manda UNA
+  // sola respuesta, la más importante que haya salido — un grupo con la captura
+  // y otra foto tiene que seguir diciendo "el encargado lo está verificando".
+  const [reply, rank]: [string, number] = onImage?.reply
+    ? [onImage.reply, 5]
     : awaitingVerification
-      ? paymentVerificationText(
-          settingsResult.ok ? settingsResult.data : null,
-          business.name,
-          intent,
-        )
+      ? [
+          paymentVerificationText(
+            settingsResult.ok ? settingsResult.data : null,
+            business.name,
+            intent,
+          ),
+          4,
+        ]
       : booked
-        ? booked.status === 'pending'
-          ? PAYMENT_BOOKED_PENDING_REPLY
-          : PAYMENT_BOOKED_CONFIRMED_REPLY
+        ? [
+            booked.status === 'pending'
+              ? PAYMENT_BOOKED_PENDING_REPLY
+              : PAYMENT_BOOKED_CONFIRMED_REPLY,
+            3,
+          ]
         : intent
-          ? PAYMENT_IMAGE_REPLY
+          ? [PAYMENT_IMAGE_REPLY, 2]
           : forwarded
-            ? IMAGE_FORWARDED_REPLY
-            : IMAGE_RECEIVED_REPLY
+            ? [IMAGE_FORWARDED_REPLY, 1]
+            : [IMAGE_RECEIVED_REPLY, 0]
+
+  let finalReply = reply
+  if (burst) {
+    const best = burst.shared.reply
+    if (!best || rank > best.rank) burst.shared.reply = { text: reply, rank }
+    // Las fotos que no son la última del grupo no le contestan nada al cliente:
+    // tres fotos eran tres "¡Recibí tu imagen!", y cada uno un mensaje saliente.
+    if (!lastOfBurst) return
+    finalReply = burst.shared.reply?.text ?? reply
+  }
+
   const persisted = await messageService.append({
     businessId,
     conversationId,
     role: 'assistant',
-    content: reply,
+    content: finalReply,
   })
   if (!persisted.ok) {
     log.error({ code: persisted.error.code }, 'append image acknowledgement failed')
   }
 
   try {
-    await sendWithPresence({ businessId, jid, text: reply, send, readKey: raw.key })
+    await sendWithPresence({ businessId, jid, text: finalReply, send, readKey: raw.key })
   } catch (err) {
     log.error({ err, jid }, 'failed to acknowledge customer image')
   }
@@ -767,17 +814,23 @@ async function buildStepImageNotice(params: {
   state: string
   caption: string | null
   paused: boolean
+  /** Posición de la foto en el grupo que mandó el cliente junto, si vino en uno. */
+  photo?: { index: number; total: number }
   log: HandlerLogger
 }): Promise<string> {
   const { business, settings, customer, conversationId, state, log } = params
 
   let assistantTexts: string[] = []
+  let offered: string[] = []
   const history = await messageService.getRecentHistory(business.id, conversationId, 20)
   if (history.ok) {
     assistantTexts = history.data
       .filter((m) => m.role === 'assistant' && m.content.trim() !== '')
       .map((m) => m.content)
       .reverse()
+    // El nombre exacto de lo que eligió vive en los send_fixed_message: en un
+    // flujo armado con mensajes fijos ningún texto de Emma lo nombra.
+    offered = mediaForwarder.fixedMessageServicesOf(history.data)
   } else {
     log.warn({ code: history.error.code }, 'could not read history for the image notice')
   }
@@ -787,6 +840,7 @@ async function buildStepImageNotice(params: {
         activeServices(settings),
         customerService.collectedDataOf(customer),
         assistantTexts,
+        offered,
       )
     : null
 
@@ -799,6 +853,7 @@ async function buildStepImageNotice(params: {
     summary: chosen?.description ?? chosen?.name ?? null,
     said: params.caption,
     paused: params.paused,
+    ...(params.photo ? { photo: params.photo } : {}),
   })
 }
 
@@ -911,8 +966,28 @@ function extractPhone(msg: WAMessage): string | null {
 // only acknowledge. Both still create the customer/conversation records.
 type Payload =
   | { kind: 'text'; text: string }
-  | { kind: 'image'; caption: string | null }
+  | { kind: 'image'; caption: string | null; burst?: ImageBurst }
   | { kind: 'unsupported'; format: UnsupportedFormat }
+
+/**
+ * Una foto dentro de un grupo que el cliente mandó junto (ver imageBuffer.ts).
+ *
+ * `shared` es el MISMO objeto para todas las fotos del grupo: así la última sabe
+ * si alguna anterior se reenvió, si el paso pidió pausar y cuál es la respuesta
+ * más importante que salió. La pausa y la respuesta al cliente van una sola vez,
+ * en la última foto — si la primera pausaba, las siguientes chocaban con "¿Emma
+ * apagada?" y el dueño nunca las recibía.
+ */
+interface ImageBurst {
+  index: number
+  total: number
+  shared: {
+    shouldPause: boolean
+    /** El estado en que estaba el chat cuando se pidió la pausa, para el evento. */
+    pauseState: string | null
+    reply: { text: string; rank: number } | null
+  }
+}
 
 // What the transcript records for a photo. The LLM reads this on the next turn,
 // so it must not claim the image was discarded — told "no puedo procesar" after
@@ -1238,6 +1313,7 @@ async function processMessage(
       jid,
       send,
       log,
+      ...(payload.burst ? { burst: payload.burst } : {}),
     })
     return
   }
@@ -1573,15 +1649,43 @@ export function handleIncomingMessage(
 
   const senderKey = `${businessId}:${phone}`
 
-  // Media and everything else bypasses the buffer: only text can be joined into
-  // a sentence, and holding a photo back would delay the owner's notification
-  // for no gain. A photo arriving mid-burst is therefore answered on its own,
-  // possibly before the text it came with — accepted trade-off.
+  // Las fotos se agrupan (imageBuffer.ts): el DNI de frente y de reverso, o el
+  // DNI y la captura, llegan seguidos. Procesadas de a una, la primera pausaba a
+  // Emma y las siguientes nunca le llegaban al dueño; en grupo, todas se
+  // reenvían, la pausa va una vez al final y el cliente recibe una sola
+  // respuesta. Se procesan en orden, bajo el mismo candado del remitente.
+  if (incoming.kind === 'image') {
+    return bufferImage(senderKey, { raw, caption: incoming.caption }).then((group) => {
+      if (group === null) {
+        log.info({ phone }, 'handler: photo folded into a later group from the same sender')
+        return
+      }
+      const shared: ImageBurst['shared'] = { shouldPause: false, pauseState: null, reply: null }
+      return withSenderLock(senderKey, () =>
+        withProcessingSlot(async () => {
+          for (const [index, photo] of group.entries()) {
+            await processMessage(photo.raw, businessId, send, jid, phone, {
+              kind: 'image',
+              caption: photo.caption,
+              burst: { index, total: group.length, shared },
+            })
+          }
+        }),
+      )
+    })
+  }
+
+  // Everything else that is not text bypasses both buffers: there is nothing to
+  // join and nothing to group.
   if (incoming.kind !== 'text') {
     return withSenderLock(senderKey, () =>
       withProcessingSlot(() => processMessage(raw, businessId, send, jid, phone, incoming)),
     )
   }
+
+  // Un texto cierra el grupo de fotos pendiente del mismo cliente: "listo, ahí
+  // están" no se tiene que contestar antes de procesar las fotos que mandó antes.
+  flushImagesNow(senderKey)
 
   // Si el cliente usó "responder" de WhatsApp sobre una ficha, esa cita se
   // pierde apenas se junta con el resto en el buffer de abajo — para cuando
