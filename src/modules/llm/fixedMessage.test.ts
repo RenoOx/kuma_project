@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderFixedMessage, renderStaticMessage } from './fixedMessage.js'
+import { renderFixedMessage, renderStaticMessage, stepOwesFixedMessage } from './fixedMessage.js'
 
 // El mensaje fijo existe para que ningún monto pase por la IA: estos tests
 // cuidan que el código tampoco invente uno cuando el servicio no lo tiene.
@@ -54,5 +54,26 @@ describe('renderStaticMessage', () => {
   it('refuses any marker: there is no service to fill it from', () => {
     expect(renderStaticMessage('Desde S/. {precio}').ok).toBe(false)
     expect(renderStaticMessage('Te cuento de {servicio}').ok).toBe(false)
+  })
+})
+
+describe('stepOwesFixedMessage', () => {
+  const step = { fixedMessages: ['beneficiosCertificado'] }
+
+  it('owes one when the step was entered this turn and nothing went out', () => {
+    expect(stepOwesFixedMessage(step, true, 0)).toBe(true)
+  })
+
+  it('owes nothing once one went out', () => {
+    expect(stepOwesFixedMessage(step, true, 1)).toBe(false)
+  })
+
+  it('owes nothing when the step was entered on an earlier turn', () => {
+    expect(stepOwesFixedMessage(step, false, 0)).toBe(false)
+  })
+
+  it('owes nothing when the step has no fixed messages', () => {
+    expect(stepOwesFixedMessage({}, true, 0)).toBe(false)
+    expect(stepOwesFixedMessage({ fixedMessages: [] }, true, 0)).toBe(false)
   })
 })
