@@ -71,3 +71,14 @@ export function renderFixedMessage(
   if (leftover) return { ok: false, reason: `marcador desconocido ${leftover[0]}` }
   return { ok: true, text }
 }
+
+/**
+ * Un mensaje fijo que no es de ningún servicio (el `openWith` de un paso: una
+ * presentación, una intro). Sale tal cual, y por eso se niega ante CUALQUIER
+ * marcador: no hay servicio de dónde sacar un {precio} o un {servicio}.
+ */
+export function renderStaticMessage(template: string): RenderResult {
+  const marker = template.match(/\{[a-z_]+\}/)
+  if (marker) return { ok: false, reason: `marcador ${marker[0]} sin servicio` }
+  return { ok: true, text: template }
+}

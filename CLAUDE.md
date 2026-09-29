@@ -295,7 +295,9 @@ El flujo NO lo decide el LLM — lo controla el código.
 - **Estado**: dónde está la conversación (`conversations.state`, `varchar(50)`,
   default `idle`). No hay enum en la BD: los ids de nodo son libres
 - **Trigger**: qué pasó. De una tool (`ToolResult.trigger`), del código (imagen
-  recibida) o del tiempo (24h sin respuesta)
+  recibida) o del tiempo. El del tiempo (`inactive_24h` → `idle`) lo emite
+  `llm.service` SOLO para un negocio cuyo archivo declara `restartAfterHours`
+  (ver "Config por negocio en archivos"); para el resto nadie lo emite
 - **Transición**: estado actual + trigger → estado nuevo
 - **Tools por estado**: en cada estado el LLM solo ve las tools permitidas.
   `llm.service.ts` filtra el array antes de llamar a OpenAI, así que una tool
@@ -362,7 +364,19 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   enviarlo. Existe porque pedirle por instrucción "no agregues nada después del
   mensaje fijo" falló en 4 intentos seguidos (Instituto Tecmin, 2026-09-27): el
   modelo, después de ejecutar tools, casi siempre escribe una frase de cierre. Si
-  en el turno NO salió mensaje fijo, el texto sale normal.
+  en el turno NO salió mensaje fijo, el texto sale normal. Solo cuentan los
+  mensajes fijos que pidió la IA, no los `openWith`.
+- **`openWith: ['id']`** — mensajes fijos que manda el CÓDIGO al entrar al paso,
+  sin que la IA los pida (Tecmin: la presentación en `greeting`, la intro de
+  cursos en `listado_servicios`). Existe porque "siempre se presenta" no se
+  consigue pidiéndoselo al modelo. Sin servicio: `renderStaticMessage` se niega
+  ante cualquier marcador. Cuándo salen (`llm.service`): si el paso es donde cae
+  el turno por el mensaje del cliente, siempre, y se guardan en el historial
+  ANTES de llamar al modelo; si se entra a mitad de turno (`advance_flow`,
+  `show_services`), solo si el turno TERMINA en ese paso — así la intro de cursos
+  no sale en un turno que pasó por el listado y siguió a certificaciones. Van
+  primeros en `LLMResponse.fixedMessages` y no cuentan para
+  `MAX_FIXED_MESSAGES_PER_TURN`.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
@@ -1001,7 +1015,11 @@ negocios. `business:show` dice cuál corre y por qué.
 Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions`,
 `collectData` y `requiresDeposit: false`** por encima de `messages.greeting`,
 `assistant.tone`, `assistant.customInstructions`, `collectDataFields` y
-`requiresDeposit`, y declarar los **mensajes fijos**. `requiresDeposit` solo
+`requiresDeposit`, declarar los **mensajes fijos** y **`restartAfterHours`**: si
+el cliente vuelve después de N horas sin actividad (`hoursSinceLastActivity`,
+contra el mensaje anterior a su ráfaga), `llm.service` aplica `inactive_24h` antes
+del `customer_message` y la conversación arranca otra vez en `greeting`, aunque
+haya quedado a mitad del flujo. Tecmin: 24. `requiresDeposit` solo
 apaga, nunca prende: existe para el caso real de Instituto Tecmin, cuyo
 adelanto de S/30 sigue prendido en la base porque "Formas de pago y adelanto"
 está bloqueado en el panel — el archivo es el único lugar donde Vamvu puede

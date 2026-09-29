@@ -55,6 +55,13 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * fijo no funciona — casi siempre escribe una frase de cierre igual.
    */
   fixedOnly?: boolean
+  /**
+   * Mensajes fijos que el CÓDIGO manda solo al entrar a este paso, antes que
+   * todo lo demás del turno. Sin servicio: el texto no puede llevar {precio} ni
+   * {servicio}. Si se entra a mitad de turno y el turno termina en otro paso,
+   * no salen (ver llm.service).
+   */
+  openWith?: NoInfer<M>[]
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -81,6 +88,12 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
   requiresDeposit?: false
   /** Mensajes que el código manda tal cual; la IA solo decide cuándo. */
   fixedMessages?: Record<M, FixedMessage>
+  /**
+   * Horas sin hablar después de las cuales un mensaje del cliente cuenta como
+   * conversación nueva: vuelve al inicio del flujo (idle → greeting). Ausente:
+   * nunca se reinicia por tiempo.
+   */
+  restartAfterHours?: number
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -101,6 +114,7 @@ export interface BusinessConfig {
   composition: FlowComposition
   settings: BusinessSettingsOverlay
   fixedMessages: Record<string, FixedMessage>
+  restartAfterHours?: number
 }
 
 function overrideOf<F extends FlowType, M extends string>(
@@ -117,6 +131,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.fixedMessages !== undefined ? { fixedMessages: step.fixedMessages } : {}),
     ...(step.mediaFirst !== undefined ? { mediaFirst: step.mediaFirst } : {}),
     ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
+    ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }
@@ -149,5 +164,8 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
       ...(input.requiresDeposit !== undefined ? { requiresDeposit: input.requiresDeposit } : {}),
     },
     fixedMessages: { ...(input.fixedMessages ?? {}) } as Record<string, FixedMessage>,
+    ...(input.restartAfterHours !== undefined
+      ? { restartAfterHours: input.restartAfterHours }
+      : {}),
   }
 }

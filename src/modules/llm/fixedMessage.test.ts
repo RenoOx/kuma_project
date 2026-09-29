@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderFixedMessage } from './fixedMessage.js'
+import { renderFixedMessage, renderStaticMessage } from './fixedMessage.js'
 
 // El mensaje fijo existe para que ningún monto pase por la IA: estos tests
 // cuidan que el código tampoco invente uno cuando el servicio no lo tiene.
@@ -40,5 +40,19 @@ describe('renderFixedMessage', () => {
   it('refuses an unknown marker rather than sending it to the customer', () => {
     const result = renderFixedMessage('Hola {nombre}', service(295, 295))
     expect(result).toEqual({ ok: false, reason: 'marcador desconocido {nombre}' })
+  })
+})
+
+describe('renderStaticMessage', () => {
+  it('sends the text as written', () => {
+    expect(renderStaticMessage('Hola 👋 soy Nicole')).toEqual({
+      ok: true,
+      text: 'Hola 👋 soy Nicole',
+    })
+  })
+
+  it('refuses any marker: there is no service to fill it from', () => {
+    expect(renderStaticMessage('Desde S/. {precio}').ok).toBe(false)
+    expect(renderStaticMessage('Te cuento de {servicio}').ok).toBe(false)
   })
 })
