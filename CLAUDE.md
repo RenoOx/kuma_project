@@ -364,8 +364,21 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   enviarlo. Existe porque pedirle por instrucción "no agregues nada después del
   mensaje fijo" falló en 4 intentos seguidos (Instituto Tecmin, 2026-09-27): el
   modelo, después de ejecutar tools, casi siempre escribe una frase de cierre. Si
-  en el turno NO salió mensaje fijo, el texto sale normal. Solo cuentan los
-  mensajes fijos que pidió la IA, no los `openWith`.
+  en el turno NO salió mensaje fijo, el texto sale normal. Cuentan los mensajes
+  fijos que pidió la IA y el `openWith` del PROPIO paso (no la presentación de
+  otro): así la lista de certificaciones de Tecmin es la respuesta entera del
+  turno en que se entra — la IA escribía la suya, con precios, encima.
+  **Y un paso `fixedOnly` al que se entró en este turno tiene que mandar su
+  mensaje fijo**: si la IA cierra sin mandarlo, `llm.service` le devuelve el turno
+  UNA vez con la orden de mandarlo (su texto no se guarda); si insiste, sale su
+  texto. Nació de "sí" en beneficios → "un adelanto de S/ 100" inventado en vez
+  del mensaje de pago (Tecmin, 2026-09-29).
+- **Un paso con mensajes fijos no se abandona sin mandarlos**: si se entró en este
+  turno y no salió ninguno, `advance_flow` se rechaza sin ejecutarse
+  (`fixed_message_pending`). La IA encadenaba perfil → beneficios → pago en un
+  turno y los beneficios nunca salían. Esta regla y la anterior deciden con
+  `stepOwesFixedMessage` (`fixedMessage.ts`); un paso entrado en un turno
+  anterior no debe nada.
 - **`openWith: ['id']`** — mensajes fijos que manda el CÓDIGO al entrar al paso,
   sin que la IA los pida (Tecmin: la presentación en `greeting`, la intro de
   cursos en `listado_servicios`). Existe porque "siempre se presenta" no se

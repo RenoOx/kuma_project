@@ -73,6 +73,23 @@ export function renderFixedMessage(
 }
 
 /**
+ * Si el paso todavía le debe al cliente uno de sus mensajes fijos.
+ *
+ * Un paso con mensajes fijos existe para mandarlos: los beneficios, el pago. Si
+ * la conversación entró en ESTE turno y no salió ninguno, el paso no cumplió.
+ * Nació de un caso real (Instituto Tecmin, 2026-09-29): la IA pasó por
+ * beneficios sin mandarlos y, en vez del mensaje de pago, inventó "un adelanto
+ * de S/ 100". Si se entró en un turno anterior no se le exige: ya tuvo su turno.
+ */
+export function stepOwesFixedMessage(
+  step: { fixedMessages?: string[] },
+  enteredThisTurn: boolean,
+  sentInStep: number,
+): boolean {
+  return (step.fixedMessages?.length ?? 0) > 0 && enteredThisTurn && sentInStep === 0
+}
+
+/**
  * Un mensaje fijo que no es de ningún servicio (el `openWith` de un paso: una
  * presentación, una intro). Sale tal cual, y por eso se niega ante CUALQUIER
  * marcador: no hay servicio de dónde sacar un {precio} o un {servicio}.

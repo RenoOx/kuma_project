@@ -51,8 +51,15 @@ export default defineBusinessConfig({
   // opciones no dice el monto de cada una — solo cuando el cliente pregunta por
   // UNA en particular, o cuando ya lo trae un mensaje fijo. Revertir borrando
   // esto: el motor por defecto sí muestra precio en el listado.
-  instructions:
+  //
+  // La segunda frase (2026-09-29): Emma le inventó "un adelanto de S/ 100" a un
+  // alumno de certificación. Los montos de pago solo existen en los mensajes
+  // fijos; lo que lo garantiza es el motor (un paso fixedOnly tiene que mandar
+  // el suyo), esto es una red más.
+  instructions: [
     "Cuando LISTES varias opciones juntas (cursos o certificaciones), no digas el precio de cada una — solo el nombre. El precio se lo das recién cuando pregunta por UNA en particular, o cuando ya viene en un mensaje fijo.",
+    "Nunca digas con tus palabras un monto de pago, un adelanto ni datos de pago (Yape, número, titular): eso sale solo en los mensajes fijos.",
+  ].join("\n"),
 
   // Lo que Emma pide y guarda en collect_data. Sin 'nombre completo' a
   // propósito (2026-09-27): el dueño no lo quiere pedir en este paso — el
@@ -173,27 +180,37 @@ export default defineBusinessConfig({
       ],
     },
 
-    // Camino con experiencia. La IA solo elige el tramo por el número de
-    // maquinarias; el texto de la oferta y el precio los pone el código. Las
-    // letras A/B/C van en la invitación (las pone el código, siempre iguales),
-    // no en el texto de la IA.
+    // Camino con experiencia. La lista A/B/C la manda el CÓDIGO al entrar
+    // (`listadoCertificaciones`) y, con fixedOnly, es la respuesta entera de ese
+    // turno: el 2026-09-29 la IA escribió su propia lista con precios
+    // ("· Certificación - 1 a 2 máquinas — S/ 295") encima de la invitación,
+    // aunque la regla de no dar precios al listar ya estaba.
+    //
+    // Elegir una letra ES avanzar, igual que en cursos: con "¿en cuál deseas
+    // más información?", un "B" se leía como "dame información" y Emma se
+    // quedaba acá dando el precio en vez de pasar a beneficios.
     {
       node: "asesoria_perfil",
       label: "Asesoría con experiencia",
+      openWith: ["listadoCertificaciones"],
+      fixedOnly: true,
+      // La pregunta ya viene al final de la lista.
+      cta: false,
       extraInstructions: [
-        "La invitación de este paso ya lista las 3 certificaciones con su letra (A, B, C) y se agrega sola al final de tu mensaje: no escribas vos la lista ni tu propia pregunta de cierre — la duplicarías.",
-        "Si más adelante tenés que volver a nombrar las opciones, siempre con su letra y en este orden: A. 1 a 2 maquinarias, B. 3 a 4 maquinarias, C. 5 maquinarias o más. Nunca con el precio al lado.",
-        "No repreguntes el número de maquinarias en texto libre: esperá la letra (o el tramo si lo dice directo) y elegí de la lista de servicios la certificación de ese tramo:",
+        "La lista de las 3 certificaciones con su letra (A, B, C) ya le llegó sola al entrar a este paso: no la escribas vos.",
+        "En este paso NUNCA escribas un precio ni un monto — ni al listar ni al hablar de una sola. El precio le llega en el mensaje de beneficios.",
+        "Si tenés que volver a nombrar las opciones, siempre con su letra, sin precio y en este orden: A. Certificación de 1 a 2 maquinarias, B. Certificación de 3 a 4 maquinarias, C. Certificación de 5 maquinarias o más.",
+        'Cuando el alumno elija una —por letra o por tramo—, es que la ELIGIÓ: no le des precio ni detalle, llamá advance_flow con la ruta "quiere-certificarse" en ese mismo turno. El mapeo, contra la lista de servicios:',
         '- A o "1 a 2" → la certificación de 1 a 2',
         '- B o "3 a 4" → la certificación de 3 a 4',
         '- C o "5 o más" → la certificación de 5 o más',
+        "No repreguntes el número de maquinarias en texto libre: esperá la letra o el tramo.",
         "Para las herramientas usá el nombre del servicio tal como figura en la lista de servicios.",
       ].join("\n"),
-      cta: "¿En cuál de las opciones deseas más información?\nA. Certificación de 1 a 2 maquinarias\nB. Certificación de 3 a 4 maquinarias\nC. Certificación de 5 maquinarias o más",
       routes: [
         {
           id: "quiere-certificarse",
-          when: "El alumno quiere avanzar con la certificación que se le ofreció.",
+          when: "El alumno eligió una de las certificaciones: por letra (A, B o C) o por tramo (1 a 2, 3 a 4, 5 o más).",
           to: "mostrar_beneficios",
         },
         {
@@ -276,6 +293,16 @@ export default defineBusinessConfig({
     presentacion: {
       when: "Al entrar al saludo (conversación nueva, o de vuelta después de 24 h).",
       text: "Hola 👋 soy Nicole Perez, asesora comercial del Instituto Tecmin",
+    },
+    listadoCertificaciones: {
+      when: "Al entrar a la asesoría con experiencia: las 3 certificaciones, sin precio.",
+      text: [
+        "Estas son nuestras certificaciones por experiencia:",
+        "A. Certificación de 1 a 2 maquinarias",
+        "B. Certificación de 3 a 4 maquinarias",
+        "C. Certificación de 5 maquinarias o más",
+        "¿En cuál de las opciones deseas más información?",
+      ].join("\n"),
     },
     introCursos: {
       when: "Al entrar al listado de cursos, antes de las fichas.",

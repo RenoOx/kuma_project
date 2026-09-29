@@ -29,11 +29,21 @@ import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
-import { type FixedOutbound, renderStaticMessage, type StepFixedMessage } from './fixedMessage.js'
+import {
+  type FixedOutbound,
+  renderStaticMessage,
+  type StepFixedMessage,
+  stepOwesFixedMessage,
+} from './fixedMessage.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
-import { executeTool, type ToolAttachment, type ToolContext } from './toolExecutor.js'
+import {
+  executeTool,
+  type ToolAttachment,
+  type ToolContext,
+  type ToolExecutionResult,
+} from './toolExecutor.js'
 import { kumaTools } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
@@ -54,6 +64,12 @@ const MAX_FIXED_MESSAGES_PER_TURN = 2
 const OPENAI_TIMEOUT_MS = 30_000
 const MAX_ITERATIONS_FALLBACK_TEXT =
   'No me quedó claro cómo ayudarte con eso. Un encargado te va a contactar para orientarte mejor.'
+
+// Lo que recibe la IA cuando quiere salir de un paso sin haber mandado su
+// mensaje fijo, o cuando cierra un paso `fixedOnly` con texto propio. Ver
+// stepOwesFixedMessage en fixedMessage.ts.
+const FIXED_MESSAGE_PENDING_INSTRUCTION =
+  'Este paso responde con su mensaje fijo y todavía no lo mandaste. Mandalo ahora con send_fixed_message (ver MENSAJES FIJOS del paso actual) y no escribas nada propio. Recién después se avanza.'
 
 function convertHistoryToChatMessages(history: Message[]): ChatCompletionMessageParam[] {
   const out: ChatCompletionMessageParam[] = []
@@ -461,6 +477,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // respuesta no las hace más claras.
   const fixedOut: FixedOutbound[] = []
   let fixedPersisted = 0
+  // Para stepOwesFixedMessage: si el paso vigente se entró en este turno y
+  // cuántos mensajes fijos salieron desde que se entró. Se reinician en cada
+  // cambio de paso.
+  let enteredThisTurn = openingState !== turnStart
+  let sentInStep = 0
+  // Un paso `fixedOnly` que cierra sin su mensaje fijo se devuelve UNA vez: si
+  // al segundo intento tampoco lo manda, sale su texto — nunca se deja al
+  // cliente sin respuesta.
+  let nudged = false
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
@@ -521,41 +546,23 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
     // Final answer: model decided not to call any tools.
     if (!toolCalls || toolCalls.length === 0) {
-      // Vacío es un error solo si además no se mandó nada fijo esta vuelta:
-      // sin fixedOut, un content vacío es una respuesta que no le dijo nada
-      // al cliente. Con fixedOut, el mensaje fijo YA le dijo algo (y ya se
-      // persistió más arriba en el loop) — un cierre sin texto propio es una
-      // respuesta válida, no un fallo. Antes esto no existía: el modelo no
-      // tenía forma de "no decir nada", así que agregaba una frase de cierre
-      // aunque se le pidiera lo contrario.
-      if (!assistantContent && fixedOut.length === 0 && openingOut.length === 0) {
-        return err(
-          new AppError({
-            code: 'llm_empty_response',
-            message: 'openai returned no content and no tool_calls',
-            userMessage: 'Disculpa, no pude generar una respuesta.',
-            logContext: {
-              businessId: params.businessId,
-              conversationId: params.conversationId,
-              iteration,
-            },
-          }),
-        )
-      }
-
-      // `fixedOnly` (config del paso): si salió un mensaje fijo, ése es la
-      // respuesta completa y el texto propio del modelo se tira. Lo decide el
-      // código y no una instrucción, porque pedirle al modelo que no agregue
-      // nada después de un mensaje fijo no funcionó nunca: siempre escribía
-      // una frase de cierre ("Esto es lo que vas a tener. ¿…?"). Se lee el
-      // paso vigente al cerrar el turno, igual que el CTA y `mediaFirst`.
-      const discardText = stateConfig.fixedOnly === true && fixedOut.length > 0
-      const finalContent = discardText ? '' : assistantContent
-      if (discardText && assistantContent) {
-        log.debug(
+      // Un paso `fixedOnly` al que se entró en este turno responde con su
+      // mensaje fijo. Si la IA cierra sin mandarlo, se le devuelve el turno una
+      // vez; su texto no se guarda. Así "sí" en beneficios llega al mensaje de
+      // pago del negocio y no a un monto inventado.
+      if (
+        stateConfig.fixedOnly === true &&
+        stepOwesFixedMessage(stateConfig, enteredThisTurn, sentInStep) &&
+        !nudged &&
+        iteration < MAX_TOOL_ITERATIONS - 1
+      ) {
+        nudged = true
+        log.info(
           { state: effectiveState, discarded: preview(assistantContent, 120) },
-          'fixedOnly step: model text discarded after a fixed message',
+          'fixedOnly step: nudged to send its fixed message',
         )
+        chatMessages.push({ role: 'system', content: FIXED_MESSAGE_PENDING_INSTRUCTION })
+        continue
       }
 
       // El `openWith` de un paso al que se entró A MITAD de turno sale solo si el
@@ -573,6 +580,55 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           if (!persisted.ok) return persisted
           closingOut.push(closing)
         }
+      }
+      // Vacío es un error solo si además no salió nada fijo esta vuelta: sin
+      // mensajes fijos, un content vacío es una respuesta que no le dijo nada
+      // al cliente. Con alguno, ese mensaje YA le dijo algo (y ya se persistió)
+      // — un cierre sin texto propio es una respuesta válida, no un fallo.
+      // Antes esto no existía: el modelo no tenía forma de "no decir nada", así
+      // que agregaba una frase de cierre aunque se le pidiera lo contrario.
+      if (
+        !assistantContent &&
+        fixedOut.length === 0 &&
+        openingOut.length === 0 &&
+        closingOut.length === 0
+      ) {
+        return err(
+          new AppError({
+            code: 'llm_empty_response',
+            message: 'openai returned no content and no tool_calls',
+            userMessage: 'Disculpa, no pude generar una respuesta.',
+            logContext: {
+              businessId: params.businessId,
+              conversationId: params.conversationId,
+              iteration,
+            },
+          }),
+        )
+      }
+
+      // Solo el `openWith` del paso donde termina el turno: la presentación
+      // del saludo no silencia la respuesta de un paso posterior.
+      const ownOpenWithSent =
+        closingOut.length > 0 ||
+        (effectiveState === openingState && openingState !== turnStart && openingOut.length > 0)
+
+      // `fixedOnly` (config del paso): si salió un mensaje fijo —el que pidió la
+      // IA o el `openWith` del propio paso—, ése es la respuesta completa y el
+      // texto propio del modelo se tira. Lo decide el código y no una
+      // instrucción, porque pedirle al modelo que no agregue nada después de un
+      // mensaje fijo no funcionó nunca: siempre escribía una frase de cierre
+      // ("Esto es lo que vas a tener. ¿…?"). Con el `openWith` pasa lo mismo:
+      // Tecmin, 2026-09-29, la IA escribió su propia lista de certificaciones
+      // con precios encima de la del negocio. Se lee el paso vigente al cerrar
+      // el turno, igual que el CTA y `mediaFirst`.
+      const discardText = stateConfig.fixedOnly === true && (fixedOut.length > 0 || ownOpenWithSent)
+      const finalContent = discardText ? '' : assistantContent
+      if (discardText && assistantContent) {
+        log.debug(
+          { state: effectiveState, discarded: preview(assistantContent, 120) },
+          'fixedOnly step: model text discarded after a fixed message',
+        )
       }
 
       if (finalContent) {
@@ -660,7 +716,24 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         parsedArgs = {}
       }
 
-      const toolResult = await executeTool(call.function.name, parsedArgs, toolContext)
+      // Un paso con mensajes fijos no se abandona sin mandarlos: la IA encadenaba
+      // rutas (perfil → beneficios → pago) en un solo turno y los beneficios
+      // nunca salían. Se rechaza sin ejecutar, y la IA sigue en el mismo turno.
+      const owesFixed =
+        call.function.name === 'advance_flow' &&
+        stepOwesFixedMessage(stateConfig, enteredThisTurn, sentInStep)
+      if (owesFixed) {
+        log.info({ state: effectiveState }, 'advance_flow refused: fixed message pending')
+      }
+      const toolResult: ToolExecutionResult = owesFixed
+        ? {
+            result: JSON.stringify({
+              error: 'fixed_message_pending',
+              instruction: FIXED_MESSAGE_PENDING_INSTRUCTION,
+            }),
+            error: 'fixed_message_pending',
+          }
+        : await executeTool(call.function.name, parsedArgs, toolContext)
 
       log.info(
         {
@@ -691,6 +764,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           continue
         }
         fixedOut.push(fixed)
+        sentInStep++
       }
 
       // Folded over the turn's own variable rather than re-read from the row:
@@ -708,6 +782,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           toolResult.evidence,
         )
         if (effectiveState !== stateBeforeThisCall) {
+          enteredThisTurn = true
+          sentInStep = 0
           // El resto de esta vuelta tiene que ver el paso NUEVO — ver el
           // comentario de forState más arriba.
           ;({ stateConfig, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
