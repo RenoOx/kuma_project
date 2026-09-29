@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { renderFixedMessage, renderStaticMessage, stepOwesFixedMessage } from './fixedMessage.js'
+import {
+  renderFixedMessage,
+  renderStaticMessage,
+  stepOwesFixedMessage,
+  withoutRepeatedLines,
+} from './fixedMessage.js'
 
 // El mensaje fijo existe para que ningún monto pase por la IA: estos tests
 // cuidan que el código tampoco invente uno cuando el servicio no lo tiene.
@@ -75,5 +80,37 @@ describe('stepOwesFixedMessage', () => {
   it('owes nothing when the step has no fixed messages', () => {
     expect(stepOwesFixedMessage({}, true, 0)).toBe(false)
     expect(stepOwesFixedMessage({ fixedMessages: [] }, true, 0)).toBe(false)
+  })
+})
+
+describe('withoutRepeatedLines', () => {
+  const INTRO = 'Genial, ahora te paso un resumen de tus cursos'
+
+  it('drops the intro Emma repeated, even with an emoji, and keeps the list and the question', () => {
+    const text = [
+      'Genial, ahora te paso un resumen de tus cursos 😊',
+      '',
+      '· BÁSICO - Operación y mantenimiento de equipos',
+      '',
+      '¿Qué curso te gustaría iniciar?',
+      'A. Básico',
+    ].join('\n')
+    expect(withoutRepeatedLines(text, [INTRO])).toBe(
+      [
+        '· BÁSICO - Operación y mantenimiento de equipos',
+        '',
+        '¿Qué curso te gustaría iniciar?',
+        'A. Básico',
+      ].join('\n'),
+    )
+  })
+
+  it('keeps a line that only looks like the one sent', () => {
+    const text = 'Genial, ¿cuál te interesa?'
+    expect(withoutRepeatedLines(text, [INTRO])).toBe(text)
+  })
+
+  it('returns the text as is when nothing was sent', () => {
+    expect(withoutRepeatedLines(`${INTRO}\n\nHola`, [])).toBe(`${INTRO}\n\nHola`)
   })
 })

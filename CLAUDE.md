@@ -389,7 +389,9 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   `show_services`), solo si el turno TERMINA en ese paso — así la intro de cursos
   no sale en un turno que pasó por el listado y siguió a certificaciones. Van
   primeros en `LLMResponse.fixedMessages` y no cuentan para
-  `MAX_FIXED_MESSAGES_PER_TURN`.
+  `MAX_FIXED_MESSAGES_PER_TURN`. Si la IA igual repite una línea de un `openWith`
+  que salió en el turno (pasó con la intro de cursos), `withoutRepeatedLines`
+  (`fixedMessage.ts`) la borra de su texto antes de guardarlo y enviarlo.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
