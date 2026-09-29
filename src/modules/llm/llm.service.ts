@@ -34,6 +34,7 @@ import {
   renderStaticMessage,
   type StepFixedMessage,
   stepOwesFixedMessage,
+  withoutRepeatedLines,
 } from './fixedMessage.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
@@ -623,7 +624,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // con precios encima de la del negocio. Se lee el paso vigente al cerrar
       // el turno, igual que el CTA y `mediaFirst`.
       const discardText = stateConfig.fixedOnly === true && (fixedOut.length > 0 || ownOpenWithSent)
-      const finalContent = discardText ? '' : assistantContent
+      // Lo que el código ya mandó como mensaje de entrada no se repite en el
+      // texto de Emma: la IA volvía a escribir la intro de cursos aunque se le
+      // dijera que ya había salido. Queda limpio también en el historial.
+      const finalContent = discardText
+        ? ''
+        : withoutRepeatedLines(
+            assistantContent,
+            [...openingOut, ...closingOut].map((m) => m.text),
+          )
       if (discardText && assistantContent) {
         log.debug(
           { state: effectiveState, discarded: preview(assistantContent, 120) },

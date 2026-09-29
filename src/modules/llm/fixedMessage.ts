@@ -72,6 +72,41 @@ export function renderFixedMessage(
   return { ok: true, text }
 }
 
+// Para comparar una línea de Emma con un mensaje fijo: sin emojis, signos,
+// tildes ni mayúsculas. "Genial, ahora te paso… 😊" es la misma línea que
+// "Genial, ahora te paso…".
+function comparable(line: string): string {
+  return line
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * El texto de Emma sin las líneas que ya le llegaron como mensaje fijo en este
+ * turno.
+ *
+ * Existe porque la IA repetía la intro de cursos que el código acababa de
+ * mandar (Tecmin, 2026-09-29), aunque se le decía que no. Solo sale una línea
+ * que sea IGUAL a una línea ya mandada; una que solo se le parece se queda.
+ */
+export function withoutRepeatedLines(text: string, alreadySent: readonly string[]): string {
+  const sent = new Set(
+    alreadySent.flatMap((m) => m.split('\n').map(comparable)).filter((l) => l !== ''),
+  )
+  if (sent.size === 0) return text
+  const kept = text.split('\n').filter((line) => !sent.has(comparable(line)))
+  if (kept.length === text.split('\n').length) return text
+  // Lo que borramos dejaba huecos: sin líneas en blanco al principio ni de a tres.
+  return kept
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 /**
  * Si el paso todavía le debe al cliente uno de sus mensajes fijos.
  *

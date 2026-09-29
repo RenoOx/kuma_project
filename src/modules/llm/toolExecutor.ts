@@ -330,7 +330,7 @@ async function buildServiceCards(
  * sentence cut at a letter reads like a bug.
  */
 function buildCardCaption(service: Service): string {
-  const head = `*${service.name}*}`
+  const head = `*${service.name}*`
   const body = service.description?.trim()
   if (!body) return head
 
