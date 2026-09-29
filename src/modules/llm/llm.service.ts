@@ -17,6 +17,7 @@ import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import * as messageService from '@/modules/message/message.service.js'
+import { isIgnoredForModel } from '@/modules/whatsapp/messageKind.js'
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
@@ -76,6 +77,10 @@ function convertHistoryToChatMessages(history: Message[]): ChatCompletionMessage
       continue
     }
     if (msg.role === 'user') {
+      // Emojis sueltos y multimedia ignorada (sticker, video…) quedan guardados
+      // para el Inbox, pero el modelo no los lee: si los viera, "no influyen" sería
+      // mentira — un "😂" en el historial le cambiaba el tono de la respuesta.
+      if (isIgnoredForModel(msg.content)) continue
       out.push({ role: 'user', content: msg.content })
     }
   }

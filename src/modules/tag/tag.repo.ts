@@ -28,6 +28,20 @@ export async function findById(
   return row ?? null
 }
 
+/** La etiqueta de este negocio con este nombre exacto, o null. */
+export async function findByName(
+  businessId: string,
+  name: string,
+  exec: Executor = db,
+): Promise<Tag | null> {
+  const [row] = await exec
+    .select()
+    .from(tags)
+    .where(and(eq(tags.businessId, businessId), eq(tags.name, name)))
+    .limit(1)
+  return row ?? null
+}
+
 export async function insert(data: NewTag, exec: Executor = db): Promise<Tag> {
   const [row] = await exec.insert(tags).values(data).returning()
   if (!row) throw new Error('insert tags returned no row')
@@ -117,6 +131,36 @@ export async function replaceForConversation(
   await exec.delete(conversationTags).where(eq(conversationTags.conversationId, conversationId))
   if (tagIds.length === 0) return
   await exec.insert(conversationTags).values(tagIds.map((tagId) => ({ conversationId, tagId })))
+}
+
+/**
+ * Agrega UNA etiqueta a la conversación sin tocar las demás. Ponerla dos veces
+ * no hace nada (UNIQUE conversación + etiqueta). Sin chequeo de tenant propio:
+ * el service valida la conversación y la etiqueta antes de llamar acá.
+ */
+export async function addToConversation(
+  conversationId: string,
+  tagId: string,
+  exec: Executor = db,
+): Promise<void> {
+  await exec.insert(conversationTags).values({ conversationId, tagId }).onConflictDoNothing()
+}
+
+/** Saca estas etiquetas de la conversación, dejando las demás. */
+export async function removeFromConversation(
+  conversationId: string,
+  tagIds: string[],
+  exec: Executor = db,
+): Promise<void> {
+  if (tagIds.length === 0) return
+  await exec
+    .delete(conversationTags)
+    .where(
+      and(
+        eq(conversationTags.conversationId, conversationId),
+        inArray(conversationTags.tagId, tagIds),
+      ),
+    )
 }
 
 /**

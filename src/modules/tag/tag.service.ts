@@ -5,8 +5,8 @@ import * as panelRepo from '@/modules/panel/panel.repo.js'
 import { AppError, ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as tagRepo from './tag.repo.js'
-import type { CreateTagInput, UpdateTagInput } from './tag.types.js'
-import { MAX_TAGS_PER_BUSINESS } from './tag.types.js'
+import type { CreateTagInput, QualificationOutcome, TagColor, UpdateTagInput } from './tag.types.js'
+import { MAX_TAGS_PER_BUSINESS, QUALIFICATION_TAGS } from './tag.types.js'
 
 function wrap(cause: unknown, code: string, logContext: Record<string, unknown>): AppError {
   return new AppError({
@@ -143,5 +143,95 @@ export async function assign(
     return ok(rows.map((r) => r.tag))
   } catch (cause) {
     return err(wrap(cause, 'tag_assign_failed', { businessId, conversationId }))
+  }
+}
+
+// ── Calificación de leads ────────────────────────────────────────────────────
+//
+// La única vez que el CÓDIGO pone etiquetas (el resto las pone el dueño a mano).
+// Ver QUALIFICATION_TAGS en tag.types.ts.
+
+/**
+ * La etiqueta con ese nombre; si no existe, la crea (respetando el límite de
+ * 10). Fuera de cualquier transacción a propósito: si dos procesos la crean a
+ * la vez, el UNIQUE rechaza a uno — y en Postgres un error adentro de una
+ * transacción la deja abortada, sin poder volver a buscar. Acá el perdedor
+ * simplemente la lee.
+ */
+async function ensureTag(
+  businessId: string,
+  spec: { name: string; color: TagColor },
+): Promise<Result<Tag>> {
+  const existing = await tagRepo.findByName(businessId, spec.name)
+  if (existing) return ok(existing)
+
+  const created = await create(businessId, spec)
+  if (created.ok) return created
+  if (created.error instanceof ConflictError) {
+    const raced = await tagRepo.findByName(businessId, spec.name)
+    if (raced) return ok(raced)
+  }
+  return created
+}
+
+/**
+ * Le pone "Por validar" a la conversación sin tocar sus otras etiquetas. La
+ * llama el handler cuando Emma se pausa porque llegó la captura o el DNI; la
+ * conversación ya viene resuelta para este negocio.
+ */
+export async function markPendingValidation(
+  businessId: string,
+  conversationId: string,
+): Promise<Result<void>> {
+  try {
+    const tag = await ensureTag(businessId, QUALIFICATION_TAGS.pending)
+    if (!tag.ok) return tag
+    await tagRepo.addToConversation(conversationId, tag.data.id)
+    return ok(undefined)
+  } catch (cause) {
+    return err(wrap(cause, 'tag_mark_pending_failed', { businessId, conversationId }))
+  }
+}
+
+/**
+ * El dueño califica el lead desde el panel: sale "Por validar" (y el resultado
+ * contrario, si estaba) y queda "Pagó" o "No pagó". El cambio va en una sola
+ * transacción: el chat nunca queda un instante con las dos o con ninguna.
+ */
+export async function qualify(
+  businessId: string,
+  conversationId: string,
+  outcome: QualificationOutcome,
+): Promise<Result<Tag[]>> {
+  try {
+    const conversation = await panelRepo.findConversation(businessId, conversationId)
+    if (!conversation) {
+      return err(
+        new NotFoundError({ resource: 'conversation', logContext: { businessId, conversationId } }),
+      )
+    }
+
+    const target = await ensureTag(businessId, QUALIFICATION_TAGS[outcome])
+    if (!target.ok) return target
+
+    const opposite = QUALIFICATION_TAGS[outcome === 'paid' ? 'not_paid' : 'paid']
+    const toRemove = await Promise.all([
+      tagRepo.findByName(businessId, QUALIFICATION_TAGS.pending.name),
+      tagRepo.findByName(businessId, opposite.name),
+    ])
+
+    await db.transaction(async (tx) => {
+      await tagRepo.removeFromConversation(
+        conversationId,
+        toRemove.flatMap((tag) => (tag ? [tag.id] : [])),
+        tx,
+      )
+      await tagRepo.addToConversation(conversationId, target.data.id, tx)
+    })
+
+    const rows = await tagRepo.findForConversations(businessId, [conversationId])
+    return ok(rows.map((r) => r.tag))
+  } catch (cause) {
+    return err(wrap(cause, 'tag_qualify_failed', { businessId, conversationId, outcome }))
   }
 }

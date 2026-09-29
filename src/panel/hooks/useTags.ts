@@ -6,11 +6,13 @@ import {
   createTag,
   deleteTag,
   getTags,
+  qualifyConversation,
   setEmmaEnabled,
   type TagInput,
   updateTag,
 } from '../api/tags.js'
 import type { ConversationListItem, MessagePage, Paged, PanelTag } from '../api/types.js'
+import type { QualificationOutcome } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
 export function useTags() {
@@ -71,6 +73,32 @@ export function useAssignTags(conversationId: string) {
       void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
     },
   })
+}
+
+/**
+ * Califica el lead de un chat "Por validar" como Pagó o No pagó.
+ *
+ * Invalida también ['tags']: la primera vez que se usa, el server crea las
+ * etiquetas "Pagó" / "No pagó", y el selector y las pestañas del Inbox tienen
+ * que verlas.
+ */
+export function useQualify(conversationId: string) {
+  const session = useSession()
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation<PanelTag[], Error, QualificationOutcome>({
+    mutationFn: (outcome) => qualifyConversation(session, conversationId, outcome),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['conversations', session.businessId] })
+      void queryClient.invalidateQueries({ queryKey: ['tags', session.businessId] })
+    },
+  })
+
+  return {
+    qualify: (outcome: QualificationOutcome) => mutation.mutate(outcome),
+    pending: mutation.isPending ? mutation.variables : null,
+    error: mutation.isError ? errorText(mutation.error) : null,
+  }
 }
 
 /**

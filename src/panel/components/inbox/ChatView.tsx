@@ -9,6 +9,7 @@ import { Button } from '../ui/button.js'
 import { EmmaToggle } from './EmmaToggle.js'
 import { MessageBubble } from './MessageBubble.js'
 import { PaymentProofs } from './PaymentProofs.js'
+import { QualifyButtons } from './QualifyButtons.js'
 import { ReplyInput } from './ReplyInput.js'
 import { TagBadge } from './TagBadge.js'
 import { TagManager } from './TagManager.js'
@@ -115,6 +116,8 @@ export function ChatView({
             ))}
           </div>
         )}
+
+        <QualifyButtons conversationId={conversation.id} tags={conversation.tags} />
 
         <TagPicker
           conversationId={conversation.id}

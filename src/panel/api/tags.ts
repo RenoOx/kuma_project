@@ -1,4 +1,4 @@
-import type { TagColor } from '../lib/constants.js'
+import type { QualificationOutcome, TagColor } from '../lib/constants.js'
 import { apiGet, apiSend, type PanelSession } from './client.js'
 import type { PanelTag } from './types.js'
 
@@ -40,6 +40,21 @@ export function assignTags(
 ): Promise<PanelTag[]> {
   // PUT because sending it twice leaves the same state — it replaces the set.
   return apiSend<PanelTag[]>(session, 'PUT', `/conversations/${conversationId}/tags`, { tagIds })
+}
+
+/**
+ * Califica el lead: el server saca "Por validar" (y el resultado contrario) y
+ * pone "Pagó" o "No pagó", creándolas si no existen. Devuelve las etiquetas que
+ * quedaron en la conversación.
+ */
+export function qualifyConversation(
+  session: PanelSession,
+  conversationId: string,
+  outcome: QualificationOutcome,
+): Promise<PanelTag[]> {
+  return apiSend<PanelTag[]>(session, 'POST', `/conversations/${conversationId}/qualify`, {
+    outcome,
+  })
 }
 
 export function setEmmaEnabled(

@@ -4,7 +4,12 @@ import { z } from 'zod'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as panelRepo from '@/modules/panel/panel.repo.js'
 import * as tagService from '@/modules/tag/tag.service.js'
-import { assignTagsSchema, createTagSchema, updateTagSchema } from '@/modules/tag/tag.types.js'
+import {
+  assignTagsSchema,
+  createTagSchema,
+  qualifySchema,
+  updateTagSchema,
+} from '@/modules/tag/tag.types.js'
 import type { AppError } from '@/shared/errors.js'
 import { ConflictError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import type { Result } from '@/shared/result.js'
@@ -87,6 +92,19 @@ panelTagRoutes.put('/api/panel/:businessId/conversations/:conversationId/tags', 
   return respond(
     c,
     await tagService.assign(panelBusiness(c).id, c.req.param('conversationId'), body.data.tagIds),
+  )
+})
+
+// Calificar un lead desde el chat: saca "Por validar" y deja "Pagó" o "No
+// pagó". Aparte del PUT de arriba porque el dueño no manda el set completo: el
+// server sabe qué sacar y qué poner, y crea las etiquetas si no existen.
+panelTagRoutes.post('/api/panel/:businessId/conversations/:conversationId/qualify', async (c) => {
+  const body = await parseBody(c, qualifySchema)
+  if (!body.ok) return body.res
+
+  return respond(
+    c,
+    await tagService.qualify(panelBusiness(c).id, c.req.param('conversationId'), body.data.outcome),
   )
 })
 

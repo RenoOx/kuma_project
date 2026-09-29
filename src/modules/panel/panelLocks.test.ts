@@ -40,6 +40,8 @@ describe('isLockedPanelWrite', () => {
     ['PATCH', '/settings/bot'],
     ['POST', '/conversations/c1/reply'],
     ['PATCH', '/conversations/c1/emma'],
+    // Calificar un lead (Pagó / No pagó) es operativo, como las etiquetas.
+    ['POST', '/conversations/c1/qualify'],
     ['POST', '/appointments'],
     ['POST', '/tags'],
     ['POST', '/simulator/messages'],

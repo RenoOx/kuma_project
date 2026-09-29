@@ -138,6 +138,31 @@ export function findChosenService<S extends { name: string }>(
   return null
 }
 
+const SUMMARY_MAX_LINES = 5
+const SUMMARY_MAX_CHARS = 300
+
+/**
+ * El resumen recortado para el aviso: la descripción de un curso puede tener
+ * diez viñetas, y el dueño solo necesita reconocer cuál es. Máximo 5 líneas (las
+ * vacías no cuentan) y 300 caracteres — el tope de caracteres cubre una
+ * descripción escrita como un solo párrafo largo. Si se corta, termina en "…".
+ * La descripción del panel no cambia: esto es solo lo que va en el aviso.
+ */
+export function clampSummary(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  let out = lines.slice(0, SUMMARY_MAX_LINES).join('\n')
+  let cut = lines.length > SUMMARY_MAX_LINES
+  if (out.length > SUMMARY_MAX_CHARS) {
+    const space = out.lastIndexOf(' ', SUMMARY_MAX_CHARS)
+    out = out.slice(0, space > 0 ? space : SUMMARY_MAX_CHARS).trimEnd()
+    cut = true
+  }
+  return cut ? `${out}…` : out
+}
+
 /**
  * El aviso al dueño cuando llega una foto en un paso con reenvío configurado.
  *
@@ -178,7 +203,7 @@ export function buildStepImageCaption(params: {
     who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
     `🕒 ${formatDateTimeForDisplay(params.receivedAt, params.timezone)}`,
     params.summary?.trim()
-      ? `📋 Resumen: ${params.summary.trim()}`
+      ? `📋 Resumen: ${clampSummary(params.summary)}`
       : '📋 Resumen: no se pudo identificar qué eligió',
   ]
   if (said) lines.push('', `💬 "${said}"`)

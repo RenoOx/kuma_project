@@ -214,6 +214,8 @@ describe('la invitación de cierre de un paso', () => {
       CTA,
     )
     expect(prompt).toContain(`"${CTA}"`)
+    // Sin esto, el modelo sumaba su propia pregunta antes del CTA y quedaban dos.
+    expect(prompt).toContain('Esa es la ÚNICA pregunta de cierre del mensaje')
   })
 
   it('con cta: false no cierra con ninguna invitación, ni la rotativa', () => {
