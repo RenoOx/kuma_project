@@ -91,6 +91,8 @@ export interface StateConfig {
   mediaFirst?: boolean
   /** Si salió un mensaje fijo, es la respuesta completa: el texto de Emma se descarta. */
   fixedOnly?: boolean
+  /** Mensajes fijos que el código manda solo, al entrar a este paso (ver llm.service). */
+  openWith?: string[]
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -135,6 +137,12 @@ export interface NodeOverride {
   mediaFirst?: boolean
   /** Si salió un mensaje fijo, es la respuesta completa: el texto de Emma se descarta. */
   fixedOnly?: boolean
+  /**
+   * Mensajes fijos que manda el CÓDIGO al entrar a este paso, sin que la IA los
+   * pida. Solo desde archivo. Para lo que tiene que salir siempre (una
+   * presentación): pedírselo a la IA por instrucción no es "siempre".
+   */
+  openWith?: string[]
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -240,6 +248,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
     const cta = override?.cta === false ? false : override?.cta?.trim()
     const onImage = imageHandlingOf(override)
     const fixedMessages = (override?.fixedMessages ?? []).filter((id) => id.trim() !== '')
+    const openWith = (override?.openWith ?? []).filter((id) => id.trim() !== '')
     // Same rule as a blueprint's fixed jump: a route to a step the owner did not
     // include is dropped rather than an error, so removing a step never breaks
     // the ones pointing at it.
@@ -277,6 +286,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(fixedMessages.length > 0 ? { fixedMessages } : {}),
       ...(override?.mediaFirst ? { mediaFirst: true } : {}),
       ...(override?.fixedOnly ? { fixedOnly: true } : {}),
+      ...(openWith.length > 0 ? { openWith } : {}),
     }
   })
 

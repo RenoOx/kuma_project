@@ -126,7 +126,11 @@ function showBusiness(business: Business, promptState: string | null): void {
       const known = fileMessages[id] !== undefined
       out(`  fijo:      ${id}${known ? '' : '  ⚠ no está en fixedMessages del archivo'}`)
     }
-    out(`  tools:     ${(state?.tools ?? []).join(', ') || '—'}`)
+    for (const id of state?.openWith ?? []) {
+      const known = fileMessages[id] !== undefined
+      out(`  al entrar: ${id}${known ? '' : '  ⚠ no está en fixedMessages del archivo'}`)
+    }
+    out(`  tools:    ${(state?.tools ?? []).join(', ') || '—'}`)
   }
 
   if (promptState) {

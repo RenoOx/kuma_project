@@ -19,10 +19,12 @@ import { defineBusinessConfig } from "./define.js";
 //
 // Antes de que esto corra tal cual en prod hacen falta dos cambios en el panel
 // de Tecmin, del lado del dueño — no los hace este archivo:
-// Las 3 certificaciones (2026-09-25, ya creadas en el panel de Tecmin):
-// "Certificación - 1 a 2 máquinas" S/295, "Certificación - 3 a 4 máquinas"
-// S/350, "Certificación - 5 máquinas o más" S/500. asesoria_perfil las nombra
-// tal cual — sin ellas, send_fixed_message fallaría.
+// Las 3 certificaciones (2026-09-25, ya creadas en el panel de Tecmin), por
+// tramo: 1 a 2 maquinarias S/295, 3 a 4 maquinarias S/350, 5 maquinarias o más
+// S/500. Desde 2026-09-29 van a llamarse "Certificación - 1 a 2 maquinarias",
+// etc. — el renombre se hace en el panel (/servicios), no acá. asesoria_perfil
+// las mapea por el TRAMO y no por el nombre exacto, así funciona antes y
+// después del renombre; sin ellas, send_fixed_message fallaría.
 //
 // El adelanto de S/30 por Yape sigue prendido en la fila real: "Formas de pago
 // y adelanto" quedó bloqueado en el panel (lo configura Vamvu), así que el
@@ -35,10 +37,15 @@ export default defineBusinessConfig({
   name: "Instituto Tecmin",
   flowType: "sales",
 
-  // Lo primero que dice Emma, tal cual. Hace la pregunta de la bifurcación, así
-  // que en el primer mensaje no se agrega otra invitación (ver greetingAsks).
+  // El Bloque 2 de la presentación, tal cual: lo escribe Emma después del
+  // Bloque 1 (`presentacion`, que manda el código al entrar al saludo). Hace la
+  // pregunta de la bifurcación, así que no se le agrega otra invitación.
   greeting:
-    "¡Hola! ¿Cómo estás? Para apoyarte necesito saber si tienes experiencia en maquinaria pesada.",
+    "Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?",
+
+  // Un alumno que vuelve después de un día es una conversación nueva: arranca
+  // otra vez con la presentación, aunque ayer haya quedado a mitad del flujo.
+  restartAfterHours: 24,
 
   // Por ahora, sin precio en el listado (2026-09-26): cuando lista VARIAS
   // opciones no dice el monto de cada una — solo cuando el cliente pregunta por
@@ -61,42 +68,80 @@ export default defineBusinessConfig({
   flow: [
     { node: "idle" },
 
-    // El saludo es el mensaje configurado ("¿tienes experiencia en maquinaria
-    // pesada?"), que Emma manda tal cual en el primer mensaje. El video de
-    // presentación se sube desde el panel (/asistente → Conversación → "Saludo
-    // inicial" → "Material de este paso") y sale ANTES del texto: así la
-    // pregunta queda al final, lista para contestar, en vez de tapada por el video.
-    { node: "greeting", mediaFirst: true },
+    // La presentación en dos bloques (2026-09-29), cada uno un mensaje aparte:
+    // 1. `presentacion`, que manda el CÓDIGO al entrar a este paso — sale
+    //    siempre, también cuando el alumno vuelve después de 24 h.
+    // 2. El saludo configurado (la pregunta), que escribe Emma.
+    // El video se sube desde el panel (/asistente → Conversación → "Saludo
+    // inicial" → "Material de este paso") y queda entre los dos: así la
+    // pregunta queda al final, lista para contestar.
+    //
+    // Las rutas y el "no uses show_services" son el arreglo del bug del
+    // 2026-09-29: un alumno abrió con "info del certificado", Emma llamó
+    // show_services acá, y esa tool siempre lleva a listado_servicios (el paso
+    // de CURSOS) — la respuesta del certificado salió con "¿En qué curso estás
+    // interesado? A. Básico…" pegado al final.
+    {
+      node: "greeting",
+      openWith: ["presentacion"],
+      mediaFirst: true,
+      // El Bloque 2 ya es la pregunta. Sin esto, al volver después de 24 h (ya
+      // hay historial) la invitación rotativa se le pegaba atrás.
+      cta: false,
+      extraInstructions: [
+        "La presentación (tu nombre y el instituto) ya le llegó sola, antes de tu mensaje: no te vuelvas a presentar.",
+        '- Si el alumno solo saludó o todavía no dijo qué busca, tu mensaje es exactamente: "Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?"',
+        "- Si ya dijo qué busca, NO le hagas esa pregunta: llamá advance_flow con la ruta que corresponda en este mismo turno y respondé desde ese paso.",
+        "- No uses show_services en este paso: los cursos y las certificaciones se muestran en su propio paso.",
+      ].join("\n"),
+      routes: [
+        {
+          id: "con-experiencia",
+          when: "El alumno pregunta por certificación o certificados, o dice que tiene experiencia operando maquinaria.",
+          to: "asesoria_perfil",
+        },
+        {
+          id: "sin-experiencia",
+          when: "El alumno pregunta por los cursos, quiere empezar desde cero o dice que no tiene experiencia operando maquinaria.",
+          to: "listado_servicios",
+        },
+      ],
+    },
 
     // La bifurcación del diagrama: acá solo se decide el camino. Lo que se le
     // ofrece a cada uno vive en su propio paso.
     {
       node: "informing",
       extraInstructions: [
-        "El saludo ya le preguntó si tiene experiencia en maquinaria pesada. Tu único trabajo acá es saber la respuesta.",
-        "- Si TIENE experiencia: pasá al paso de certificación.",
-        "- Si NO tiene experiencia: pasá al paso de cursos.",
-        "- Si la respuesta no es clara, preguntale de nuevo si tiene experiencia manejando maquinaria pesada.",
+        "El saludo ya le preguntó si tiene experiencia operando maquinaria o si quiere un curso desde cero. Tu único trabajo acá es saber la respuesta.",
+        "- Si TIENE experiencia, o pregunta por certificación: pasá al paso de certificación.",
+        "- Si NO tiene experiencia, o pregunta por los cursos: pasá al paso de cursos.",
+        "- No uses show_services en este paso: los cursos y las certificaciones se muestran en su propio paso.",
+        "- Si la respuesta no es clara, preguntale de nuevo si tiene experiencia operando maquinaria.",
         "- Si antes de contestar pregunta por la ubicación o cómo llegar, dale la dirección y el link de Google Maps de arriba en una línea, y volvé a preguntarle si tiene experiencia.",
       ].join("\n"),
       routes: [
         {
           id: "con-experiencia",
-          when: "El alumno dice que tiene experiencia manejando maquinaria pesada.",
+          when: "El alumno dice que tiene experiencia operando maquinaria, o pregunta por certificación.",
           to: "asesoria_perfil",
         },
         {
           id: "sin-experiencia",
-          when: "El alumno no tiene experiencia en maquinaria pesada.",
+          when: "El alumno no tiene experiencia operando maquinaria, o quiere un curso desde cero.",
           to: "listado_servicios",
         },
       ],
     },
 
+    // Orden en WhatsApp: `introCursos` (lo manda el código al entrar) → las 3
+    // fichas (mediaFirst) → el texto de Emma, que es solo la invitación A/B/C.
     {
       node: "listado_servicios",
+      openWith: ["introCursos"],
       extraInstructions: [
-        'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. Tu texto es solo una intro corta: el precio y el detalle ya van en cada ficha, no los repitas vos.',
+        'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. La intro ("Genial, ahora te paso un resumen de tus cursos") ya le llegó sola: no escribas otra. El precio y el detalle ya van en cada ficha, no los repitas vos.',
+        'Si el alumno está hablando de certificaciones y no de cursos, este no es su paso: no le muestres cursos ni la invitación de cursos, y llamá advance_flow con la ruta "es-certificacion" en este mismo turno.',
         "La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.",
         'No escribas tu propia pregunta de cierre (ej. "¿te interesa alguno en particular?"): la invitación con las 3 opciones ya se agrega sola al final de tu mensaje. Escribirla vos también la duplica.',
         'Cuando el alumno nombre UN curso concreto —por su nombre o por letra (A, B o C)— es que lo ELIGIÓ: no le vuelvas a mandar la ficha ni le preguntes si quiere más información. Llamá advance_flow con la ruta "ruta-cierre" en ese mismo turno.',
@@ -108,32 +153,43 @@ export default defineBusinessConfig({
       // después: el alumno tiene que ver el material completo antes de que le
       // pregunten cuál elige.
       mediaFirst: true,
-      cta: "¿En qué curso estás interesado?\nA. Básico\nB. Avanzado\nC. Operación Múltiple",
+      cta: "¿Qué curso te gustaría iniciar?\nA. Básico\nB. Avanzado\nC. Operación Múltiple",
       routes: [
         {
           id: "ruta-cierre",
           when: "El alumno eligió un curso concreto y quiere inscribirse.",
           to: "mostrar_beneficios",
         },
+        // Red de seguridad del bug del 2026-09-29: si igual llega acá hablando
+        // de certificados, sale en el mismo turno. Como el CTA se recalcula al
+        // cambiar de paso, cierra con el de certificaciones, y la intro de
+        // cursos no sale (un openWith de mitad de turno solo sale si el turno
+        // termina en ese paso).
+        {
+          id: "es-certificacion",
+          when: "El alumno está hablando de certificaciones, no de cursos.",
+          to: "asesoria_perfil",
+        },
       ],
     },
 
-    // Camino con experiencia. La IA solo elige el tramo por el número de máquinas;
-    // el texto de la oferta y el precio los pone el código (ofertaCertificacion).
+    // Camino con experiencia. La IA solo elige el tramo por el número de
+    // maquinarias; el texto de la oferta y el precio los pone el código. Las
+    // letras A/B/C van en la invitación (las pone el código, siempre iguales),
+    // no en el texto de la IA.
     {
       node: "asesoria_perfil",
       label: "Asesoría con experiencia",
       extraInstructions: [
-        "La invitación de este paso ya da las 3 opciones con letra. No repreguntes el número de máquinas en texto libre: esperá la letra (o el tramo si lo dice directo) y mapealo así:",
-        '- A o "1 a 2" → Certificación - 1 a 2 máquinas',
-        '- B o "3 a 4" → Certificación - 3 a 4 máquinas',
-        '- C o "5 o más" → Certificación - 5 máquinas o más',
-        "No escribas tu propia pregunta de cierre: la invitación con las 3 opciones ya se agrega sola al final de tu mensaje.",
-        '✅ "· Certificación - 1 a 2 máquina"',
-        '❌ "· Certificación - 1 a 2 máquinas — S/ 295" (NUNCA así)',
-        "Lista siempre las 3 opciones de certificacion. Si el alumno responde solo con la letra, mapealo así: A = 1 a 2 máquinas, B = 3 a 4 máquinas, C = 5 o más.",
+        "La invitación de este paso ya lista las 3 certificaciones con su letra (A, B, C) y se agrega sola al final de tu mensaje: no escribas vos la lista ni tu propia pregunta de cierre — la duplicarías.",
+        "Si más adelante tenés que volver a nombrar las opciones, siempre con su letra y en este orden: A. 1 a 2 maquinarias, B. 3 a 4 maquinarias, C. 5 maquinarias o más. Nunca con el precio al lado.",
+        "No repreguntes el número de maquinarias en texto libre: esperá la letra (o el tramo si lo dice directo) y elegí de la lista de servicios la certificación de ese tramo:",
+        '- A o "1 a 2" → la certificación de 1 a 2',
+        '- B o "3 a 4" → la certificación de 3 a 4',
+        '- C o "5 o más" → la certificación de 5 o más',
+        "Para las herramientas usá el nombre del servicio tal como figura en la lista de servicios.",
       ].join("\n"),
-      cta: "¿Cuántas máquinas operas?\nA. 1 a 2 máquinas\nB. 3 a 4 máquinas\nC. 5 máquinas o más",
+      cta: "¿En cuál de las opciones deseas más información?\nA. Certificación de 1 a 2 maquinarias\nB. Certificación de 3 a 4 maquinarias\nC. Certificación de 5 maquinarias o más",
       routes: [
         {
           id: "quiere-certificarse",
@@ -157,7 +213,7 @@ export default defineBusinessConfig({
         '1. Los beneficios: "beneficiosCertificado" si eligió una certificación, "beneficiosCurso" si eligió un curso.',
         "2. El descuento que corresponda:",
         '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
-        '   - Certificación: "descuentoCert1a2" (1 a 2 máquinas), "descuentoCert3a4" (3 a 4 máquinas), "descuentoCert5oMas" (5 máquinas o más).',
+        '   - Certificación: "descuentoCert1a2" (1 a 2 maquinarias), "descuentoCert3a4" (3 a 4 maquinarias), "descuentoCert5oMas" (5 maquinarias o más).',
         "No inventes vos ningún monto: todo ya va en los mensajes.",
         "Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.",
       ].join("\n"),
@@ -214,13 +270,24 @@ export default defineBusinessConfig({
   ],
 
   fixedMessages: {
+    // Los dos `openWith`: los manda el código al entrar al paso, sin servicio,
+    // así que no pueden llevar {precio} ni {servicio}. El `when` es para quien
+    // lee el archivo — la IA nunca los ve como opción.
+    presentacion: {
+      when: "Al entrar al saludo (conversación nueva, o de vuelta después de 24 h).",
+      text: "Hola 👋 soy Nicole Perez, asesora comercial del Instituto Tecmin",
+    },
+    introCursos: {
+      when: "Al entrar al listado de cursos, antes de las fichas.",
+      text: "Genial, ahora te paso un resumen de tus cursos",
+    },
     // {precio} sale del servicio elegido en el panel: si el dueño cambia el precio
     // de una certificación, la oferta cambia sola. La foto del carnet se sube
     // desde /asistente ("Fotos de tus mensajes automáticos") — no vive acá.
     ofertaCertificacion: {
-      when: "Cuando ya sabés cuántas máquinas maneja y elegiste su certificación.",
+      when: "Cuando ya sabés cuántas maquinarias opera y elegiste su certificación.",
       text: [
-        "Por solo S/. {precio} obtienes tus certificados y la inversión incluye:",
+        "Por esta campaña te vamos a dejar todos los certificados a S/. {precio}, obtienes tus certificados y la inversión incluye:",
         "📜 Certificados físicos y digitales de cada equipo.",
         "🎞️ 10 clases teóricas en video.",
         "Recuerda que la inversión incluye:",
@@ -265,29 +332,29 @@ export default defineBusinessConfig({
     // en el servicio, así que el monto va tal cual acá, igual que el precio.
     descuentoBasico: {
       when: "Eligió el curso BÁSICO, antes de avanzar.",
-      text: "Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 100, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 100, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     descuentoAvanzado: {
       when: "Eligió el curso AVANZADO, antes de avanzar.",
-      text: "Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 300, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 300, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     descuentoMultiple: {
       when: "Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.",
-      text: "Te comento que cada 1er lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 800, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 800, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     // Descuento por certificación, montos reales (2026-09-27). Sin la línea de
     // "cada 1er lunes": ese cronograma es de los cursos, las certificaciones no
     // arrancan por cohorte mensual.
     descuentoCert1a2: {
-      when: "Eligió la certificación de 1 a 2 máquinas, antes de avanzar.",
+      when: "Eligió la certificación de 1 a 2 maquinarias, antes de avanzar.",
       text: "Tenemos el descuento para tu certificación de S/ 30, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     descuentoCert3a4: {
-      when: "Eligió la certificación de 3 a 4 máquinas, antes de avanzar.",
+      when: "Eligió la certificación de 3 a 4 maquinarias, antes de avanzar.",
       text: "Tenemos el descuento para tu certificación de S/ 40, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     descuentoCert5oMas: {
-      when: "Eligió la certificación de 5 máquinas o más, antes de avanzar.",
+      when: "Eligió la certificación de 5 maquinarias o más, antes de avanzar.",
       text: "Tenemos el descuento para tu certificación de S/ 50, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     // Pago de INSCRIPCIÓN por curso, montos reales (2026-09-27). Es un monto
@@ -309,9 +376,7 @@ export default defineBusinessConfig({
     pagoCertificacion: {
       when: "Eligió una CERTIFICACIÓN y quiere seguir con la inscripción.",
       text: [
-        "1. Envíame la foto de tu DNI, ambas caras, para realizar todos tus documentos.",
-        "2. Te enviaré los certificados para que verifiques que tus datos son correctos.",
-        "3. Realizas el pago por Yape al 986547823 (Alexis Instituto Tecmin) y me mandas la captura.",
+        "Para empezar a realizar el tramite de tus certificados. Enviame la foto de tu DNI.",
       ].join("\n"),
     },
   },

@@ -213,6 +213,19 @@ describe('compileFlow', () => {
     expect(flow.greeting && 'cta' in flow.greeting).toBe(false)
     expect(flow.greeting && 'fixedOnly' in flow.greeting).toBe(false)
   })
+
+  it('carries the messages sent on entering a step, and nothing when absent or blank', () => {
+    const flow = compileFlow(
+      {
+        nodes: ['idle', 'greeting', 'informing'],
+        overrides: { greeting: { openWith: ['presentacion', ' '] }, informing: { openWith: [] } },
+      },
+      'sales',
+    )
+    expect(flow.greeting?.openWith).toEqual(['presentacion'])
+    expect(flow.informing && 'openWith' in flow.informing).toBe(false)
+    expect(flow.idle && 'openWith' in flow.idle).toBe(false)
+  })
 })
 
 describe('validateFlow', () => {

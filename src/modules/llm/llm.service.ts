@@ -12,7 +12,12 @@ import type { BusinessSettings, FlowType } from '@/modules/business/business.set
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import { fileConfigFor, resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
-import { getStateConfig, type TransitionEvidence } from '@/modules/conversation/stateMachine.js'
+import { IDLE_TRIGGER } from '@/modules/conversation/nodeCatalog.js'
+import {
+  getStateConfig,
+  INITIAL_STATE,
+  type TransitionEvidence,
+} from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
@@ -23,7 +28,8 @@ import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
-import type { FixedOutbound, StepFixedMessage } from './fixedMessage.js'
+import { hoursSinceLastActivity } from './conversationRestart.js'
+import { type FixedOutbound, renderStaticMessage, type StepFixedMessage } from './fixedMessage.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
 import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
@@ -179,17 +185,94 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     return from
   }
 
+  // 5. Recent history (handler is expected to have appended the user msg
+  // already; we don't re-append). Se carga antes del trigger de apertura porque
+  // el reinicio por inactividad se decide mirando cuándo fue el último mensaje.
+  const historyResult = await messageService.getRecentHistory(
+    params.businessId,
+    params.conversationId,
+    HISTORY_LIMIT,
+  )
+  if (!historyResult.ok) return historyResult
+  // Mismo motivo que kbEntries: para que forState lo use sin depender del
+  // angostamiento de este chequeo.
+  const history = historyResult.data
+
+  const fileConfig = fileConfigFor(params.businessId)
+
+  // Reinicio por inactividad (solo si el archivo del negocio lo pide): un
+  // cliente que vuelve después de N horas es una conversación nueva y arranca
+  // otra vez desde el saludo, aunque haya quedado a mitad del flujo. Sin esto
+  // `inactive_24h` estaba declarado en todos los pasos y no lo emitía nadie.
+  let turnStart = currentState
+  const restartAfterHours = fileConfig?.restartAfterHours
+  if (restartAfterHours !== undefined && currentState !== INITIAL_STATE) {
+    const idleHours = hoursSinceLastActivity(history, new Date())
+    if (idleHours !== null && idleHours >= restartAfterHours) {
+      turnStart = await applyTriggerOrKeep(currentState, IDLE_TRIGGER)
+      log.info(
+        { from: currentState, to: turnStart, idleHours: Math.round(idleHours) },
+        'conversation restarted after inactivity',
+      )
+    }
+  }
+
   // The turn's opening trigger, applied BEFORE the tools are picked so a first
   // message gets the tools of the state it lands in. This is what lifts a
   // conversation off 'idle': no tool can, because 'idle' offers none that
   // produces a trigger. In every other state it matches nothing and writes
   // nothing.
-  let effectiveState = await applyTriggerOrKeep(currentState, 'customer_message')
+  let effectiveState = await applyTriggerOrKeep(turnStart, 'customer_message')
+  // Dónde quedó el turno por el mensaje del cliente, antes de cualquier tool.
+  const openingState = effectiveState
 
   // Los mensajes fijos de este paso: el id lo da el paso compilado, el texto el
   // archivo del negocio. No depende del estado — se resuelve una vez y se
   // reusa cada vez que se recalcula el resto para un estado nuevo.
-  const fileMessages = fileConfigFor(params.businessId)?.fixedMessages ?? {}
+  const fileMessages = fileConfig?.fixedMessages ?? {}
+
+  // El `openWith` de un paso: mensajes fijos que manda el código al entrar, sin
+  // que la IA los pida. Uno roto (id sin declarar, marcador sin servicio) se
+  // saltea con un error en el log: no le cuesta la respuesta al cliente.
+  const openWithOf = async (state: string): Promise<FixedOutbound[]> => {
+    const out: FixedOutbound[] = []
+    for (const id of getStateConfig(flow, state).openWith ?? []) {
+      const message = fileMessages[id]
+      const rendered = message ? renderStaticMessage(message.text) : null
+      if (!message || !rendered?.ok) {
+        log.error(
+          { state, message: id, reason: rendered?.ok === false ? rendered.reason : 'undeclared' },
+          'openWith message skipped',
+        )
+        continue
+      }
+      const gallery = message.images
+        ? await serviceMediaService.listForOwner(params.businessId, 'fixedMessage', id)
+        : []
+      out.push({
+        text: rendered.text,
+        ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+      })
+    }
+    return out
+  }
+
+  // Se guardan en el historial ya, antes de llamar al modelo: son lo primero
+  // que ve el cliente en este turno, y el modelo tiene que saber que salieron
+  // para no repetirlos.
+  const openingOut: FixedOutbound[] = []
+  if (openingState !== turnStart) {
+    for (const opening of await openWithOf(openingState)) {
+      const persisted = await messageService.append({
+        businessId: params.businessId,
+        conversationId: params.conversationId,
+        role: 'assistant',
+        content: opening.text,
+      })
+      if (!persisted.ok) return persisted
+      openingOut.push(opening)
+    }
+  }
 
   // 4. Knowledge base — selective, not the whole table. The customer message
   // routes to a category; `always` entries and matching `trigger_based` entries
@@ -216,18 +299,6 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     { matchedCategories: kbResult.data.matchedCategories, kbEntryCount: kbEntries.length },
     'knowledge base entries selected for prompt',
   )
-
-  // 5. Recent history (handler is expected to have appended the user msg
-  // already; we don't re-append).
-  const historyResult = await messageService.getRecentHistory(
-    params.businessId,
-    params.conversationId,
-    HISTORY_LIMIT,
-  )
-  if (!historyResult.ok) return historyResult
-  // Mismo motivo que kbEntries: para que forState lo use sin depender del
-  // angostamiento de este chequeo.
-  const history = historyResult.data
 
   // 6. Anything this customer still has open. The proposal text is already in
   // the history above, but a past assistant turn is something the model
@@ -372,6 +443,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
     ...convertHistoryToChatMessages(history),
+    // Ya guardados, pero el historial se leyó antes de guardarlos.
+    ...openingOut.map((m): ChatCompletionMessageParam => ({ role: 'assistant', content: m.text })),
   ]
 
   let totalTokensInput = 0
@@ -455,7 +528,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // respuesta válida, no un fallo. Antes esto no existía: el modelo no
       // tenía forma de "no decir nada", así que agregaba una frase de cierre
       // aunque se le pidiera lo contrario.
-      if (!assistantContent && fixedOut.length === 0) {
+      if (!assistantContent && fixedOut.length === 0 && openingOut.length === 0) {
         return err(
           new AppError({
             code: 'llm_empty_response',
@@ -483,6 +556,23 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           { state: effectiveState, discarded: preview(assistantContent, 120) },
           'fixedOnly step: model text discarded after a fixed message',
         )
+      }
+
+      // El `openWith` de un paso al que se entró A MITAD de turno sale solo si el
+      // turno termina ahí: si la conversación pasó por el listado de cursos y
+      // siguió de largo a certificaciones, la intro de cursos no tiene sentido.
+      const closingOut: FixedOutbound[] = []
+      if (effectiveState !== openingState) {
+        for (const closing of await openWithOf(effectiveState)) {
+          const persisted = await messageService.append({
+            businessId: params.businessId,
+            conversationId: params.conversationId,
+            role: 'assistant',
+            content: closing.text,
+          })
+          if (!persisted.ok) return persisted
+          closingOut.push(closing)
+        }
       }
 
       if (finalContent) {
@@ -513,7 +603,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // actually asked for first. A step's material is context the owner chose;
       // a service's photo is an answer to a question just asked, and if only one
       // slot is left that is the one that should use it.
-      if (effectiveState !== currentState) {
+      if (effectiveState !== turnStart) {
         queueAttachments(
           attachments,
           await nodeAttachments({
@@ -534,7 +624,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         escalated,
         maxIterationsHit: false,
         attachments,
-        fixedMessages: fixedOut,
+        // En el mismo orden en que quedaron en el historial.
+        fixedMessages: [...openingOut, ...fixedOut, ...closingOut],
         // Del paso vigente al CERRAR el turno: es el mismo criterio que usa el
         // CTA (stateConfig ya refleja cualquier advance_flow de esta vuelta).
         mediaFirst: stateConfig.mediaFirst ?? false,
@@ -705,7 +796,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     attachments: [],
     // Estos sí: ya quedaron en el historial como dichos, y no mandarlos dejaría
     // al dueño leyendo en el Inbox una oferta que el cliente nunca recibió.
-    fixedMessages: fixedOut,
+    fixedMessages: [...openingOut, ...fixedOut],
     // Sin attachments en este camino, el orden no importa.
     mediaFirst: false,
   })
