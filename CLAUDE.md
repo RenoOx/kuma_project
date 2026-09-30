@@ -392,6 +392,16 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   `MAX_FIXED_MESSAGES_PER_TURN`. Si la IA igual repite una línea de un `openWith`
   que salió en el turno (pasó con la intro de cursos), `withoutRepeatedLines`
   (`fixedMessage.ts`) la borra de su texto antes de guardarlo y enviarlo.
+- **`catalogOnEnter: '<categoría>'`** — al entrar al paso (si el turno termina ahí),
+  el CÓDIGO manda las fichas de esa categoría (`serviceCardsForCategory` en
+  `toolExecutor.ts`) y el texto de Emma de ese turno es exactamente el `cta`.
+  Tecmin, `listado_servicios` con "Cursos": entrar ahí ES la decisión "es nuevo,
+  quiere un curso desde cero", y el alumno recibe intro → fichas → invitación.
+  Existe porque las fichas dependían de que la IA llamara `show_services` (a veces
+  no lo hacía y escribía el listado en texto). **No pasa por la ventana de
+  repetición** de `sentServiceImages.ts`: entrar al paso es la decisión de
+  informar, y en pruebas seguidas la ventana las bloqueaba. El anti-ban sigue
+  siendo la cola de envío. En los turnos siguientes dentro del paso no se reenvía nada.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
@@ -473,6 +483,13 @@ negocio nunca dio.
   y se guardan en el historial como mensajes de assistant DESPUÉS de todos los
   resultados de tools de la vuelta: meterlos entre `tool_calls` y su resultado
   rompe el formato de OpenAI.
+- **`text` puede ser una lista de BLOQUES** (desde 2026-09-30): cada bloque sale
+  como un mensaje de WhatsApp aparte, en orden y por `enqueueSend`, y la galería
+  va después del último. Para `MAX_FIXED_MESSAGES_PER_TURN` cuenta como UN
+  mensaje: los beneficios de un curso de Tecmin en 3 bloques más el descuento no
+  entraban en el tope de 2. En el historial queda unido por una línea en blanco
+  (`FixedOutbound.text`; los bloques viajan en `FixedOutbound.blocks`). Si un
+  bloque tiene un marcador inválido, se niega el mensaje entero.
 - **`images?: boolean` es un flag de intención, no la lista de fotos.** Un
   mensaje que lo declara puede llevar una galería; uno que no, es puro texto y
   ni se consulta contra el almacenamiento al mandarse — no tiene sentido

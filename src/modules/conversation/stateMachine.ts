@@ -93,6 +93,8 @@ export interface StateConfig {
   fixedOnly?: boolean
   /** Mensajes fijos que el código manda solo, al entrar a este paso (ver llm.service). */
   openWith?: string[]
+  /** Categoría cuyas fichas manda el código al entrar a este paso (ver llm.service). */
+  catalogOnEnter?: string
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -143,6 +145,12 @@ export interface NodeOverride {
    * presentación): pedírselo a la IA por instrucción no es "siempre".
    */
   openWith?: string[]
+  /**
+   * Las fichas de esta categoría las manda el CÓDIGO al entrar a este paso, y
+   * el texto de Emma de ese turno pasa a ser la invitación (`cta`). Solo desde
+   * archivo. Existe porque si la IA no llamaba show_services, no había fichas.
+   */
+  catalogOnEnter?: string
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -287,6 +295,9 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(override?.mediaFirst ? { mediaFirst: true } : {}),
       ...(override?.fixedOnly ? { fixedOnly: true } : {}),
       ...(openWith.length > 0 ? { openWith } : {}),
+      ...(override?.catalogOnEnter?.trim()
+        ? { catalogOnEnter: override.catalogOnEnter.trim() }
+        : {}),
     }
   })
 

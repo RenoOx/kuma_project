@@ -226,6 +226,22 @@ describe('compileFlow', () => {
     expect(flow.informing && 'openWith' in flow.informing).toBe(false)
     expect(flow.idle && 'openWith' in flow.idle).toBe(false)
   })
+
+  it('carries the catalogue sent on entering a step, and nothing when absent or blank', () => {
+    const flow = compileFlow(
+      {
+        nodes: ['idle', 'greeting', 'informing', 'listado_servicios'],
+        overrides: {
+          listado_servicios: { catalogOnEnter: ' Cursos ' },
+          informing: { catalogOnEnter: '  ' },
+        },
+      },
+      'sales',
+    )
+    expect(flow.listado_servicios?.catalogOnEnter).toBe('Cursos')
+    expect(flow.informing && 'catalogOnEnter' in flow.informing).toBe(false)
+    expect(flow.greeting && 'catalogOnEnter' in flow.greeting).toBe(false)
+  })
 })
 
 describe('validateFlow', () => {

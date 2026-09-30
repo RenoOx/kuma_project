@@ -12,8 +12,13 @@ export interface FixedMessage {
    * El texto, con marcadores que completa el código:
    *   {precio}   el precio del servicio elegido, solo el número ("295")
    *   {servicio} el nombre del servicio elegido
+   *
+   * Una lista son BLOQUES: cada uno sale como un mensaje de WhatsApp aparte, en
+   * orden, y la galería va después del último. Para el tope de mensajes fijos
+   * por turno sigue contando como uno solo (Tecmin, 2026-09-30: los beneficios
+   * de un curso en 3 mensajes, más el descuento, no entraban en el tope de 2).
    */
-  text: string
+  text: string | string[]
   /**
    * Si este mensaje puede llevar una galería después del texto. Default: no.
    *
@@ -33,12 +38,31 @@ export type StepFixedMessage = FixedMessage & { id: string }
 
 /** Lo que sale hacia el cliente: el texto ya completo y, si hay, la galería. */
 export interface FixedOutbound {
+  /** El texto entero; con bloques, unidos por una línea en blanco (así queda en el historial). */
   text: string
+  /** Si el mensaje tiene bloques: cada uno es un mensaje de WhatsApp aparte. */
+  blocks?: string[]
   /** Las keys de S3 de la galería subida por panel, en orden. */
   images?: string[]
 }
 
-export type RenderResult = { ok: true; text: string } | { ok: false; reason: string }
+export type RenderResult =
+  | { ok: true; text: string; blocks?: string[] }
+  | { ok: false; reason: string }
+
+// Un texto suelto se completa tal cual; una lista, bloque por bloque. Si uno
+// solo se niega, se niega el mensaje entero: mandar la mitad de una oferta es
+// peor que escalar.
+function renderEach(template: string | string[], one: (t: string) => RenderResult): RenderResult {
+  if (typeof template === 'string') return one(template)
+  const blocks: string[] = []
+  for (const block of template) {
+    const rendered = one(block)
+    if (!rendered.ok) return rendered
+    blocks.push(rendered.text)
+  }
+  return { ok: true, text: blocks.join('\n\n'), blocks }
+}
 
 /**
  * Completa los marcadores con los datos del servicio elegido.
@@ -48,6 +72,13 @@ export type RenderResult = { ok: true; text: string } | { ok: false; reason: str
  * precio que el negocio no fijó.
  */
 export function renderFixedMessage(
+  template: string | string[],
+  service: Pick<Service, 'name' | 'priceMin' | 'priceMax' | 'requiresEvaluation'>,
+): RenderResult {
+  return renderEach(template, (block) => renderOneFixed(block, service))
+}
+
+function renderOneFixed(
   template: string,
   service: Pick<Service, 'name' | 'priceMin' | 'priceMax' | 'requiresEvaluation'>,
 ): RenderResult {
@@ -129,8 +160,10 @@ export function stepOwesFixedMessage(
  * presentación, una intro). Sale tal cual, y por eso se niega ante CUALQUIER
  * marcador: no hay servicio de dónde sacar un {precio} o un {servicio}.
  */
-export function renderStaticMessage(template: string): RenderResult {
-  const marker = template.match(/\{[a-z_]+\}/)
-  if (marker) return { ok: false, reason: `marcador ${marker[0]} sin servicio` }
-  return { ok: true, text: template }
+export function renderStaticMessage(template: string | string[]): RenderResult {
+  return renderEach(template, (block) => {
+    const marker = block.match(/\{[a-z_]+\}/)
+    if (marker) return { ok: false, reason: `marcador ${marker[0]} sin servicio` }
+    return { ok: true, text: block }
+  })
 }

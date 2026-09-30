@@ -1551,18 +1551,26 @@ async function sendFixedMessages(params: {
 }): Promise<void> {
   const { businessId, jid, messages, send, log } = params
   for (const message of messages) {
-    try {
-      await sendWithPresence({
-        businessId,
-        jid,
-        text: message.text,
-        send,
-        ...(params.readKey ? { readKey: params.readKey } : {}),
-      })
-    } catch (err) {
-      log.error({ err, jid }, 'failed to send fixed message')
-      continue
+    // Un mensaje con bloques sale como varios mensajes de WhatsApp, en orden y
+    // cada uno por la cola. Si un bloque falla, el resto del mensaje (y su
+    // galería) no sale: la oferta a medias leería peor que ninguna.
+    let failed = false
+    for (const block of message.blocks ?? [message.text]) {
+      try {
+        await sendWithPresence({
+          businessId,
+          jid,
+          text: block,
+          send,
+          ...(params.readKey ? { readKey: params.readKey } : {}),
+        })
+      } catch (err) {
+        log.error({ err, jid }, 'failed to send fixed message')
+        failed = true
+        break
+      }
     }
+    if (failed) continue
     for (const key of message.images ?? []) {
       const downloaded = await mediaService.downloadMedia(businessId, key)
       if (!downloaded.ok) {
