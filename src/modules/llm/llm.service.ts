@@ -41,6 +41,8 @@ import { openai } from './openai.client.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
 import {
   executeTool,
+  MAX_SERVICE_CARDS_PER_TURN,
+  serviceCardsForCategory,
   type ToolAttachment,
   type ToolContext,
   type ToolExecutionResult,
@@ -268,6 +270,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         : []
       out.push({
         text: rendered.text,
+        ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
         ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
       })
     }
@@ -624,15 +627,36 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // con precios encima de la del negocio. Se lee el paso vigente al cerrar
       // el turno, igual que el CTA y `mediaFirst`.
       const discardText = stateConfig.fixedOnly === true && (fixedOut.length > 0 || ownOpenWithSent)
+      // `catalogOnEnter`: al entrar al paso, las fichas las manda el código —si
+      // la IA no llamaba show_services no había fichas, y la IA escribía el
+      // listado en texto— y el mensaje de Emma es exactamente la invitación del
+      // paso. Si la IA igual pidió las fichas, la cola descarta las repetidas.
+      const catalogCategory = enteredThisTurn ? stateConfig.catalogOnEnter : undefined
+      const stepCta = typeof stateConfig.cta === 'string' ? stateConfig.cta : undefined
+      if (catalogCategory) {
+        const cards = await serviceCardsForCategory(toolContext, catalogCategory)
+        if (cards.length === 0) {
+          log.warn(
+            { state: effectiveState, category: catalogCategory },
+            'catalogOnEnter: no cards to send (category empty or without photos)',
+          )
+        }
+        attachmentBudget = Math.max(attachmentBudget, MAX_SERVICE_CARDS_PER_TURN)
+        queueAttachments(attachments, cards, attachmentBudget)
+      }
+
       // Lo que el código ya mandó como mensaje de entrada no se repite en el
       // texto de Emma: la IA volvía a escribir la intro de cursos aunque se le
       // dijera que ya había salido. Queda limpio también en el historial.
-      const finalContent = discardText
-        ? ''
-        : withoutRepeatedLines(
-            assistantContent,
-            [...openingOut, ...closingOut].map((m) => m.text),
-          )
+      const finalContent =
+        catalogCategory && stepCta
+          ? stepCta
+          : discardText
+            ? ''
+            : withoutRepeatedLines(
+                assistantContent,
+                [...openingOut, ...closingOut].map((m) => m.text),
+              )
       if (discardText && assistantContent) {
         log.debug(
           { state: effectiveState, discarded: preview(assistantContent, 120) },

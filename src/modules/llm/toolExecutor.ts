@@ -253,6 +253,26 @@ const UNKNOWN_SERVICE_INSTRUCTION =
 
 // ── Service cards ────────────────────────────────────────────────────────────
 
+/**
+ * Las fichas de una categoría, para el `catalogOnEnter` de un paso: las manda
+ * el código al entrar, sin que la IA llame show_services.
+ *
+ * Sin la ventana de repetición a propósito: entrar al paso ES la decisión de
+ * informar (Tecmin: "es nuevo, quiere un curso desde cero"), y un alumno que
+ * vuelve a entrar tiene que verlas otra vez. El anti-ban real es la cola de
+ * envío, que sigue igual. Categoría inexistente o sin config: ninguna ficha.
+ */
+export async function serviceCardsForCategory(
+  context: ToolContext,
+  category: string,
+): Promise<ToolAttachment[]> {
+  const settings = await businessService.getSettings(context.businessId)
+  if (!settings.ok) return []
+  const services = findServicesByCategory(settings.data, category)
+  if (!services) return []
+  return buildServiceCards(context, services, { ignoreRepeatWindow: true })
+}
+
 /** Cards one turn may carry. See the comment on buildServiceCards. */
 export const MAX_SERVICE_CARDS_PER_TURN = 4
 
@@ -289,6 +309,7 @@ const MAX_CAPTION_CHARS = 900
 async function buildServiceCards(
   context: ToolContext,
   services: Service[],
+  options: { ignoreRepeatWindow?: boolean } = {},
 ): Promise<ToolAttachment[]> {
   const cards: ToolAttachment[] = []
 
@@ -298,7 +319,8 @@ async function buildServiceCards(
     if (!service.id) continue
     // The same repeat window a direct send goes through: a customer who asks
     // twice in five minutes gets the text, not the photos again.
-    if (!canSendServiceMedia(context.conversationId, service.id)) continue
+    if (!options.ignoreRepeatWindow && !canSendServiceMedia(context.conversationId, service.id))
+      continue
 
     const media = await serviceMediaService.listForOwner(context.businessId, 'service', service.id)
     const first = media[0]
@@ -1201,6 +1223,7 @@ export async function executeTool(
         fixedMessages: [
           {
             text: rendered.text,
+            ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
             ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
           },
         ],

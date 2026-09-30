@@ -130,6 +130,7 @@ function showBusiness(business: Business, promptState: string | null): void {
       const known = fileMessages[id] !== undefined
       out(`  al entrar: ${id}${known ? '' : '  ⚠ no está en fixedMessages del archivo'}`)
     }
+    if (state?.catalogOnEnter) out(`  catálogo al entrar: ${state.catalogOnEnter}`)
     out(`  tools:    ${(state?.tools ?? []).join(', ') || '—'}`)
   }
 

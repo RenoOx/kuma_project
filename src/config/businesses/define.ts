@@ -62,6 +62,12 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * no salen (ver llm.service).
    */
   openWith?: NoInfer<M>[]
+  /**
+   * Categoría de servicios cuyas fichas (imagen + detalle) manda el CÓDIGO al
+   * entrar a este paso, sin depender de que la IA llame show_services ni de la
+   * ventana de repetición. En ese turno el texto de Emma es exactamente el `cta`.
+   */
+  catalogOnEnter?: string
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -132,6 +138,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.mediaFirst !== undefined ? { mediaFirst: step.mediaFirst } : {}),
     ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
     ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
+    ...(step.catalogOnEnter !== undefined ? { catalogOnEnter: step.catalogOnEnter } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }

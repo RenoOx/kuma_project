@@ -32,6 +32,28 @@ import { defineBusinessConfig } from "./define.js";
 // ESTE FLUJO sin tocar esa fila — el mismo mecanismo que ya usan greeting y
 // collectData.
 
+// Los textos de descuento y de pago de un curso son iguales salvo el monto del
+// descuento: una sola redacción, así no se desalinean entre cursos.
+function descuentoCurso(descuento: string): string {
+  return `Te comento que este Lunes empezamos las clases. Tenemos un descuento de ${descuento} para ti, ¿Te gustaría obtener este descuento?`
+}
+
+function pagoCurso(descuento: string): string {
+  return [
+    `Para brindarte tu descuento de ${descuento} solo realiza la primera inversión de S/. 150.00 que incluye:`,
+    "Inscripción.",
+    "Matrícula.",
+    "⛑️ Casco.",
+    "🦺 Chaleco.",
+    "🧤 Guantes de seguridad.",
+    "🥽 Gafas de seguridad.",
+    "📒 Folder pioner",
+    "📚 Manuales de clases físicos.",
+    "",
+    `Al Yape 986547823 (a nombre de: Tecmin Corp SAC). Me envías la captura para confirmar el pago y te brindaremos tus ${descuento} de descuento`,
+  ].join("\n")
+}
+
 export default defineBusinessConfig({
   businessId: "4aIwSdMZBY12B06MSSovj",
   name: "Instituto Tecmin",
@@ -141,26 +163,30 @@ export default defineBusinessConfig({
       ],
     },
 
-    // Orden en WhatsApp: `introCursos` (lo manda el código al entrar) → las 3
-    // fichas (mediaFirst) → el texto de Emma, que es solo la invitación A/B/C.
+    // Se entra acá cuando ya se sabe que es nuevo (ruta "sin-experiencia": no
+    // tiene experiencia, quiere un curso desde cero). En ese turno TODO lo manda
+    // el código, en este orden:
+    //   1. `introCursos` (openWith)
+    //   2. las fichas de "Cursos" (catalogOnEnter; mediaFirst las pone antes del texto)
+    //   3. el `cta`, que reemplaza el texto de Emma
+    // Nació de un turno sin fichas (2026-09-30): dependían de que la IA llamara
+    // show_services, y la ventana de 15 minutos las bloqueaba en pruebas
+    // seguidas. Después, este paso solo captura qué curso elige.
     {
       node: "listado_servicios",
       openWith: ["introCursos"],
+      catalogOnEnter: "Cursos",
       extraInstructions: [
-        'Apenas sepas que no tiene experiencia, llamá show_services con category "Cursos" UNA sola vez y mostrá los 3 cursos completos de una — cada uno con su ficha (imagen + detalle), todos juntos en el mismo turno. Nunca de a uno ni repartido en varios mensajes. La intro ("Genial, ahora te paso un resumen de tus cursos") ya le llegó sola: no escribas otra. El precio y el detalle ya van en cada ficha, no los repitas vos.',
-        'Si el alumno está hablando de certificaciones y no de cursos, este no es su paso: no le muestres cursos ni la invitación de cursos, y llamá advance_flow con la ruta "es-certificacion" en este mismo turno.',
-        "La invitación de este paso ya da las 3 opciones con letra. Si el alumno responde solo con la letra, mapealo así: A = Básico, B = Avanzado, C = Operación Múltiple.",
-        'No escribas tu propia pregunta de cierre (ej. "¿te interesa alguno en particular?"): la invitación con las 3 opciones ya se agrega sola al final de tu mensaje. Escribirla vos también la duplica.',
+        "La intro, las fichas de los 3 cursos y la pregunta con las opciones ya le llegaron solas al entrar a este paso: no las repitas ni escribas un listado.",
+        "Tu única tarea acá es capturar qué curso elige. Mapeo: A = Básico, B = Avanzado, C = Operación Múltiple, o por su nombre.",
         'Cuando el alumno nombre UN curso concreto —por su nombre o por letra (A, B o C)— es que lo ELIGIÓ: no le vuelvas a mandar la ficha ni le preguntes si quiere más información. Llamá advance_flow con la ruta "ruta-cierre" en ese mismo turno.',
-        "Al escribir el listado de los 3 cursos, tu línea de cada uno es SOLO el nombre — nunca el precio, ni el monto, aunque lo tengas disponible.",
-        '✅ "· BÁSICO - Operación y mantenimiento de equipos"',
-        '❌ "· BÁSICO - Operación y mantenimiento de equipos: S/ 200" (NUNCA así)',
+        "Si pregunta otra cosa antes de elegir, respondé corto sin dar precios de varios cursos juntos.",
+        'Si el alumno está hablando de certificaciones y no de cursos, este no es su paso: llamá advance_flow con la ruta "es-certificacion" en este mismo turno.',
       ].join("\n"),
-      // Las 3 fichas con foto tienen que llegar ANTES que esta invitación, no
-      // después: el alumno tiene que ver el material completo antes de que le
-      // pregunten cuál elige.
+      // Las fichas tienen que llegar ANTES que la invitación: el alumno tiene
+      // que ver el material completo antes de que le pregunten cuál elige.
       mediaFirst: true,
-      cta: "¿Qué curso te gustaría iniciar?\nA. Básico\nB. Avanzado\nC. Operación Múltiple",
+      cta: "Comentame ¿Qué curso te gustaría iniciar? 😊\nA. Básico\nB. Avanzado\nC. Operación Múltiple",
       routes: [
         {
           id: "ruta-cierre",
@@ -328,18 +354,23 @@ export default defineBusinessConfig({
     // que lo haga.
     // {precio} es la inversión SEMANAL de ese curso (así carga el dueño el
     // precio de un curso en el panel — no es un monto único por todo el
-    // curso). El cronograma semanal (días, práctico, semanas) es el mismo
-    // para cualquier curso: solo el monto cambia según cuál eligió.
+    // curso; desde 2026-09-30: Básico 220, Avanzado 260, Múltiple 260). El
+    // cronograma semanal es el mismo para cualquier curso: solo el monto cambia.
+    //
+    // En 3 bloques (2026-09-30): cada uno sale como un mensaje aparte, y la
+    // foto del carnet va después del tercero, justo debajo del "como este 👇".
     beneficiosCurso: {
       when: "Eligió un CURSO y ya le mostraste la ruta de cierre.",
       text: [
-        "En este curso la inversión semanal es S/. {precio} y cada semana incluye:",
-        "- 03 días de clases teóricas (lunes, martes, miércoles).",
-        "- 01 práctico en el taller (jueves).",
-        "- 01 hora de operación en el equipo (viernes).",
-        "- 12 semanas de clases",
-        "🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃",
-      ].join("\n"),
+        [
+          "En este curso la inversión semanal es S/ {precio} que incluye:",
+          "- 03 días de clases teóricas (lunes, martes, miércoles).",
+          "- 01 práctico en el taller (jueves).",
+          "- 01 hora (60 minutos cada estudiante) de operación en el equipo (viernes).",
+        ].join("\n"),
+        "⏳ Duración: 12 semanas (03 meses).",
+        "Al final te brindaremos tus certificados y 01 carnet de operador con código QR para que puedas verificar que tus certificados están registrados y subidos al sistema como este 👇😃",
+      ],
       images: true,
     },
     beneficiosCertificado: {
@@ -354,20 +385,20 @@ export default defineBusinessConfig({
       ].join("\n"),
       images: true,
     },
-    // El gancho de venta: descuento por curso, montos reales (2026-09-26). Uno
-    // por curso porque cada uno tiene el suyo — no hay un campo de "descuento"
-    // en el servicio, así que el monto va tal cual acá, igual que el precio.
+    // El gancho de venta: descuento por curso (S/ 100, 300 y 800). Uno por
+    // curso porque cada uno tiene el suyo — no hay un campo de "descuento" en
+    // el servicio, así que el monto va tal cual acá. Texto del 2026-09-30.
     descuentoBasico: {
       when: "Eligió el curso BÁSICO, antes de avanzar.",
-      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 100, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: descuentoCurso("S/ 100"),
     },
     descuentoAvanzado: {
       when: "Eligió el curso AVANZADO, antes de avanzar.",
-      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 300, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: descuentoCurso("S/ 300"),
     },
     descuentoMultiple: {
       when: "Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.",
-      text: "Te comento que este Lunes del mes empezamos clases.\nTenemos el descuento para tu curso de S/ 800, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
+      text: descuentoCurso("S/ 800"),
     },
     // Descuento por certificación, montos reales (2026-09-27). Sin la línea de
     // "cada 1er lunes": ese cronograma es de los cursos, las certificaciones no
@@ -384,21 +415,21 @@ export default defineBusinessConfig({
       when: "Eligió la certificación de 5 maquinarias o más, antes de avanzar.",
       text: "Tenemos el descuento para tu certificación de S/ 50, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
-    // Pago de INSCRIPCIÓN por curso, montos reales (2026-09-27). Es un monto
-    // distinto de la inversión semanal y del descuento. Uno por curso para que
-    // el monto lo ponga el código: con los tres en una lista, el modelo mezcló
-    // cuál era de quién.
+    // Primera inversión de un curso (2026-09-30): S/ 150.00 para los tres, con
+    // lo que incluye y el Yape de Tecmin Corp SAC. Sigue siendo uno por curso
+    // porque el monto del DESCUENTO que menciona cambia: con los montos en una
+    // lista, el modelo ya mezcló una vez cuál era de quién.
     pagoBasico: {
       when: "Eligió el curso BÁSICO y quiere seguir con la inscripción.",
-      text: "Para confirmar tu inscripción, realiza el pago de S/ 100 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.",
+      text: pagoCurso("S/ 100"),
     },
     pagoAvanzado: {
       when: "Eligió el curso AVANZADO y quiere seguir con la inscripción.",
-      text: "Para confirmar tu inscripción, realiza el pago de S/ 150 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.",
+      text: pagoCurso("S/ 300"),
     },
     pagoMultiple: {
       when: "Eligió el curso OPERACIÓN MÚLTIPLE y quiere seguir con la inscripción.",
-      text: "Para confirmar tu inscripción, realiza el pago de S/ 200 por Yape al 986547823 (Alexis Instituto Tecmin). Me mandas la captura para confirmar.",
+      text: pagoCurso("S/ 800"),
     },
     pagoCertificacion: {
       when: "Eligió una CERTIFICACIÓN y quiere seguir con la inscripción.",
