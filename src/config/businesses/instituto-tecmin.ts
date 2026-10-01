@@ -54,6 +54,25 @@ function pagoCurso(descuento: string): string {
   ].join("\n")
 }
 
+// El detalle de una certificación (2026-09-30), en 3 bloques: el precio del
+// curso completo, el "pero como tú ya sabes operar" y el precio promo. Iguales
+// para las 3 opciones salvo los dos montos. La foto del carnet va después del
+// tercero; la pregunta de cierre es otro mensaje (`preguntaCertificado`) para
+// que salga DESPUÉS de la foto.
+function detalleCertificado(precioOriginal: string, precioPromo: string): string[] {
+  return [
+    `Te comento: El curso que incluye teoría y práctica para *aprender a operar de forma básica* ese equipo tiene una duración de 05 meses y medio con una inversión total de *${precioOriginal}*`,
+    "Pero como tú ya sabes operar esos equipos",
+    [
+      `Por solo ${precioPromo} obtienes tus certificados y la inversión incluye:`,
+      "📜 01 certificado físico y digital de cada equipo.",
+      "Recuerda que la inversión incluye:",
+      "📖 01 manual digital de cada equipo.",
+      "🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃",
+    ].join("\n"),
+  ]
+}
+
 export default defineBusinessConfig({
   businessId: "4aIwSdMZBY12B06MSSovj",
   name: "Instituto Tecmin",
@@ -253,32 +272,34 @@ export default defineBusinessConfig({
       node: "mostrar_beneficios",
       extraInstructions: [
         "Apenas entrés a este paso, mandá DOS mensajes fijos en el mismo turno, en este orden, con send_fixed_message:",
-        '1. Los beneficios: "beneficiosCertificado" si eligió una certificación, "beneficiosCurso" si eligió un curso.',
-        "2. El descuento que corresponda:",
-        '   - Curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
-        '   - Certificación: "descuentoCert1a2" (1 a 2 maquinarias), "descuentoCert3a4" (3 a 4 maquinarias), "descuentoCert5oMas" (5 maquinarias o más).',
+        "Si eligió un CURSO:",
+        '1. "beneficiosCurso".',
+        '2. El descuento de su curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
+        "Si eligió una CERTIFICACIÓN:",
+        '1. El detalle de su opción: "detalleCert1a2" (A, 1 a 2 maquinarias), "detalleCert3a4" (B, 3 a 4 maquinarias), "detalleCert5oMas" (C, 5 maquinarias o más).',
+        '2. "preguntaCertificado".',
         "No inventes vos ningún monto: todo ya va en los mensajes.",
-        "Recién cuando el alumno responda sobre el descuento (sea que quiera aplicarlo o no), avanzá.",
+        "Recién cuando el alumno responda la pregunta del último mensaje (el descuento en cursos, o si realizamos sus certificados), avanzá.",
       ].join("\n"),
-      // Los 2 mensajes fijos SON la respuesta: el descuento ya termina con su
+      // Los 2 mensajes fijos SON la respuesta: el último ya termina con su
       // pregunta. Cualquier texto propio de Emma en ese turno se descarta en
       // código — pedírselo por instrucción falló 4 veces seguidas.
       fixedOnly: true,
       cta: false,
       fixedMessages: [
         "beneficiosCurso",
-        "beneficiosCertificado",
         "descuentoBasico",
         "descuentoAvanzado",
         "descuentoMultiple",
-        "descuentoCert1a2",
-        "descuentoCert3a4",
-        "descuentoCert5oMas",
+        "detalleCert1a2",
+        "detalleCert3a4",
+        "detalleCert5oMas",
+        "preguntaCertificado",
       ],
       routes: [
         {
           id: "continua",
-          when: "El alumno ya respondió sobre el descuento (lo quiera aplicar o no) y quiere seguir con la inscripción.",
+          when: 'El alumno respondió que sí: al descuento (curso) o a "¿Realizamos tus certificados?" (certificación), y quiere seguir.',
           to: "solicitar_pago",
         },
       ],
@@ -327,31 +348,15 @@ export default defineBusinessConfig({
         "A. Certificación de 1 a 2 maquinarias",
         "B. Certificación de 3 a 4 maquinarias",
         "C. Certificación de 5 maquinarias o más",
-        "¿En cuál de las opciones deseas más información?",
+        "Coméntame, ¿Cuál de estas opciones es la que deseas?",
       ].join("\n"),
     },
     introCursos: {
       when: "Al entrar al listado de cursos, antes de las fichas.",
       text: "Genial, ahora te paso un resumen de tus cursos",
     },
-    // {precio} sale del servicio elegido en el panel: si el dueño cambia el precio
-    // de una certificación, la oferta cambia sola. La foto del carnet se sube
-    // desde /asistente ("Fotos de tus mensajes automáticos") — no vive acá.
-    ofertaCertificacion: {
-      when: "Cuando ya sabés cuántas maquinarias opera y elegiste su certificación.",
-      text: [
-        "Por esta campaña te vamos a dejar todos los certificados a S/. {precio}, obtienes tus certificados y la inversión incluye:",
-        "📜 Certificados físicos y digitales de cada equipo.",
-        "🎞️ 10 clases teóricas en video.",
-        "Recuerda que la inversión incluye:",
-        "📖 01 manual digital de cada equipo.",
-        "🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃",
-      ].join("\n"),
-      images: true,
-    },
-    // Las dos galerías de beneficios se suben desde el panel — el instituto
-    // todavía no cargó las fotos; send_fixed_message manda el texto solo hasta
-    // que lo haga.
+    // La foto de beneficios se sube desde el panel (/asistente → "Fotos de tus
+    // mensajes automáticos"); sin foto, el mensaje sale solo con el texto.
     // {precio} es la inversión SEMANAL de ese curso (así carga el dueño el
     // precio de un curso en el panel — no es un monto único por todo el
     // curso; desde 2026-09-30: Básico 220, Avanzado 260, Múltiple 260). El
@@ -373,17 +378,31 @@ export default defineBusinessConfig({
       ],
       images: true,
     },
-    beneficiosCertificado: {
-      when: "Eligió una CERTIFICACIÓN y ya le mostraste la ruta de cierre.",
-      text: [
-        "En tu caso, todos tus certificados te vamos a dejar a solo S/. {precio}:",
-        "📜 01 certificado físico y digital.",
-        "🎞️ 10 clases teóricas en video.",
-        "Recuerda que la inversión incluye:",
-        "📖 01 manual digital de cada equipo.",
-        "🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃",
-      ].join("\n"),
+    // El detalle de cada certificación (2026-09-30): precio del curso completo
+    // y precio promo, escritos acá — no hay campo para el precio original en
+    // el panel, y así el monto lo pone el código, nunca la IA. Uno por opción,
+    // cada uno con su foto del carnet (se sube en el panel, una vez por opción).
+    // Reemplazan a beneficiosCertificado y a los descuentos de certificación:
+    // en este camino no hay descuento, el precio promo ES la oferta.
+    detalleCert1a2: {
+      when: "Eligió la certificación A (1 a 2 maquinarias).",
+      text: detalleCertificado("S/. 3000.00", "S/. 295.00"),
       images: true,
+    },
+    detalleCert3a4: {
+      when: "Eligió la certificación B (3 a 4 maquinarias).",
+      text: detalleCertificado("S/. 4000.00", "S/. 395.00"),
+      images: true,
+    },
+    detalleCert5oMas: {
+      when: "Eligió la certificación C (5 maquinarias o más).",
+      text: detalleCertificado("S/. 5000.00", "S/. 495.00"),
+      images: true,
+    },
+    // Aparte del detalle para que salga DESPUÉS de la foto del carnet.
+    preguntaCertificado: {
+      when: "Después del detalle de su certificación, siempre.",
+      text: "¿Realizamos tus certificados?",
     },
     // El gancho de venta: descuento por curso (S/ 100, 300 y 800). Uno por
     // curso porque cada uno tiene el suyo — no hay un campo de "descuento" en
@@ -399,21 +418,6 @@ export default defineBusinessConfig({
     descuentoMultiple: {
       when: "Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar.",
       text: descuentoCurso("S/ 800"),
-    },
-    // Descuento por certificación, montos reales (2026-09-27). Sin la línea de
-    // "cada 1er lunes": ese cronograma es de los cursos, las certificaciones no
-    // arrancan por cohorte mensual.
-    descuentoCert1a2: {
-      when: "Eligió la certificación de 1 a 2 maquinarias, antes de avanzar.",
-      text: "Tenemos el descuento para tu certificación de S/ 30, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
-    },
-    descuentoCert3a4: {
-      when: "Eligió la certificación de 3 a 4 maquinarias, antes de avanzar.",
-      text: "Tenemos el descuento para tu certificación de S/ 40, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
-    },
-    descuentoCert5oMas: {
-      when: "Eligió la certificación de 5 maquinarias o más, antes de avanzar.",
-      text: "Tenemos el descuento para tu certificación de S/ 50, tiene validez solo si pagas hoy. ¿Te gustaría aplicar el descuento?",
     },
     // Primera inversión de un curso (2026-09-30): S/ 150.00 para los tres, con
     // lo que incluye y el Yape de Tecmin Corp SAC. Sigue siendo uno por curso

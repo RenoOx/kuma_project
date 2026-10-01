@@ -483,6 +483,12 @@ negocio nunca dio.
   y se guardan en el historial como mensajes de assistant DESPUÉS de todos los
   resultados de tools de la vuelta: meterlos entre `tool_calls` y su resultado
   rompe el formato de OpenAI.
+- **La ventana de historial se repara antes de mandarla** (`historyToChatMessages`
+  en `llm/chatHistory.ts`, la misma lógica que `convertHistory` del dueño). La
+  ventana cuenta filas (`HISTORY_LIMIT` = 20), no turnos: si corta entre un
+  pedido de herramienta y su respuesta, OpenAI rechaza el pedido entero y el
+  cliente recibe "algo no salió bien". Con 2-3 herramientas por turno pasaba
+  seguido (Tecmin, 2026-09-30: "el numero cual es?" y "estaran en Lima?").
 - **`text` puede ser una lista de BLOQUES** (desde 2026-09-30): cada bloque sale
   como un mensaje de WhatsApp aparte, en orden y por `enqueueSend`, y la galería
   va después del último. Para `MAX_FIXED_MESSAGES_PER_TURN` cuenta como UN

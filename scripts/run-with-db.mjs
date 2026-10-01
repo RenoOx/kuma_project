@@ -4,15 +4,20 @@
 // fighting Windows shell quoting.
 import { spawn } from 'node:child_process'
 
-const sourceVar = process.env.DATABASE_URL_FROM
-if (!sourceVar) {
+const sourceList = process.env.DATABASE_URL_FROM
+if (!sourceList) {
   console.error('DATABASE_URL_FROM not set. Expected PROD_DATABASE_URL.')
   process.exit(1)
 }
 
-const url = process.env[sourceVar]
-if (!url) {
-  console.error(`Source variable ${sourceVar} is empty or missing in .env`)
+// Admite una lista separada por comas y usa la primera que esté definida: así
+// un script de lectura prefiere PROD_READONLY_DATABASE_URL (usuario de solo
+// lectura) y cae a PROD_DATABASE_URL si todavía no se creó.
+const candidates = sourceList.split(',').map((name) => name.trim())
+const sourceVar = candidates.find((name) => process.env[name])
+const url = sourceVar ? process.env[sourceVar] : undefined
+if (!sourceVar || !url) {
+  console.error(`None of ${candidates.join(', ')} is set in .env`)
   process.exit(1)
 }
 
