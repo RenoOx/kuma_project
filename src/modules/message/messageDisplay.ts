@@ -35,6 +35,13 @@ interface MarkerRendering {
 // Ordered: payment captures are also images, so they have to be recognised
 // before the plain-image rule.
 const MARKER_RENDERINGS: MarkerRendering[] = [
+  // La marca de una foto que llegó antes de que Emma la pidiera (earlyImages en
+  // el archivo del negocio). Va primero: menciona el pago y el DNI, y sin esto
+  // caía en el genérico y el Inbox mostraba un segundo adjunto que no existió.
+  {
+    test: /antes de que se la pidieras/i,
+    label: 'ℹ️ Foto recibida antes de pedirla (no se reenvió)',
+  },
   { test: /captura de pago|comprobante de pago/i, label: '📷 Comprobante de pago recibido' },
   { test: /no puedo procesar/i, label: '📎 Archivo que Emma no puede leer' },
   { test: /envió una imagen|envió la imagen/i, label: '📷 Imagen recibida' },

@@ -28,6 +28,14 @@ import {
   renderPendingBlock,
 } from './prompts.appointments.js'
 import type { FlowPrompt, NicheExamples } from './prompts.flow.js'
+import {
+  LEAN_PRICE_BLOCK,
+  LEAN_RULES_BLOCK,
+  LEAN_UNRECOGNIZED_BLOCK,
+  LEAN_WRITING_BLOCK,
+  leanClosingBlock,
+  leanGreetingBlock,
+} from './prompts.lean.js'
 import { SALES_CTA_VARIANTS, SALES_PROMPT } from './prompts.sales.js'
 
 function groupByCategory(entries: KnowledgeBaseEntry[]): Record<string, KnowledgeBaseEntry[]> {
@@ -1323,6 +1331,114 @@ function buildStaticBody(
   ]
 }
 
+/**
+ * El cuerpo estable del prompt liviano (`leanPrompt` en el archivo del negocio).
+ *
+ * Mismo orden que buildStaticBody —lo estable primero, la KB al final— para no
+ * romper el caché de OpenAI. Reusa los mismos bloques del negocio (ubicación,
+ * catálogo, instrucciones del dueño, adelanto); lo que cambia son las reglas
+ * generales, que van en su versión corta de prompts.lean.ts. Sin bloque de
+ * nicho: los emojis y el trato van en "Cómo escribes".
+ */
+function buildLeanStaticBody(
+  business: Business,
+  knowledgeBase: KnowledgeBaseEntry[],
+  settings: BusinessSettings | null,
+  todayISO: string,
+  withMedia: ReadonlySet<string>,
+  answers: readonly string[],
+): string[] {
+  const books = settings ? schedulesAppointments(settings) : true
+  const flow: FlowPrompt = books ? APPOINTMENTS_PROMPT : SALES_PROMPT
+  const assistant = settings?.assistant ?? null
+
+  return [
+    '# Identidad',
+    // Sin "asistente": un negocio que pidió el prompt liviano decide en sus
+    // instrucciones cómo se presenta Emma (Tecmin: "asesora comercial").
+    assistant
+      ? `Eres ${assistant.name}, del equipo de ${business.name}. Respondes por WhatsApp.`
+      : `Eres parte del equipo de ${business.name}. Respondes por WhatsApp.`,
+    ...(assistant ? [genderLine(assistant.gender)] : []),
+    ...(assistant?.businessDescription
+      ? [`Sobre el negocio: ${assistant.businessDescription}`]
+      : []),
+    '',
+    ...LEAN_WRITING_BLOCK,
+    '',
+    '# Ubicación',
+    renderLocationBlock(business.address, business.googleMapsUrl),
+    ...renderContactBlock(assistant),
+    '',
+    settings ? renderConfiguredBlock(settings, todayISO, withMedia, flow) : NOT_CONFIGURED_BLOCK,
+    '',
+    ...LEAN_PRICE_BLOCK,
+    '',
+    ...LEAN_RULES_BLOCK,
+    // La regla de cancelar es la misma de siempre, pero trae el número de su
+    // lugar en las reglas largas: acá va novena.
+    flow.cancelRule.replace(/^\d+\.\s*/, `${LEAN_RULES_BLOCK.length}. `),
+    '',
+    ...(settings ? LEAN_UNRECOGNIZED_BLOCK : []),
+    ...configuredGuidanceBlock(settings),
+    ...(settings ? flow.hybridBlock(settings) : []),
+    ...(settings ? flow.approvalBlock(settings) : []),
+    ...(settings ? flow.depositRules(settings) : []),
+    ...customInstructionsBlock(settings),
+    // Después de las instrucciones del dueño y antes del turno: es texto del
+    // negocio, estable, así que entra en la parte cacheable.
+    ...(answers.length > 0
+      ? [
+          '',
+          '# Respuestas del negocio',
+          'Si el cliente pregunta algo de esta lista, usa esta respuesta tal cual, aunque insista o repregunte. No le agregues datos.',
+          ...answers.map((a) => `- ${a}`),
+        ]
+      : []),
+    // La KB solo si tiene algo: el encabezado y sus dos líneas de advertencia
+    // sobre una base vacía eran ~140 tokens en cada llamado que no decían nada.
+    ...(knowledgeBase.length > 0
+      ? [
+          '',
+          '# Conocimiento del negocio',
+          'Cubre políticas, preguntas frecuentes y promociones. NO es fuente de servicios, precios, horarios, dirección ni datos de contacto: para eso mandan los bloques de arriba.',
+          renderKnowledgeBase(knowledgeBase),
+        ]
+      : []),
+  ]
+}
+
+/**
+ * La cola del prompt liviano: fecha, datos del cliente y el cierre.
+ *
+ * Sin la regla de "un saludo aislado se contesta con el saludo exacto": en un
+ * flujo por pasos, un "hola, ¿sigue el descuento?" a mitad de la conversación
+ * hacía que Emma volviera a preguntar lo del principio (Tecmin, 2026-09-30).
+ */
+function buildLeanVariableTail(
+  business: Business,
+  settings: BusinessSettings | null,
+  todayISO: string,
+  dayOfWeek: string,
+  nowHHMM: string,
+  greeting: string,
+  cta: CallToActionDecision,
+  pending: PendingAppointmentContext | null,
+  customerFacts: Record<string, string>,
+): string[] {
+  return [
+    '# Contexto actual',
+    `Fecha y hora actual: ${dayOfWeek} ${todayISO} ${nowHHMM} (${business.timezone}).`,
+    ...outOfHoursBlock(settings, todayISO, nowHHMM),
+    '',
+    ...renderCustomerFacts(customerFacts),
+    ...(pending ? renderPendingBlock(pending) : []),
+    ...leanGreetingBlock(greeting),
+    '',
+    ...leanClosingBlock(cta.include ? { include: true, text: cta.text } : { include: false }),
+  ]
+}
+
 function buildVariableTail(
   business: Business,
   settings: BusinessSettings | null,
@@ -1413,6 +1529,10 @@ export function buildSystemPrompt(
   // opcional por lo mismo que los dos anteriores. `false`: el paso eligió no
   // cerrar con ninguna invitación.
   stepCta?: string | false,
+  // El prompt liviano de un negocio con `leanPrompt` en su archivo. Ausente o
+  // false: el prompt de siempre, byte por byte (lo fijan los snapshots).
+  // `answers`: las respuestas del archivo del negocio; solo existen en el liviano.
+  options: { lean?: boolean; answers?: readonly string[] } = {},
 ): string {
   const today = todayInTimezone(business.timezone)
   const dayOfWeek = dayOfWeekInTimezone(business.timezone)
@@ -1437,6 +1557,31 @@ export function buildSystemPrompt(
       : stepCta
         ? decideStepCallToAction(history, stepCta)
         : decideCallToAction(history, ctaFlavourFor(settings), Math.random, greetingAsks)
+
+  if (options.lean) {
+    return [
+      ...buildLeanStaticBody(
+        business,
+        knowledgeBase,
+        settings,
+        today,
+        withMedia,
+        options.answers ?? [],
+      ),
+      '',
+      ...buildLeanVariableTail(
+        business,
+        settings,
+        today,
+        dayOfWeek,
+        nowHHMM,
+        greeting,
+        cta,
+        pending,
+        customerFacts,
+      ),
+    ].join('\n')
+  }
 
   return [
     ...buildStaticBody(business, knowledgeBase, settings, today, withMedia),

@@ -14,7 +14,7 @@ import {
 } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
-import { resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
+import { fileConfigFor, resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
 import { blueprintFor } from '@/modules/conversation/nodeCatalog.js'
 import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
@@ -29,7 +29,7 @@ import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import * as tagService from '@/modules/tag/tag.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
-import { bufferImage, flushImagesNow } from '@/modules/whatsapp/imageBuffer.js'
+import { bufferImage, flushImagesNow, hasPendingImages } from '@/modules/whatsapp/imageBuffer.js'
 import {
   consumeImageExpectation,
   type ImagePurpose,
@@ -69,8 +69,30 @@ import { formatPersonName } from '@/shared/name.js'
 import { samePhone } from '@/shared/phone.js'
 import { renderTemplate } from '@/shared/templates.js'
 
-const LLM_FALLBACK_REPLY =
-  'Mmm, algo no salió bien de mi lado. Intenta de nuevo en un momento, ¿va?'
+// Cuando Emma no puede responder (OpenAI no contestó a tiempo, la base falló),
+// el cliente ya no recibe "Mmm, algo no salió bien de mi lado. Intenta de nuevo
+// en un momento": le pedía que reenviara, y en un pico eso multiplicaba los
+// mensajes (Tecmin, 2026-09-30: 189 turnos así en una prueba). Su mensaje ya
+// quedó guardado en el Inbox; el que se entera es el dueño, que puede
+// contestarle desde ahí. Fire-and-forget, como el aviso de la pausa.
+function notifyOwnerUnanswered(params: {
+  businessId: string
+  customerName: string | null
+  phone: string
+  reason: string
+  log: HandlerLogger
+}): void {
+  const who = formatPersonName(params.customerName) ?? '(sin nombre)'
+  const text = [
+    '⚠️ *Emma no pudo responder*',
+    `Cliente: ${who} (${params.phone})`,
+    `Motivo: ${params.reason}`,
+    'Su mensaje está en el Inbox: respóndele desde el panel.',
+  ].join('\n')
+  ownerNotifier.notifyOwner(params.businessId, text).catch((err) => {
+    params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
+  })
+}
 
 const PAUSED_REPLY =
   'En este momento no podemos atenderte automáticamente. Un asesor te contactará pronto.'
@@ -81,6 +103,12 @@ const PAUSED_REPLY =
 const OWNER_FALLBACK_REPLY = 'Uy, no pude completar eso 😅 ¿Lo intentamos de nuevo?'
 
 const ESCALATED_REPLY = 'Ya avisé al encargado, te escribirá en breve 😊'
+
+// Lo que lee el modelo cuando una foto llega en un paso que no la pide, en un
+// negocio con `earlyImages: 'continue'`. Va como mensaje del cliente, igual que
+// las marcas de pago: el modelo nunca ve la foto, y sin esto no sabría que llegó.
+const EARLY_IMAGE_MARKER =
+  '[El cliente mandó una foto antes de que se la pidieras. No la ves y NO se le reenvió a nadie. Esto NO es una respuesta a tu última pregunta: no es un sí ni un no. No digas que la recibiste ni que la revisaste, y no pidas datos ni pagos con tus palabras: seguí el paso actual normalmente, y cuando corresponda pedir el pago o el DNI, pedile que la vuelva a mandar en ese momento.]'
 
 // ── Configured canned replies ────────────────────────────────────────────────
 //
@@ -212,18 +240,24 @@ const processingWaiters: Array<() => void> = []
  * through a four-second debounce window would spend the budget on waiting rather
  * than on working.
  */
-async function withProcessingSlot(work: () => Promise<void>): Promise<void> {
+async function withProcessingSlot(work: (release: () => void) => Promise<void>): Promise<void> {
   if (activeProcessing >= MAX_CONCURRENT_PROCESSING) {
-    // The slot is handed over already counted (see the finally below), so
+    // The slot is handed over already counted (see release below), so
     // nothing is incremented on this side of the wait.
     await new Promise<void>((resolve) => processingWaiters.push(resolve))
   } else {
     activeProcessing++
   }
 
-  try {
-    await work()
-  } finally {
+  // `work` puede soltar el lugar antes de terminar: processMessage lo suelta
+  // apenas Emma terminó de pensar, antes de enviar. El envío espera en la fila
+  // de WhatsApp de ese número (segundos por mensaje), y retener el lugar ahí
+  // hacía que un pico de un negocio frenara hasta ~1 min a los demás solo para
+  // pensar. El orden por cliente lo sigue garantizando withSenderLock.
+  let released = false
+  const release = (): void => {
+    if (released) return
+    released = true
     // Hand the slot straight to the next waiter WITHOUT dropping the count.
     // Decrementing first and then resolving leaves a microtask-sized window in
     // which a fresh caller sees a free slot, takes it, and the woken waiter then
@@ -232,6 +266,12 @@ async function withProcessingSlot(work: () => Promise<void>): Promise<void> {
     const next = processingWaiters.shift()
     if (next) next()
     else activeProcessing--
+  }
+
+  try {
+    await work(release)
+  } finally {
+    release()
   }
 }
 
@@ -381,7 +421,7 @@ async function handleCustomerImage(params: {
   log: HandlerLogger
   /** Si la foto vino en un grupo: la pausa y la respuesta se dejan para la última. */
   burst?: ImageBurst
-}): Promise<void> {
+}): Promise<'done' | 'reply_with_llm'> {
   const { raw, business, customer, conversationId, caption, jid, send, log, burst } = params
   const lastOfBurst = !burst || burst.index === burst.total - 1
   const businessId = business.id
@@ -454,11 +494,36 @@ async function handleCustomerImage(params: {
   // tu foto! Ya la comparto…" y no la compartía con nadie. El placeholder y el
   // evento de arriba se guardan igual, así el dueño la ve en el Inbox.
   if (!onImage && !wanted) {
+    // Tampoco se reenvía con `earlyImages: 'continue'` (archivo del negocio): al
+    // dueño le llega una foto recién cuando Emma la pidió, con la información
+    // correcta ya dada. Lo que cambia es que Emma sigue el paso sabiendo que
+    // llegó, en vez de dejar al cliente esperando en silencio (Tecmin,
+    // 2026-09-30: el DNI llegaba junto con el "sí" y nadie respondía).
+    // En un grupo, solo la última foto deja la marca y pide la respuesta.
+    if (fileConfigFor(businessId)?.earlyImages === 'continue') {
+      if (!lastOfBurst) return 'done'
+      const marked = await messageService.append({
+        businessId,
+        conversationId,
+        role: 'user',
+        content: EARLY_IMAGE_MARKER,
+        senderType: 'customer',
+      })
+      if (!marked.ok) {
+        log.error({ code: marked.error.code }, 'append early image marker failed')
+        return 'done'
+      }
+      log.info(
+        { conversationId, state: conversation?.state },
+        'customer image arrived before Emma asked: not forwarded, Emma continues the step',
+      )
+      return 'reply_with_llm'
+    }
     log.info(
       { conversationId, state: conversation?.state },
       'customer image ignored: this step does not ask for photos',
     )
-    return
+    return 'done'
   }
 
   // Downloaded at most once, and only when something will actually use the bytes:
@@ -718,7 +783,7 @@ async function handleCustomerImage(params: {
     if (!best || rank > best.rank) burst.shared.reply = { text: reply, rank }
     // Las fotos que no son la última del grupo no le contestan nada al cliente:
     // tres fotos eran tres "¡Recibí tu imagen!", y cada uno un mensaje saliente.
-    if (!lastOfBurst) return
+    if (!lastOfBurst) return 'done'
     finalReply = burst.shared.reply?.text ?? reply
   }
 
@@ -737,6 +802,7 @@ async function handleCustomerImage(params: {
   } catch (err) {
     log.error({ err, jid }, 'failed to acknowledge customer image')
   }
+  return 'done'
 }
 
 /**
@@ -1042,6 +1108,8 @@ async function processMessage(
   jid: string,
   phone: string,
   payload: Payload,
+  /** Suelta el lugar de procesamiento (ver withProcessingSlot). Sin él, se suelta al final. */
+  releaseSlot?: () => void,
 ): Promise<void> {
   const log = logger.child({ component: 'whatsapp.handler', businessId })
 
@@ -1187,9 +1255,13 @@ async function processMessage(
       { err: customerResult.error.logContext, code: customerResult.error.code },
       'getOrCreate customer failed',
     )
-    try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
-    } catch {}
+    notifyOwnerUnanswered({
+      businessId,
+      customerName: raw.pushName ?? null,
+      phone,
+      reason: 'no se pudo registrar al cliente en la base',
+      log,
+    })
     return
   }
   const customer = customerResult.data
@@ -1203,9 +1275,13 @@ async function processMessage(
       },
       'getOrCreateOpen conversation failed',
     )
-    try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
-    } catch {}
+    notifyOwnerUnanswered({
+      businessId,
+      customerName: customer.name,
+      phone,
+      reason: 'no se pudo abrir la conversación en la base',
+      log,
+    })
     return
   }
   const conversation = conversationResult.data
@@ -1222,9 +1298,13 @@ async function processMessage(
       { err: userMsgResult.error.logContext, code: userMsgResult.error.code },
       'append user message failed',
     )
-    try {
-      await sendWithPresence({ businessId, jid, text: LLM_FALLBACK_REPLY, send, readKey: raw.key })
-    } catch {}
+    notifyOwnerUnanswered({
+      businessId,
+      customerName: customer.name,
+      phone,
+      reason: 'no se pudo guardar su mensaje en la base',
+      log,
+    })
     return
   }
 
@@ -1359,7 +1439,7 @@ async function processMessage(
   // call, because there is nothing to reason about — the decision of whether it
   // matters was already made when Emma asked for it.
   if (payload.kind === 'image') {
-    await handleCustomerImage({
+    const outcome = await handleCustomerImage({
       raw,
       business,
       customer,
@@ -1370,7 +1450,9 @@ async function processMessage(
       log,
       ...(payload.burst ? { burst: payload.burst } : {}),
     })
-    return
+    // Una foto que llegó antes de tiempo en un negocio con `earlyImages`: no se
+    // reenvió, y Emma contesta siguiendo el paso (más abajo, el flujo de LLM).
+    if (outcome === 'done') return
   }
 
   // Nothing to reason about — acknowledge the format and stop before the LLM.
@@ -1429,6 +1511,24 @@ async function processMessage(
     return
   }
 
+  // "listo" + la captura, mandados juntos: el texto espera 4 s y la foto 10 s,
+  // así que el texto se procesaba primero y el cliente recibía "Aún no me llega
+  // la captura" segundos antes de "Recibido ✅" (Tecmin, regresión 4). Si la foto
+  // ya está esperando y este paso pausa a Emma al recibirla, la respuesta ES la
+  // de la foto: el texto queda guardado (Inbox e historial) y no se llama a la IA.
+  if (payload.kind === 'text' && hasPendingImages(`${businessId}:${phone}`)) {
+    const settingsResult = await businessService.getSettings(businessId)
+    const flow = resolveBusinessFlow(businessId, settingsResult.ok ? settingsResult.data : null)
+    if (getStateConfig(flow, conversation.state).onImage?.pause === true) {
+      log.info(
+        { conversationId: conversation.id, state: conversation.state },
+        'text left to the incoming photo',
+      )
+      releaseSlot?.()
+      return
+    }
+  }
+
   // Normal LLM flow.
   const llmResult = await llmService.generateReply({
     businessId,
@@ -1436,6 +1536,8 @@ async function processMessage(
     userMessage: text,
     state: conversation.state,
   })
+  // Lo que sigue es enviar: espera la fila de WhatsApp, no a OpenAI.
+  releaseSlot?.()
 
   let replyText: string
   if (llmResult.ok) {
@@ -1452,26 +1554,23 @@ async function processMessage(
       'llm reply generated',
     )
   } else {
-    replyText = LLM_FALLBACK_REPLY
+    // Nada al cliente (ni se guarda un texto de Emma que no salió): el dueño
+    // recibe el aviso y contesta desde el Inbox. Ver notifyOwnerUnanswered.
+    replyText = ''
     log.error(
       { code: llmResult.error.code, context: llmResult.error.logContext },
-      'llm generateReply failed, using fallback message',
+      'llm generateReply failed, owner notified instead of sending a fallback',
     )
-    const fallbackPersist = await messageService.append({
+    notifyOwnerUnanswered({
       businessId,
-      conversationId: conversation.id,
-      role: 'assistant',
-      content: replyText,
+      customerName: customer.name,
+      phone,
+      reason:
+        llmResult.error.code === 'llm_unavailable' || llmResult.error.code === 'llm_timeout'
+          ? 'OpenAI no respondió a tiempo (mucho tráfico)'
+          : 'error al generar la respuesta',
+      log,
     })
-    if (!fallbackPersist.ok) {
-      log.error(
-        {
-          err: fallbackPersist.error.logContext,
-          code: fallbackPersist.error.code,
-        },
-        'append fallback assistant message failed',
-      )
-    }
   }
 
   // Los mensajes fijos van ANTES de la respuesta: primero la oferta tal cual (y
@@ -1745,7 +1844,9 @@ export function handleIncomingMessage(
   // join and nothing to group.
   if (incoming.kind !== 'text') {
     return withSenderLock(senderKey, () =>
-      withProcessingSlot(() => processMessage(raw, businessId, send, jid, phone, incoming)),
+      withProcessingSlot((release) =>
+        processMessage(raw, businessId, send, jid, phone, incoming, release),
+      ),
     )
   }
 
@@ -1770,11 +1871,19 @@ export function handleIncomingMessage(
       return
     }
     return withSenderLock(senderKey, () =>
-      withProcessingSlot(() =>
-        processMessage(raw, businessId, send, jid, phone, {
-          kind: 'text',
-          text: joined,
-        }),
+      withProcessingSlot((release) =>
+        processMessage(
+          raw,
+          businessId,
+          send,
+          jid,
+          phone,
+          {
+            kind: 'text',
+            text: joined,
+          },
+          release,
+        ),
       ),
     )
   })

@@ -133,6 +133,9 @@ npm run db:migrate       # tsx src/db/migrate.ts
 npm run db:studio:dev    # drizzle-kit studio contra la base de dev
 npm run business:show:dev -- <id> [--prompt <estado>]   # qué flujo corre un negocio y por qué (solo lectura)
 npm run business:show:dev -- --all                      # resumen de todos: fuente del flujo y lo que se saltó
+npm run business:clone:dev -- <id>   # copia config de un negocio de prod (solo lectura) a dev, con números +999
+npm run qa:simulate -- --profiles G01,A01 --runs 1   # test masivo de leads por el handler real (solo dev, gasta OpenAI)
+npm run qa:evaluate -- qa/leads/out/<corrida>        # chequeos automáticos de una corrida (sin OpenAI)
 npm run lint             # biome check --write
 npm run typecheck        # tsc --noEmit  +  tsc --noEmit -p src/panel/tsconfig.json
 npm run check            # lint + typecheck + test (ejecutar antes de commit)
@@ -268,6 +271,23 @@ Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
   La foto NUNCA llega al LLM
 - **Anti-ban**: `humanDelay` + `sendWithPresence` simulan comportamiento
   humano antes de enviar
+- **Freno de OpenAI** (`llm/openaiGate.ts`, desde 2026-09-30): la cuenta de OpenAI
+  tiene UN límite de tokens por minuto para todos los negocios (200.000). Todo
+  llamado (Emma y asistente del dueño) pasa por `createChatCompletion`, que
+  reserva su costo estimado (texto ÷ 3 + `max_tokens`) en una ventana de 60 s con
+  presupuesto `OPENAI_TPM_BUDGET` (150.000) y espera en fila si no entra; un 429
+  se reintenta respetando `retry-after` hasta el plazo del turno (100 s cliente,
+  60 s dueño). Nació de una prueba de 141 conversaciones con 189 turnos en
+  "algo no salió bien" por pasar el límite.
+- **Sin "algo no salió bien"**: si Emma no puede responder (OpenAI no contestó a
+  tiempo, falla de base), el cliente no recibe nada —su mensaje queda en el
+  Inbox— y el dueño recibe "⚠️ Emma no pudo responder" (`notifyOwnerUnanswered`
+  en `handler.ts`).
+- **El lugar de procesamiento se suelta al terminar de pensar**: de los 5
+  (`MAX_CONCURRENT_PROCESSING`), cada texto suelta el suyo apenas vuelve
+  `generateReply`, antes de enviar — la fila de WhatsApp de un número (segundos
+  por mensaje) ya no frena a los demás negocios. El orden por cliente lo sigue
+  dando `withSenderLock`.
 
 ## Archivos críticos (leer antes de cambiar)
 
@@ -429,6 +449,12 @@ el destino de una foto que el modelo igual nunca ve. Lo aplica
   "¿Emma apagada?" corre antes que el de fotos, las fotos que lleguen DESPUÉS del
   primer grupo ya no se reenvían (decisión del 2026-09-28: el dueño ya sigue ese
   chat).
+- **Texto + foto mandados juntos** ("listo" + la captura): el texto espera 4 s
+  (`MESSAGE_DEBOUNCE_MS`) y la foto 10 s, así que el texto se procesaba primero y
+  el cliente recibía "Aún no me llega la captura" segundos antes de "Recibido ✅".
+  Ahora, si al ir a contestar un texto hay fotos del mismo cliente esperando
+  (`hasPendingImages`) y el paso tiene `onImage.pause`, el texto no se contesta
+  ni se llama a la IA: la respuesta es la de la foto. El texto queda guardado.
 - Una foto deja UNA fila en el historial (el placeholder de `processMessage`).
   `handleCustomerImage` solo agrega otra cuando es de pago: esas llevan
   instrucciones para el modelo ("NO llames book_appointment…").
@@ -445,7 +471,7 @@ respuesta y lo que lee el modelo. El chat del dueño no cambia.
 | Sticker, video (y GIF), documento, ubicación, contacto (`IGNORED_CUSTOMER_FORMATS`) | silencio |
 | Audio / nota de voz | "solo puedo leer mensajes escritos…" (`AUDIO_REPLY_VARIANTS`, 1 vez cada 10 min) |
 | Foto en un paso con `onImage`, o con pago esperado / cita pendiente / adelanto | se atiende (reenvío, respuesta) |
-| Foto fuera de eso | silencio |
+| Foto fuera de eso | silencio. Con `earlyImages: 'continue'` en el archivo del negocio (Tecmin): tampoco se reenvía, pero Emma sigue el paso con una marca de que llegó y la pide de nuevo cuando corresponde |
 
 El corte va en `processMessage` justo después de guardar el mensaje y ANTES de
 los gates: un sticker durante la pausa del bot no escala ni avisa al dueño. Lo
@@ -1050,6 +1076,19 @@ Si falla alguna, el archivo **se salta**: corre lo guardado o el preset y queda
 un `logger.error` en cada turno. Un archivo roto no tumba el servidor ni a otros
 negocios. `business:show` dice cuál corre y por qué.
 
+Tres opciones más del archivo, solo para ese negocio (2026-09-30, Tecmin):
+**`leanPrompt: true`** (prompt corto de `prompts.lean.ts`: sin los bloques de
+agenda y otros rubros, conserva todas las reglas anti-invento; −44% de tokens en
+Tecmin; sin la opción, el prompt sale byte por byte igual),
+**`escalateWhen`** (reemplaza el "usar cuando…" de `escalate_to_human`, que dice
+"pregunta por pagos" — en una venta por chat eso es la señal de cierre),
+**`earlyImages: 'continue'`** (ver la tabla de formatos) y **`answers`** (2026-10-01:
+respuestas del dueño a las preguntas frecuentes —docentes, horarios, trabajo,
+validez—, una por línea; solo con `leanPrompt`, van como "# Respuestas del negocio"
+después de las instrucciones del dueño. Existen porque `instructions` tiene el tope
+de 2.000 caracteres del panel —Tecmin va en 1.979— y una pregunta sin respuesta
+era una que el modelo inventaba).
+
 Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions`,
 `collectData` y `requiresDeposit: false`** por encima de `messages.greeting`,
 `assistant.tone`, `assistant.customInstructions`, `collectDataFields` y
@@ -1099,6 +1138,25 @@ resultados, y los adjuntos (link firmado, no se envían).
   flag apagado, `restartWhatsappFor` también se niega ("Conectar" del admin,
   cambio de número, resume): el admin local no puede abrir una segunda sesión de
   un número que ya tiene Railway.
+
+### Test masivo de leads (`qa/leads/`)
+
+Leads simulados (gpt-4o-mini, 47 perfiles con semilla en `profiles.ts`) que
+entran por `handleIncomingMessage`, el mismo punto que usa `server.ts`. Corre como
+archivo de vitest aparte (`vitest.leads.config.ts`; `npm test` no lo toma) para
+poder reemplazar módulos con `vi.mock`, y solo contra dev (guard + marcador +
+número del bot `+999`). Diferencias con prod, todas en el arnés, ninguna en el
+código de Emma:
+- Cliente de WhatsApp falso que anota cada envío (`fakeWhatsapp.ts`).
+- Las descargas de fotos (WhatsApp y S3) devuelven bytes de relleno que dicen de
+  dónde vienen.
+- Modo `functional`: sin pausas anti-ban ni topes de la cola (si no, el tope de
+  200/h vuelve una corrida un día entero). Modo `load`: todo real.
+
+Gasto global con tope: `budget.ts` corta todo al llegar a $1.80 (registro en
+`qa/leads/out/ledger.json`). Resultados en `qa/leads/out/<corrida>/` (ignorado
+por git): `turns.jsonl`, `transcript.txt`, `evaluation.json`. Antes de correr,
+`business:clone:dev` para que la copia de dev sea idéntica a prod.
 
 ### Negocios de prueba (+999)
 

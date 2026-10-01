@@ -75,6 +75,16 @@ export function flushImagesNow(key: string): void {
   flush(key)
 }
 
+/**
+ * ¿Hay fotos de este remitente esperando a que cierre su grupo? La usa el
+ * handler para no contestar un "listo" que llegó junto con la captura: el texto
+ * espera 4 s y la foto 10 s, así que el texto se procesaba primero y el cliente
+ * recibía "Aún no me llega la captura" segundos antes de "Recibido ✅".
+ */
+export function hasPendingImages(key: string): boolean {
+  return groups.has(key)
+}
+
 /** Solo para tests: descarta todo grupo pendiente, resolviendo su espera con null. */
 export function _resetImageBufferForTests(): void {
   for (const [key, group] of groups) {

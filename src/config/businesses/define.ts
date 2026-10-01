@@ -100,6 +100,33 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * nunca se reinicia por tiempo.
    */
   restartAfterHours?: number
+  /**
+   * Cuándo escala Emma, en palabras del negocio: reemplaza el "usar cuando…" de
+   * la herramienta escalate_to_human, que es común a todos los negocios y dice
+   * "pregunta por pagos" — en un negocio que cobra por chat, "¿cómo pago?" es la
+   * señal de cierre, no un motivo para pasar a una persona.
+   */
+  escalateWhen?: string
+  /**
+   * Qué pasa con una foto que llega en un paso que no la pide. Ausente: se
+   * guarda y nada más (silencio, la regla general). `'continue'`: tampoco se
+   * reenvía, pero Emma sigue el paso sabiendo que llegó, para pedirla de nuevo
+   * cuando corresponda en vez de dejar al cliente esperando.
+   */
+  earlyImages?: 'continue'
+  /**
+   * Prompt corto: sin los bloques que existen para agendas y otros rubros
+   * (prompts.lean.ts). Un negocio sin esto recibe el prompt de siempre.
+   */
+  leanPrompt?: boolean
+  /**
+   * Respuestas del negocio a lo que los clientes preguntan seguido (docentes,
+   * horarios, trabajo…), una por línea, para que Emma las use tal cual. Solo con
+   * `leanPrompt`. Viven acá y no en `instructions` porque esas tienen el tope
+   * de 2.000 caracteres del panel, y una respuesta que falta es una que el
+   * modelo inventa.
+   */
+  answers?: string[]
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -121,6 +148,10 @@ export interface BusinessConfig {
   settings: BusinessSettingsOverlay
   fixedMessages: Record<string, FixedMessage>
   restartAfterHours?: number
+  escalateWhen?: string
+  earlyImages?: 'continue'
+  leanPrompt?: boolean
+  answers?: string[]
 }
 
 function overrideOf<F extends FlowType, M extends string>(
@@ -174,5 +205,9 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
     ...(input.restartAfterHours !== undefined
       ? { restartAfterHours: input.restartAfterHours }
       : {}),
+    ...(input.escalateWhen !== undefined ? { escalateWhen: input.escalateWhen } : {}),
+    ...(input.earlyImages !== undefined ? { earlyImages: input.earlyImages } : {}),
+    ...(input.leanPrompt !== undefined ? { leanPrompt: input.leanPrompt } : {}),
+    ...(input.answers !== undefined ? { answers: [...input.answers] } : {}),
   }
 }

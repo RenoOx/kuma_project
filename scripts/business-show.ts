@@ -77,7 +77,18 @@ function showBusiness(business: Business, promptState: string | null): void {
 
   const resolved = compositionFor(business.id, settings)
   out(`Composición: ${SOURCE_LABEL[resolved.source]}`)
-  if (fileConfigFor(business.id) && resolved.source !== 'file') {
+  const file = fileConfigFor(business.id)
+  if (file) {
+    const options = [
+      file.leanPrompt ? 'prompt: liviano' : 'prompt: completo',
+      file.restartAfterHours !== undefined ? `reinicio: ${file.restartAfterHours} h` : '',
+      file.earlyImages ? `foto antes de tiempo: ${file.earlyImages}` : '',
+      file.escalateWhen ? 'escalada: propia del negocio' : '',
+      file.answers?.length ? `respuestas del negocio: ${file.answers.length}` : '',
+    ].filter(Boolean)
+    out(`Opciones del archivo: ${options.join(' · ')}`)
+  }
+  if (file && resolved.source !== 'file') {
     out(`⚠ Hay archivo para este negocio y NO se está aplicando: ${resolved.fileSkipped}`)
   }
   if (resolved.storedSkipped) {
@@ -140,7 +151,10 @@ function showBusiness(business: Business, promptState: string | null): void {
     const config = getStateConfig(flow, promptState)
     // Con el CTA del paso: sin él, el bloque de cierre que se mostraba era el de
     // la rotativa y no el que corre en ese paso.
-    const body = buildSystemPrompt(business, [], settings, [], null, new Set(), {}, config.cta)
+    const body = buildSystemPrompt(business, [], settings, [], null, new Set(), {}, config.cta, {
+      lean: fileConfigFor(business.id)?.leanPrompt === true,
+      answers: fileConfigFor(business.id)?.answers ?? [],
+    })
     const fixed = (config.fixedMessages ?? []).flatMap((id) => {
       const message = fileMessages[id]
       return message ? [{ id, when: message.when ?? '' }] : []
