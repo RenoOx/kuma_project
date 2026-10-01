@@ -137,6 +137,30 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * que se escriben sin tildes. Vale para todos los pasos.
    */
   escalationGate?: { patterns: string[]; insistAfter: string }
+  /**
+   * `false`: Emma no le contesta al dueño. Sus mensajes al número del negocio se
+   * registran y nada más; las notificaciones (fotos, escaladas, avisos) le siguen
+   * llegando. Para un negocio donde el dueño reenvía los avisos y una IA que le
+   * responde solo estorba. Ausente: el asistente del dueño de siempre.
+   */
+  ownerAssistant?: false
+  /**
+   * Lo que se le responde a un audio o nota de voz, tal cual, en vez de las
+   * variantes de siempre. Mismo límite: una vez cada 10 minutos por chat.
+   */
+  audioReply?: string
+  /**
+   * Lo que contesta un chat escalado mientras espera a la persona, tal cual. Va
+   * por encima de `messages.handoff` de la base (bloqueado en el panel).
+   */
+  handoff?: string
+  /**
+   * Las etapas del embudo de ventas del panel, en orden: cada una cuenta las
+   * conversaciones que recibieron alguno de esos mensajes fijos. El panel les
+   * suma adelante "Leads" y atrás "Mandó la foto" y Pagó / No pagó. Ausente: el
+   * panel no muestra el embudo.
+   */
+  funnel?: { label: string; fixedMessages: NoInfer<M>[] }[]
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -148,6 +172,13 @@ export interface BusinessSettingsOverlay {
   instructions?: string
   collectData?: string[]
   requiresDeposit?: false
+  handoff?: string
+}
+
+/** Una etapa del embudo de ventas: las conversaciones que recibieron alguno de estos mensajes fijos. */
+export interface FunnelStage {
+  label: string
+  fixedMessages: string[]
 }
 
 export interface BusinessConfig {
@@ -163,6 +194,9 @@ export interface BusinessConfig {
   leanPrompt?: boolean
   answers?: string[]
   escalationGate?: EscalationGate
+  ownerAssistant?: false
+  audioReply?: string
+  funnel?: FunnelStage[]
 }
 
 function overrideOf<F extends FlowType, M extends string>(
@@ -211,6 +245,7 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
       ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
       ...(input.collectData !== undefined ? { collectData: input.collectData } : {}),
       ...(input.requiresDeposit !== undefined ? { requiresDeposit: input.requiresDeposit } : {}),
+      ...(input.handoff !== undefined ? { handoff: input.handoff } : {}),
     },
     fixedMessages: { ...(input.fixedMessages ?? {}) } as Record<string, FixedMessage>,
     ...(input.restartAfterHours !== undefined
@@ -228,6 +263,16 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
             patterns: input.escalationGate.patterns.map((p) => new RegExp(p)),
             insistAfter: input.escalationGate.insistAfter,
           },
+        }
+      : {}),
+    ...(input.ownerAssistant !== undefined ? { ownerAssistant: input.ownerAssistant } : {}),
+    ...(input.audioReply !== undefined ? { audioReply: input.audioReply } : {}),
+    ...(input.funnel !== undefined
+      ? {
+          funnel: input.funnel.map((stage) => ({
+            label: stage.label,
+            fixedMessages: [...stage.fixedMessages],
+          })),
         }
       : {}),
   }
