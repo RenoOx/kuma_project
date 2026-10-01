@@ -1087,7 +1087,14 @@ respuestas del dueño a las preguntas frecuentes —docentes, horarios, trabajo,
 validez—, una por línea; solo con `leanPrompt`, van como "# Respuestas del negocio"
 después de las instrucciones del dueño. Existen porque `instructions` tiene el tope
 de 2.000 caracteres del panel —Tecmin va en 1.979— y una pregunta sin respuesta
-era una que el modelo inventaba).
+era una que el modelo inventaba) y **`escalationGate`** (`{ patterns, insistAfter }`,
+2026-10-01: `escalate_to_human` solo se ejecuta si el mensaje del CLIENTE coincide
+con un patrón —pide una persona, empresa, reclamo…— o si insiste después de la
+frase `insistAfter`; si no, `toolExecutor` la rechaza con
+`escalation_not_warranted` y el modelo sigue el turno. Nació de dos "sí claro,
+¿dan boleta?" en prod escalados en vez de avanzar al pago: la instrucción sola no
+alcanzaba. Lógica pura en `llm/escalationGate.ts`; patrones sin tildes, se comparan
+contra el texto normalizado).
 
 Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions`,
 `collectData` y `requiresDeposit: false`** por encima de `messages.greeting`,

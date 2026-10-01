@@ -1,6 +1,7 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import type { ImageHandling, NodeIdFor } from '@/modules/conversation/nodeCatalog.js'
 import type { FlowComposition, NodeOverride } from '@/modules/conversation/stateMachine.js'
+import type { EscalationGate } from '@/modules/llm/escalationGate.js'
 import type { FixedMessage } from '@/modules/llm/fixedMessage.js'
 
 // Un negocio cuya conversación se configura en el repo y no en el panel.
@@ -127,6 +128,15 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * modelo inventa.
    */
   answers?: string[]
+  /**
+   * El portero de la escalada (ver llm/escalationGate.ts): escalate_to_human
+   * solo se ejecuta si el mensaje del cliente coincide con algún patrón (motivos
+   * reales: pide una persona, es empresa, reclamo…) o si insiste después de que
+   * Emma ya le dio la frase `insistAfter`. Los patrones son expresiones
+   * regulares que se comparan contra el texto sin tildes y en minúsculas, así
+   * que se escriben sin tildes. Vale para todos los pasos.
+   */
+  escalationGate?: { patterns: string[]; insistAfter: string }
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -152,6 +162,7 @@ export interface BusinessConfig {
   earlyImages?: 'continue'
   leanPrompt?: boolean
   answers?: string[]
+  escalationGate?: EscalationGate
 }
 
 function overrideOf<F extends FlowType, M extends string>(
@@ -209,5 +220,15 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
     ...(input.earlyImages !== undefined ? { earlyImages: input.earlyImages } : {}),
     ...(input.leanPrompt !== undefined ? { leanPrompt: input.leanPrompt } : {}),
     ...(input.answers !== undefined ? { answers: [...input.answers] } : {}),
+    // Compilados al cargar el archivo: una expresión inválida rompe al importar
+    // (y en businesses.test), no a mitad de una conversación.
+    ...(input.escalationGate !== undefined
+      ? {
+          escalationGate: {
+            patterns: input.escalationGate.patterns.map((p) => new RegExp(p)),
+            insistAfter: input.escalationGate.insistAfter,
+          },
+        }
+      : {}),
   }
 }
