@@ -90,16 +90,15 @@ function detalleCertificado(precioOriginal: string, precioPromo: string): string
   ]
 }
 
-// Cualquier foto, en cualquier paso (pedido del dueño, 2026-10-01): se le reenvía
-// al dueño, Emma se pausa en ese chat y al cliente le llega solo esto. Antes una
-// foto que llegaba antes de tiempo no se reenviaba y Emma seguía sola: en una
-// prueba respondió "¡Gracias por el comprobante! Procederé con tu inscripción"
-// y el dueño nunca vio la captura. Lo que antes era "¡Recibí tu imagen! Dame un
-// momentito y te confirmo" prometía una confirmación que nadie iba a dar.
+// La foto que Emma PIDIÓ (la captura del pago o el DNI, en solicitar_pago): se le
+// reenvía al dueño, Emma se pausa en ese chat y al cliente le llega solo esto.
+// Una foto que llega en otro paso no se pidió: se guarda en el Inbox y nada más
+// (regla del dueño, 2026-10-01 — antes cualquier foto pausaba a Emma). Sin
+// tiempos ("en breve"): el asesor no tiene horario fijo.
 const FOTO_AL_DUENO = {
   forward: true,
   pause: true,
-  reply: 'Recibido ✅ En breve un asesor se comunicará contigo.',
+  reply: 'Recibido ✅ Un asesor se comunicará contigo 😊',
 }
 
 export default defineBusinessConfig({
@@ -182,7 +181,7 @@ export default defineBusinessConfig({
     'Sede: los cursos son presenciales, solo en Huancayo (Junín); no hay otras sedes ni clases virtuales, y no ofrezcas alojamiento. Los certificados de las certificaciones se envían a todo el Perú.',
     'MTC o licencia de conducir: "Nuestro certificado es de operador por maquinaria; no es una licencia de conducir." Nunca nombres al MTC.',
     'Emisión del certificado: "Lo hacemos al instante."',
-    '¿Cuándo me escribe el asesor?: "En breve un asesor se comunicará contigo." Nunca des un tiempo.',
+    '¿Cuándo me escribe el asesor?: "Un asesor se comunicará contigo 😊". Nunca des un tiempo.',
   ],
 
   // Cuándo pasa a una persona (2026-09-30). El genérico de la herramienta dice
@@ -194,10 +193,35 @@ export default defineBusinessConfig({
   escalateWhen:
     'NUNCA la uses si el cliente acaba de aceptar la oferta ("sí", "sí claro", "dale", "quiero"), aunque en el mismo mensaje pregunte por factura, boleta, cuotas, pagos o cualquier otra cosa: en ese caso avanza con advance_flow y el mensaje de pago o el pedido del DNI es la respuesta. NUNCA la primera vez que pregunta algo que se responde con "Esa consulta te la confirma el asesor 😊" o que está en "Respuestas del negocio". Úsala SOLO si: el cliente pide hablar con una persona o el número o contacto del asesor; vuelve a preguntar algo que ya respondiste con "Esa consulta te la confirma el asesor"; se queja o está molesto; insiste por segunda vez con algo que no puedes responder; pregunta por devoluciones o reembolsos; es una empresa que quiere inscribir a varios trabajadores; o es un alumno actual (horarios, clases, cambios). Al usarla dile: "Te paso con un asesor para que te responda 😊". Una duda de un interesado que no sabes (instalaciones…) NO es motivo: responde "Esa consulta te la confirma el asesor 😊" y sigue. NUNCA la uses por una pregunta que está en "Respuestas del negocio" (trabajo, docentes, horarios…): respóndela tal cual. NUNCA la uses cuando pregunta cómo pagar, qué necesita o si ya puede empezar: eso es la señal para mandar el mensaje de pago o el pedido del DNI.',
 
-  // Desde el 2026-10-01 cada paso del flujo reenvía la foto (FOTO_AL_DUENO), así
-  // que esto solo cubre los dos sin regla propia: el reposo y la despedida. Ahí
-  // la foto no se reenvía, pero Emma sabe que llegó en vez de quedarse callada.
-  earlyImages: 'continue',
+  // Decisiones del dueño para la campaña (2026-10-01):
+  // - Emma solo le NOTIFICA al dueño; él reenvía los avisos y no quiere una IA
+  //   contestándole en ese hilo.
+  // - Los audios no se escuchan ni se transcriben: se le pide texto.
+  // - Sin tiempos: el asesor no tiene horario fijo, así que nunca "en breve".
+  ownerAssistant: false,
+  audioReply: 'No puedo escuchar audios por el momento, te agradecería que me mandaras texto 😊',
+  handoff: 'Un asesor se comunicará contigo 😊',
+
+  // El embudo del panel (Dashboard): quién recibió la oferta y quién recibió el
+  // pedido de pago o del DNI. El panel suma adelante los leads y atrás la foto
+  // pedida y Pagó / No pagó.
+  funnel: [
+    {
+      label: 'Recibió la oferta',
+      fixedMessages: [
+        'beneficiosBasico',
+        'beneficiosAvanzado',
+        'beneficiosMultiple',
+        'detalleCert1a2',
+        'detalleCert3a4',
+        'detalleCert5oMas',
+      ],
+    },
+    {
+      label: 'Recibió el pago o el pedido del DNI',
+      fixedMessages: ['pagoBasico', 'pagoAvanzado', 'pagoMultiple', 'pagoCertificacion'],
+    },
+  ],
 
   // El portero de la escalada (2026-10-01). Dos veces seguidas en prod un "sí
   // claro" con una pregunta de boleta/factura se escaló en vez de mandar el
@@ -254,7 +278,6 @@ export default defineBusinessConfig({
     // interesado? A. Básico…" pegado al final.
     {
       node: 'greeting',
-      onImage: FOTO_AL_DUENO,
       openWith: ['presentacion'],
       mediaFirst: true,
       // El Bloque 2 ya es la pregunta. Sin esto, al volver después de 24 h (ya
@@ -291,7 +314,6 @@ export default defineBusinessConfig({
     // ofrece a cada uno vive en su propio paso.
     {
       node: 'informing',
-      onImage: FOTO_AL_DUENO,
       extraInstructions: [
         'El saludo ya le preguntó si tiene experiencia operando maquinaria o si quiere un curso desde cero. Tu único trabajo acá es saber la respuesta.',
         // R14 (regresión 4): respondía lo de los docentes y la conversación se
@@ -339,7 +361,6 @@ export default defineBusinessConfig({
     // seguidas. Después, este paso solo captura qué curso elige.
     {
       node: 'listado_servicios',
-      onImage: FOTO_AL_DUENO,
       openWith: ['introCursos'],
       catalogOnEnter: 'Cursos',
       extraInstructions: [
@@ -398,7 +419,6 @@ export default defineBusinessConfig({
     // quedaba acá dando el precio en vez de pasar a beneficios.
     {
       node: 'asesoria_perfil',
-      onImage: FOTO_AL_DUENO,
       label: 'Asesoría con experiencia',
       openWith: ['listadoCertificaciones'],
       fixedOnly: true,
@@ -454,7 +474,6 @@ export default defineBusinessConfig({
     // terminar antes de pedir la captura del pago. Cruzan los dos caminos.
     {
       node: 'mostrar_beneficios',
-      onImage: FOTO_AL_DUENO,
       extraInstructions: [
         // Regresión del 2026-10-01: "Sí, ¿cómo hago el pago?" se contestaba con
         // texto y el mensaje de pago o el pedido del DNI nunca salían. Y en prod
