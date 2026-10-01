@@ -493,3 +493,53 @@ describe('a selling business is always open', () => {
     expect(prompt).toContain('45 min')
   })
 })
+
+// El prompt liviano (`leanPrompt` en el archivo del negocio, Tecmin 2026-09-30):
+// sin los bloques de agenda y de otros rubros, pero con TODAS las reglas que
+// impiden inventar. El prompt de siempre no cambia (lo fijan los snapshots).
+describe('buildSystemPrompt — lean', () => {
+  const sales = () =>
+    fakeSettings({
+      flowType: 'sales',
+      services: [{ name: 'Curso básico', priceMin: 220, priceMax: 220, active: true }],
+    })
+  const lean = () =>
+    buildSystemPrompt(fakeBusiness(), [], sales(), [], null, new Set(), {}, false, { lean: true })
+  const full = () => buildSystemPrompt(fakeBusiness(), [], sales(), [], null, new Set(), {}, false)
+
+  it('keeps the anti-invention rules', () => {
+    const prompt = lean()
+    expect(prompt).toContain('NUNCA hagas cuentas')
+    expect(prompt).toContain('NUNCA inventes un número de Yape')
+    expect(prompt).toContain('son marcas internas')
+    expect(prompt).toContain('lista cerrada')
+    expect(prompt).toContain('Curso básico')
+  })
+
+  it('drops the blocks written for agendas and other niches', () => {
+    const prompt = lean()
+    expect(prompt).not.toContain('# Memoria de contexto')
+    expect(prompt).not.toContain('# Cómo presentar el catálogo')
+    expect(prompt).not.toContain('# Mensajes ambiguos')
+    expect(prompt).not.toContain('tinte')
+    // Sin KB, sin el encabezado vacío.
+    expect(prompt).not.toContain('# Conocimiento del negocio')
+  })
+
+  it('numbers the shared cancel rule after its own eight', () => {
+    expect(lean()).toMatch(/\n9\. Si el cliente quiere cancelar/)
+  })
+
+  it('does not re-send the greeting for an isolated "hola" mid-flow', () => {
+    expect(lean()).not.toContain('Un saludo aislado siempre se trata como inicio de conversación')
+  })
+
+  it('is at least 40% shorter than the full prompt', () => {
+    expect(lean().length).toBeLessThan(full().length * 0.6)
+  })
+
+  it('leaves the full prompt as it was when the option is absent', () => {
+    expect(full()).toContain('# Memoria de contexto')
+    expect(full()).toContain('# Cómo presentar el catálogo')
+  })
+})

@@ -290,3 +290,28 @@ export const KUMA_TOOL_NAMES = [
   'correct_field', // corregir un dato → field_corrected
 ] as const
 export type KumaToolName = (typeof KUMA_TOOL_NAMES)[number]
+
+/**
+ * La herramienta de escalar con el "cuándo" del negocio en lugar del genérico.
+ *
+ * El genérico dice "usar cuando el cliente pregunta por pagos": en un negocio que
+ * cobra por el chat, "¿cómo pago?" es la señal de cierre, y Emma escalaba y se
+ * callaba con leads listos para pagar (Tecmin, 2026-09-30: 24 escaladas así en
+ * una prueba). Las demás herramientas, y la de un negocio sin `escalateWhen`,
+ * salen tal cual.
+ */
+export function withBusinessEscalation(
+  tool: ChatCompletionTool,
+  escalateWhen: string | undefined,
+): ChatCompletionTool {
+  if (!escalateWhen || tool.type !== 'function' || tool.function.name !== 'escalate_to_human') {
+    return tool
+  }
+  return {
+    ...tool,
+    function: {
+      ...tool.function,
+      description: `Marca la conversación para que una persona del equipo la atienda. ${escalateWhen}`,
+    },
+  }
+}

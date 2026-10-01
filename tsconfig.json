@@ -33,6 +33,8 @@
     "src/**/*",
     "tests/**/*",
     "scripts/**/*",
+    "qa/**/*",
+    "vitest.leads.config.ts",
     "drizzle.config.ts",
     "vitest.config.ts",
     "vite.config.ts"

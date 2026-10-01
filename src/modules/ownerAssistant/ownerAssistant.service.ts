@@ -6,7 +6,7 @@ import type {
 import { logger } from '@/config/logger.js'
 import type { Message } from '@/db/schema/index.js'
 import * as businessService from '@/modules/business/business.service.js'
-import { openai } from '@/modules/llm/openai.client.js'
+import { createChatCompletion, OpenAIUnavailableError } from '@/modules/llm/openaiGate.js'
 import * as messageRepo from '@/modules/message/message.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { AppError } from '@/shared/errors.js'
@@ -26,7 +26,9 @@ const MAX_TOKENS = 400
 // notifications now take rows of their own.
 const HISTORY_LIMIT = 20
 const MAX_TOOL_ITERATIONS = 5
-const OPENAI_TIMEOUT_MS = 30_000
+// Plazo del turno del dueño contra OpenAI, contando la espera del freno compartido
+// con los clientes (llm/openaiGate.ts) y los reintentos de un 429.
+const TURN_DEADLINE_MS = 60_000
 const FALLBACK_TEXT = 'Disculpá, no pude procesar esa consulta. Probá de nuevo.'
 
 function todayInTimezone(timezone: string): string {
@@ -144,6 +146,7 @@ export async function handle(
     businessId,
     conversationId,
   })
+  const turnDeadline = Date.now() + TURN_DEADLINE_MS
 
   const businessResult = await businessService.getById(businessId)
   if (!businessResult.ok) return businessResult
@@ -187,7 +190,7 @@ export async function handle(
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
     try {
-      completion = await openai.chat.completions.create(
+      completion = await createChatCompletion(
         {
           model: MODEL,
           messages: chatMessages,
@@ -196,11 +199,10 @@ export async function handle(
           temperature: TEMPERATURE,
           max_tokens: MAX_TOKENS,
         },
-        { signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS) },
+        turnDeadline,
       )
     } catch (cause) {
-      const isTimeout =
-        cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
+      const isTimeout = cause instanceof OpenAIUnavailableError && cause.reason === 'timeout'
       return err(
         new AppError({
           code: isTimeout ? 'owner_assistant_timeout' : 'owner_assistant_failed',

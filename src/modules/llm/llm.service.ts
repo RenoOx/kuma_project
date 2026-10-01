@@ -35,7 +35,7 @@ import {
   withoutRepeatedLines,
 } from './fixedMessage.js'
 import type { ExecutedToolCall, GenerateReplyParams, LLMResponse } from './llm.types.js'
-import { openai } from './openai.client.js'
+import { createChatCompletion, OpenAIUnavailableError } from './openaiGate.js'
 import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
 import {
   executeTool,
@@ -45,7 +45,7 @@ import {
   type ToolContext,
   type ToolExecutionResult,
 } from './toolExecutor.js'
-import { kumaTools } from './tools.js'
+import { kumaTools, withBusinessEscalation } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
 const TEMPERATURE = 0.4
@@ -62,7 +62,11 @@ const MAX_TOOL_ITERATIONS = 5
 // (descuento) — complementarios, no competidores. Sigue acotado, no es
 // "sin límite".
 const MAX_FIXED_MESSAGES_PER_TURN = 2
-const OPENAI_TIMEOUT_MS = 30_000
+// Cuánto puede tardar un turno entero en conseguir respuestas de OpenAI,
+// contando la espera del freno y los reintentos de un 429. Con el debounce de
+// 4 s y la fila de envío, la respuesta sigue llegando dentro de ~2 minutos; más
+// allá, el handler avisa al dueño en vez de contestarle un error al cliente.
+const TURN_DEADLINE_MS = 100_000
 const MAX_ITERATIONS_FALLBACK_TEXT =
   'No me quedó claro cómo ayudarte con eso. Un encargado te va a contactar para orientarte mejor.'
 
@@ -78,6 +82,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     businessId: params.businessId,
     conversationId: params.conversationId,
   })
+  const turnDeadline = Date.now() + TURN_DEADLINE_MS
 
   // 1. Business
   const businessResult = await businessService.getById(params.businessId)
@@ -358,9 +363,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // gates, which judge the calls that do come through: the deposit gate
     // stays the authority over book_appointment.
     const allowedToolNames = new Set(config.tools)
-    const stateTools = kumaTools.filter(
-      (t) => t.type === 'function' && allowedToolNames.has(t.function.name),
-    )
+    const stateTools = kumaTools
+      .filter((t) => t.type === 'function' && allowedToolNames.has(t.function.name))
+      .map((t) => withBusinessEscalation(t, fileConfig?.escalateWhen))
     // Every state defines at least one tool today, so this is never empty. The
     // guard is here because OpenAI rejects `tools: []` with a 400 — a state
     // added later without tools should degrade to a plain completion, not an
@@ -391,6 +396,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       servicesWithMedia,
       customerFacts,
       config.cta,
+      { lean: fileConfig?.leanPrompt === true, answers: fileConfig?.answers ?? [] },
     )
     // The node goes last, after the variable tail — the static body has to
     // stay first for the prompt cache, and the final position is where an
@@ -454,7 +460,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
     try {
-      completion = await openai.chat.completions.create(
+      // Por el freno (openaiGate): espera en fila si la cuenta está cerca del
+      // límite y reintenta un 429 hasta el plazo del turno, en vez de rendirse
+      // en 30 s.
+      completion = await createChatCompletion(
         {
           model: MODEL,
           messages: chatMessages,
@@ -463,14 +472,18 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           temperature: TEMPERATURE,
           max_tokens: MAX_TOKENS,
         },
-        { signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS) },
+        turnDeadline,
       )
     } catch (cause) {
-      const isTimeout =
-        cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
+      const unavailable = cause instanceof OpenAIUnavailableError ? cause.reason : null
       return err(
         new AppError({
-          code: isTimeout ? 'llm_timeout' : 'llm_generate_failed',
+          code:
+            unavailable === 'timeout'
+              ? 'llm_timeout'
+              : unavailable
+                ? 'llm_unavailable'
+                : 'llm_generate_failed',
           message: cause instanceof Error ? cause.message : 'unknown error',
           userMessage: 'Disculpa, estoy con un problema técnico.',
           logContext: {
@@ -478,7 +491,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
             conversationId: params.conversationId,
             iteration,
             model: MODEL,
-            timedOut: isTimeout,
+            reason: unavailable,
           },
           cause,
         }),

@@ -6317,7 +6317,7 @@ RUTAS (avanzá con advance_flow SOLO si se cumple una de estas condiciones):
 - id "ruta-cierre": El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.
 
 EJEMPLO DE RESPUESTA (referencia de tono, NO lo copies literal):
-*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
 }
 `;
 
@@ -6432,7 +6432,7 @@ RUTAS (avanzá con advance_flow SOLO si se cumple una de estas condiciones):
 - id "ruta-cierre": El cliente eligió un servicio concreto y quiere avanzar, inscribirse o comprarlo.
 
 EJEMPLO DE RESPUESTA (referencia de tono, NO lo copies literal):
-*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
 }
 `;
 
@@ -6485,7 +6485,7 @@ CASOS ESPECIALES:
 - Varios servicios: uno por uno, no todo junto.
 
 EJEMPLO DE RESPUESTA (referencia de tono, NO lo copies literal):
-*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
 }
 `;
 

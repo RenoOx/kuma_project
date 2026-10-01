@@ -2764,7 +2764,7 @@ Correo: juan@correo.com
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+        "example": "*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
@@ -2995,7 +2995,7 @@ Correo: juan@correo.com
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+        "example": "*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",
@@ -3107,7 +3107,7 @@ exports[`compiled preset flows > sales/no-fields 1`] = `
           "Cliente que pide un servicio que no existe: ofrecé los más parecidos.",
           "Varios servicios: uno por uno, no todo junto.",
         ],
-        "example": "*Plan básico* — S/ 450. ¿Te cuento de qué se trata o preferís ver otro?",
+        "example": "*Plan básico*. ¿Te cuento de qué se trata o preferís ver otro?",
         "objective": "Mostrar los servicios relevantes con su material asociado.",
         "steps": [
           "Cuando vayas a nombrar servicios, llamá show_services con la categoría o los servicios que correspondan a lo que pidió el cliente. Te devuelve cuáles son y manda sola la ficha de cada uno. No los listes de memoria.",

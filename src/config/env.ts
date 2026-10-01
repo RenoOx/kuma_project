@@ -42,6 +42,10 @@ const envSchema = z.object({
   // largo que el de texto porque dos fotos sacadas con la cámara llegan más
   // separadas que dos mensajes escritos. 0 = cada foto sola, como antes.
   IMAGE_DEBOUNCE_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
+  // Tokens por minuto que Emma se permite pedirle a OpenAI, sumando todos los
+  // negocios (la cuenta es una sola). La cuenta permite 200.000; 150.000 deja
+  // colchón para errores de estimación. Ver llm/openaiGate.ts.
+  OPENAI_TPM_BUDGET: z.coerce.number().int().min(10_000).max(10_000_000).default(150_000),
   // Admin endpoints (QR page, etc.). If unset the endpoints return 501.
   ADMIN_SECRET: z.preprocess(
     (v) => (typeof v === 'string' && v.length === 0 ? undefined : v),
