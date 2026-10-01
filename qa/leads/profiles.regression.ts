@@ -424,4 +424,58 @@ export const REGRESSION_PROFILES: LeadProfile[] = [
     },
     seed: 2025,
   },
+  // Prod, 1/10 13:39: "SI CLARO, ¿DAN FACTURA BOLETA?" se escaló en vez de
+  // avanzar. Regla del dueño: un sí se interpreta; dudoso → se pregunta sin
+  // cortar el flujo; escalar solo lo que de verdad no se puede responder.
+  {
+    id: 'R26',
+    category: 'R',
+    title: 'Certificación: sí + preguntas',
+    style: 'rafaga',
+    first: 'hola, quiero certificarme, tengo experiencia operando excavadora y retroexcavadora',
+    persona:
+      'Operas excavadora y retroexcavadora hace años. Eliges la opción A. Cuando te preguntan "¿Realizamos tus certificados?" respondes "si claro, dan factura o boleta? cuanto demora?". Cuando te piden el DNI, lo mandas.',
+    attachments: ['dni'],
+    expected: {
+      path: 'certificacion',
+      final: ['CIERRE-DNI'],
+      behavior:
+        'El "si claro" con preguntas es un sí claro: le llega el pedido del DNI en ese turno, sin responder las preguntas y sin escalar. [prod 1/10 13:39]',
+    },
+    seed: 2026,
+  },
+  {
+    id: 'R27',
+    category: 'R',
+    title: 'Curso: "SI CLARO, COMO, DAN FACTURA BOLETA?"',
+    style: 'seco',
+    first: 'AD',
+    persona:
+      'No tienes experiencia. Eliges la C. Al descuento respondes exactamente "SI CALRO, COMO , ES DAN FACTURA BOLETA?". Cuando te dan el Yape, pagas y mandas la captura.',
+    attachments: ['captura'],
+    expected: {
+      path: 'curso',
+      final: ['CIERRE-PAGO'],
+      behavior:
+        'Le llega el mensaje de pago de S/ 150 en ese turno; no escala ni responde lo de factura/boleta. [prod 1/10 13:39, el caso tal cual]',
+    },
+    seed: 2027,
+  },
+  {
+    id: 'R28',
+    category: 'R',
+    title: 'Respuesta dudosa al descuento',
+    style: 'corto',
+    first: 'AD',
+    persona:
+      'No tienes experiencia. Eliges el básico. Al descuento respondes "mmm y dan factura?". Si te vuelven a preguntar si quieres el descuento, dices "si". Después pagas y mandas la captura.',
+    attachments: ['captura'],
+    expected: {
+      path: 'curso',
+      final: ['CIERRE-PAGO'],
+      behavior:
+        'Al "mmm y dan factura?" responde corto y vuelve a "¿Te gustaría obtener tu descuento?", sin avanzar ni escalar; con el "si" manda el pago. [regla del dueño 1/10]',
+    },
+    seed: 2028,
+  },
 ]

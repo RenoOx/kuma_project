@@ -188,8 +188,11 @@ export default defineBusinessConfig({
   // Cuándo pasa a una persona (2026-09-30). El genérico de la herramienta dice
   // "si pregunta por pagos", y Emma escalaba —y se callaba— con leads que
   // preguntaban "¿cómo pago?" listos para cerrar: 24 escaladas así en la prueba.
+  // Los NUNCA van primero (prod, 1/10 13:39): el modelo lee esto al elegir la
+  // herramienta, y con la lista de motivos adelante escaló "SI CLARO, ¿DAN
+  // FACTURA BOLETA?" en vez de mandar el pago.
   escalateWhen:
-    'Úsala SOLO si: el cliente pide hablar con una persona o el número o contacto del asesor; vuelve a preguntar algo que ya respondiste con "Esa consulta te la confirma el asesor"; se queja o está molesto; insiste por segunda vez con algo que no puedes responder; pregunta por devoluciones o reembolsos; es una empresa que quiere inscribir a varios trabajadores; es un alumno actual (horarios, clases, cambios); o su tema no es inscribirse a un curso o certificación. Al usarla dile: "Te paso con un asesor para que te responda 😊". Una duda de un interesado que no sabes (instalaciones…) NO es motivo: responde "Esa consulta te la confirma el asesor 😊" y sigue. NUNCA la uses por una pregunta que está en "Respuestas del negocio" (trabajo, docentes, horarios…): respóndela tal cual. NUNCA la uses cuando pregunta cómo pagar, qué necesita o si ya puede empezar: eso es la señal para mandar el mensaje de pago o el pedido del DNI.',
+    'NUNCA la uses si el cliente acaba de aceptar la oferta ("sí", "sí claro", "dale", "quiero"), aunque en el mismo mensaje pregunte por factura, boleta, cuotas, pagos o cualquier otra cosa: en ese caso avanza con advance_flow y el mensaje de pago o el pedido del DNI es la respuesta. NUNCA la primera vez que pregunta algo que se responde con "Esa consulta te la confirma el asesor 😊" o que está en "Respuestas del negocio". Úsala SOLO si: el cliente pide hablar con una persona o el número o contacto del asesor; vuelve a preguntar algo que ya respondiste con "Esa consulta te la confirma el asesor"; se queja o está molesto; insiste por segunda vez con algo que no puedes responder; pregunta por devoluciones o reembolsos; es una empresa que quiere inscribir a varios trabajadores; es un alumno actual (horarios, clases, cambios); o su tema no es inscribirse a un curso o certificación. Al usarla dile: "Te paso con un asesor para que te responda 😊". Una duda de un interesado que no sabes (instalaciones…) NO es motivo: responde "Esa consulta te la confirma el asesor 😊" y sigue. NUNCA la uses por una pregunta que está en "Respuestas del negocio" (trabajo, docentes, horarios…): respóndela tal cual. NUNCA la uses cuando pregunta cómo pagar, qué necesita o si ya puede empezar: eso es la señal para mandar el mensaje de pago o el pedido del DNI.',
 
   // Desde el 2026-10-01 cada paso del flujo reenvía la foto (FOTO_AL_DUENO), así
   // que esto solo cubre los dos sin regla propia: el reposo y la despedida. Ahí
@@ -432,10 +435,14 @@ export default defineBusinessConfig({
       onImage: FOTO_AL_DUENO,
       extraInstructions: [
         // Regresión del 2026-10-01: "Sí, ¿cómo hago el pago?" se contestaba con
-        // texto ("la preinscripción es por Yape…", "¿tenés tu DNI a mano?") y
-        // el mensaje de pago o el pedido del DNI nunca salían. Lo primero del
-        // paso es esto, antes que cualquier otra cosa.
-        'LO PRIMERO: si los mensajes de este paso ya le llegaron y el alumno responde algo positivo ("sí", "acepto", "quiero inscribirme", "¿cómo pago?", "¿qué necesito?", "¿qué envío?", "¿con el descuento cuánto me queda?"), llamá advance_flow con la ruta "continua" en ese mismo turno y NO escribas nada: el mensaje de pago (curso) o el pedido del DNI (certificación) es la respuesta. Vale aunque en el mismo mensaje pregunte por efectivo, cuotas, factura o el total: NO respondas esas preguntas.',
+        // texto y el mensaje de pago o el pedido del DNI nunca salían. Y en prod
+        // (1/10 13:39) "SI CLARO, ¿DAN FACTURA BOLETA?" se escaló en vez de
+        // avanzar. El dueño: un "sí" se INTERPRETA, no se detecta por una
+        // palabra; ante la duda se pregunta, sin cortar el flujo.
+        'Cuando los mensajes de este paso ya le llegaron, lee su respuesta ENTERA en contexto y decide cuál de estos tres casos es:',
+        '1. SÍ CLARO: acepta la oferta, aunque además pregunte otra cosa ("si claro, ¿dan factura?", "dale, ¿cómo pago?", "quiero inscribirme", "¿qué necesito?", "¿con el descuento cuánto me queda?"). Llamá advance_flow con la ruta "continua" en ese mismo turno, NO respondas sus preguntas y NO escales: el mensaje de pago (curso) o el pedido del DNI (certificación) es la respuesta. En certificación es igual, frente a "¿Realizamos tus certificados?".',
+        '2. DUDOSO: no se sabe si acepta ("ok", "mmm", "puede ser", "lo veo", o solo una pregunta sin un sí). Respondé corto (con las "Respuestas del negocio" o "Esa consulta te la confirma el asesor 😊") y cerrá volviendo a la pregunta del paso: "¿Te gustaría obtener tu descuento? 😊" (curso) o "¿Realizamos tus certificados? 😊" (certificación). No avances ni escales.',
+        '3. NO o "lo pienso": "Entendido, estaré al tanto si deseas continuar 😊" y nada más.',
         // G03 ×3 (2026-09-30): "el curso C" recibió el detalle de la
         // certificación C y el pedido de DNI. La letra se repite en los dos
         // caminos; la ruta por la que se entró no.
@@ -458,7 +465,7 @@ export default defineBusinessConfig({
       // "volvé a mandarlo", y a leads de curso les llegó "¿Realizamos tus
       // certificados?" (R01#3, R02#1, R16#1).
       edgeCases: [
-        'Si pregunta algo antes de decidir, contestá corto con lo que sabés (sin repetir mensajes fijos) y preguntale si quiere continuar con su inscripción.',
+        'Si pregunta algo antes de decidir, es el caso DUDOSO: contestá corto con lo que sabés (sin repetir mensajes fijos) y volvé a la pregunta del paso.',
       ],
       // Los 2 mensajes fijos SON la respuesta: el último ya termina con su
       // pregunta. Cualquier texto propio de Emma en ese turno se descarta en
@@ -480,7 +487,7 @@ export default defineBusinessConfig({
       routes: [
         {
           id: 'continua',
-          when: 'El alumno responde algo positivo al descuento (curso) o a "¿Realizamos tus certificados?" (certificación): sí, acepto, quiero inscribirme, o pregunta cómo pagar, qué necesita, qué enviar o cuánto le queda con el descuento — aunque pregunte además por efectivo, cuotas o factura.',
+          when: 'Solo con un SÍ CLARO al descuento (curso) o a "¿Realizamos tus certificados?" (certificación): sí, sí claro, dale, acepto, quiero inscribirme, o pregunta cómo pagar, qué necesita, qué enviar o cuánto le queda con el descuento — aunque pregunte además por efectivo, cuotas, factura o boleta.',
           to: 'solicitar_pago',
         },
       ],
@@ -507,7 +514,7 @@ export default defineBusinessConfig({
       ].join('\n'),
       example: 'Perfecto, quedo atenta 😊',
       edgeCases: [
-        'Si pregunta algo más antes de mandar la captura o el DNI, respondé corto y recordale que la espera.',
+        'Si pregunta algo más antes de mandar la captura o el DNI, respondé corto (con las "Respuestas del negocio" o "Esa consulta te la confirma el asesor 😊") y cerrá pidiendo el requisito: "¿Me envías la captura del pago? 😊" (curso) o "¿Me envías la foto de tu DNI? 😊" (certificación). No escales por eso.',
       ],
       // El monto va en un mensaje fijo por curso, no en una lista dentro de
       // las instrucciones: con la lista, el modelo le cobró S/ 100 (BÁSICO) a
