@@ -1,11 +1,9 @@
 import type {
   ChatCompletion,
   ChatCompletionMessageParam,
-  ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions.js'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
-import type { Message } from '@/db/schema/index.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
@@ -22,12 +20,12 @@ import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { isIgnoredForModel } from '@/modules/whatsapp/messageKind.js'
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
+import { historyToChatMessages } from './chatHistory.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
 import {
   type FixedOutbound,
@@ -73,44 +71,6 @@ const MAX_ITERATIONS_FALLBACK_TEXT =
 // stepOwesFixedMessage en fixedMessage.ts.
 const FIXED_MESSAGE_PENDING_INSTRUCTION =
   'Este paso responde con su mensaje fijo y todavía no lo mandaste. Mandalo ahora con send_fixed_message (ver MENSAJES FIJOS del paso actual) y no escribas nada propio. Recién después se avanza.'
-
-function convertHistoryToChatMessages(history: Message[]): ChatCompletionMessageParam[] {
-  const out: ChatCompletionMessageParam[] = []
-  for (const msg of history) {
-    if (msg.role === 'system') continue
-    if (msg.role === 'tool') {
-      if (!msg.toolCallId) continue
-      out.push({
-        role: 'tool',
-        tool_call_id: msg.toolCallId,
-        content: msg.content,
-      })
-      continue
-    }
-    if (msg.role === 'assistant') {
-      // toolCalls is stored as the raw OpenAI shape per the Día 7 decision.
-      const stored = msg.toolCalls as ChatCompletionMessageToolCall[] | null | undefined
-      if (stored && stored.length > 0) {
-        out.push({
-          role: 'assistant',
-          content: msg.content === '' ? null : msg.content,
-          tool_calls: stored,
-        })
-      } else {
-        out.push({ role: 'assistant', content: msg.content })
-      }
-      continue
-    }
-    if (msg.role === 'user') {
-      // Emojis sueltos y multimedia ignorada (sticker, video…) quedan guardados
-      // para el Inbox, pero el modelo no los lee: si los viera, "no influyen" sería
-      // mentira — un "😂" en el historial le cambiaba el tono de la respuesta.
-      if (isIgnoredForModel(msg.content)) continue
-      out.push({ role: 'user', content: msg.content })
-    }
-  }
-  return out
-}
 
 export async function generateReply(params: GenerateReplyParams): Promise<Result<LLMResponse>> {
   const log = logger.child({
@@ -462,7 +422,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   const chatMessages: ChatCompletionMessageParam[] = [
     { role: 'system', content: systemPrompt },
-    ...convertHistoryToChatMessages(history),
+    ...historyToChatMessages(history),
     // Ya guardados, pero el historial se leyó antes de guardarlos.
     ...openingOut.map((m): ChatCompletionMessageParam => ({ role: 'assistant', content: m.text })),
   ]
