@@ -42,6 +42,13 @@ const envSchema = z.object({
   // largo que el de texto porque dos fotos sacadas con la cámara llegan más
   // separadas que dos mensajes escritos. 0 = cada foto sola, como antes.
   IMAGE_DEBOUNCE_MS: z.coerce.number().int().min(0).max(60_000).default(10_000),
+  // Mensajes salientes por hora y por número (sendQueue). 200 es el valor
+  // auditado; con anuncios, un lead de curso son ~17 mensajes y 200/h son ~12
+  // leads por hora. Se sube de a poco desde Railway (300, después 400) mirando
+  // que WhatsApp no avise nada, y se baja igual de rápido sin deploy. Techo 400:
+  // por encima ya choca con el tope de 25 por minuto en los picos, y un error de
+  // tipeo (4000) no tiene que poder desarmar la protección contra el baneo.
+  WA_MAX_PER_HOUR: z.coerce.number().int().min(50).max(400).default(200),
   // Tokens por minuto que Emma se permite pedirle a OpenAI, sumando todos los
   // negocios (la cuenta es una sola). La cuenta permite 200.000; 150.000 deja
   // colchón para errores de estimación. Ver llm/openaiGate.ts.
