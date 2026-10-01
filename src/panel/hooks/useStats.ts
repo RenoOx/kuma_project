@@ -1,6 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { getActivity, getOverview, getStats } from '../api/stats.js'
-import type { ActivityPoint, PanelOverview, PanelStats, StatsPeriod } from '../api/types.js'
+import { getActivity, getFunnel, getOverview, getStats } from '../api/stats.js'
+import type {
+  ActivityPoint,
+  FunnelReport,
+  PanelOverview,
+  PanelStats,
+  StatsPeriod,
+} from '../api/types.js'
 import { POLL_MS } from '../lib/constants.js'
 import { useSession } from '../lib/session.js'
 
@@ -34,5 +40,18 @@ export function useActivity(days = 30) {
     queryFn: () => getActivity(session, days),
     refetchInterval: POLL_MS.dashboard,
     select: (response) => response.data,
+  })
+}
+
+// El embudo de ventas: `null` para un negocio sin `funnel` en su archivo, y
+// ahí el Dashboard no muestra la tarjeta.
+export function useFunnel(period: StatsPeriod) {
+  const session = useSession()
+
+  return useQuery<{ funnel: FunnelReport | null }, Error, FunnelReport | null>({
+    queryKey: ['funnel', session.businessId, period],
+    queryFn: () => getFunnel(session, period),
+    refetchInterval: POLL_MS.dashboard,
+    select: (response) => response.funnel,
   })
 }

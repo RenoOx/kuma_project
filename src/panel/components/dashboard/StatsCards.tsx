@@ -23,15 +23,21 @@ export function StatsCards({
   stats,
   period,
   isLoading,
+  booksAppointments = true,
 }: {
   stats: PanelStats | undefined
   period: StatsPeriod
   isLoading: boolean
+  /** Un negocio que no agenda (venta) no ve "Citas agendadas" ni "Conversión a cita": serían 0 siempre. */
+  booksAppointments?: boolean
 }): React.JSX.Element {
+  const grid = booksAppointments
+    ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-4'
+    : 'grid gap-3 sm:grid-cols-2'
   if (isLoading || !stats) {
     return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
+      <div className={grid}>
+        {(booksAppointments ? [0, 1, 2, 3] : [0, 1]).map((i) => (
           <Card key={i}>
             <CardContent className="space-y-2">
               <Skeleton className="h-3 w-24" />
@@ -44,23 +50,27 @@ export function StatsCards({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className={grid}>
       <StatCard
         label="Conversaciones"
         value={String(stats.conversations)}
         delta={delta(stats.conversations, stats.prevConversations)}
         deltaLabel={PERIOD_LABEL[period]}
       />
-      <StatCard
-        label="Citas agendadas"
-        value={String(stats.appointments)}
-        delta={delta(stats.appointments, stats.prevAppointments)}
-        deltaLabel={PERIOD_LABEL[period]}
-      />
+      {booksAppointments && (
+        <StatCard
+          label="Citas agendadas"
+          value={String(stats.appointments)}
+          delta={delta(stats.appointments, stats.prevAppointments)}
+          deltaLabel={PERIOD_LABEL[period]}
+        />
+      )}
       {/* No previous-period figure comes back for these two, so they show the
           number alone rather than a comparison the API cannot support. */}
       <StatCard label="Respuesta de Emma" value={formatSeconds(stats.avgResponseTime)} />
-      <StatCard label="Conversión a cita" value={`${stats.conversionRate}%`} />
+      {booksAppointments && (
+        <StatCard label="Conversión a cita" value={`${stats.conversionRate}%`} />
+      )}
     </div>
   )
 }

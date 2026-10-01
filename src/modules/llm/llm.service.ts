@@ -184,6 +184,13 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   const fileConfig = fileConfigFor(params.businessId)
 
+  // El último texto de Emma antes de este turno (el mensaje del cliente ya está
+  // en el historial, después). El portero de la escalada lo usa para saber si
+  // el cliente insiste con algo que ya se derivó al asesor.
+  const lastAssistantText =
+    [...history].reverse().find((m) => m.role === 'assistant' && (m.content ?? '').trim() !== '')
+      ?.content ?? null
+
   // Reinicio por inactividad (solo si el archivo del negocio lo pide): un
   // cliente que vuelve después de N horas es una conversación nueva y arranca
   // otra vez desde el saludo, aunque haya quedado a mitad del flujo. Sin esto
@@ -386,6 +393,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // a mitad de turno.
       branches: config.branches,
       fixedMessages: stepFixedMessages,
+      // El portero juzga contra lo que escribió el cliente, no contra lo que
+      // el modelo cree que pidió (ver escalationGate.ts).
+      ...(fileConfig?.escalationGate
+        ? {
+            escalationGate: fileConfig.escalationGate,
+            customerText: params.userMessage,
+            previousAssistantText: lastAssistantText,
+          }
+        : {}),
     }
     const basePrompt = buildSystemPrompt(
       business,

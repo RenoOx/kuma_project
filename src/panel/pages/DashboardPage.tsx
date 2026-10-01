@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import type { StatsPeriod } from '../api/types.js'
 import { ActivityChart } from '../components/dashboard/ActivityChart.js'
+import { FunnelCard } from '../components/dashboard/FunnelCard.js'
 import { OverviewStats } from '../components/dashboard/OverviewStats.js'
 import { StatsCards } from '../components/dashboard/StatsCards.js'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs.js'
 import { useMe } from '../hooks/useMeta.js'
-import { useActivity, useOverview, useStats } from '../hooks/useStats.js'
+import { useActivity, useFunnel, useOverview, useStats } from '../hooks/useStats.js'
 import { nicheCopy } from '../lib/constants.js'
 
 const PERIODS: Array<{ value: StatsPeriod; label: string }> = [
@@ -27,6 +28,7 @@ export function DashboardPage(): React.JSX.Element {
   const stats = useStats(period)
   const overview = useOverview()
   const activity = useActivity(30)
+  const funnel = useFunnel(period)
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
@@ -50,7 +52,14 @@ export function DashboardPage(): React.JSX.Element {
           </Tabs>
         </header>
 
-        <StatsCards stats={stats.data} period={period} isLoading={stats.isLoading} />
+        <StatsCards
+          stats={stats.data}
+          period={period}
+          isLoading={stats.isLoading}
+          booksAppointments={me?.booksAppointments ?? true}
+        />
+
+        <FunnelCard funnel={funnel.data} isLoading={funnel.isLoading} />
 
         <section className="space-y-2">
           <h2 className="text-emma-text text-xs font-medium">Conversaciones por estado</h2>
@@ -59,7 +68,7 @@ export function DashboardPage(): React.JSX.Element {
 
         <ActivityChart data={activity.data} isLoading={activity.isLoading} />
 
-        {(stats.isError || overview.isError || activity.isError) && (
+        {(stats.isError || overview.isError || activity.isError || funnel.isError) && (
           <p className="text-destructive text-xs">
             Algunas métricas no cargaron. Se reintenta solo en unos segundos.
           </p>

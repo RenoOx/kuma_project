@@ -227,6 +227,42 @@ export interface ActivityPoint {
 
 export type StatsPeriod = 'today' | 'week' | 'month'
 
+// Espejo de FunnelReport (modules/panel/funnel.repo.ts). Solo existe para un
+// negocio cuyo archivo declara `funnel`; para el resto llega `null`.
+export interface FunnelStep {
+  label: string
+  count: number
+  /** Sobre los leads del período, 0-100. */
+  pct: number
+}
+
+export interface FunnelPendingItem {
+  conversationId: string
+  customerName: string | null
+  phone: string
+  hoursWaiting: number | null
+}
+
+export interface FunnelEscalatedItem {
+  conversationId: string
+  customerName: string | null
+  phone: string
+  reason: string | null
+  escalatedAt: string | null
+}
+
+export interface FunnelReport {
+  steps: FunnelStep[]
+  pendingValidation: FunnelPendingItem[]
+  escalated: FunnelEscalatedItem[]
+  signals: {
+    escalations: number
+    escalationsBlocked: number
+    unanswered: number
+    audios: number
+  }
+}
+
 // ── Customers ────────────────────────────────────────────────────────────────
 
 export interface CustomerListItem {

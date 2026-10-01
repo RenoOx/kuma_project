@@ -81,6 +81,8 @@ function notifyOwnerUnanswered(params: {
   phone: string
   reason: string
   log: HandlerLogger
+  /** Si hay conversación, queda un evento `emma_unanswered` que cuenta el embudo del panel. */
+  conversationId?: string
 }): void {
   const who = formatPersonName(params.customerName) ?? '(sin nombre)'
   const text = [
@@ -92,6 +94,20 @@ function notifyOwnerUnanswered(params: {
   ownerNotifier.notifyOwner(params.businessId, text).catch((err) => {
     params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
   })
+  // Sin esto, "Emma no pudo responder" solo existía en el WhatsApp del dueño: el
+  // panel no tenía cómo contarlo.
+  if (params.conversationId) {
+    eventsRepo
+      .create({
+        businessId: params.businessId,
+        conversationId: params.conversationId,
+        type: 'emma_unanswered',
+        payload: { reason: params.reason },
+      })
+      .catch((err: unknown) => {
+        params.log.warn({ err }, 'failed to record emma_unanswered event')
+      })
+  }
 }
 
 const PAUSED_REPLY =
@@ -1162,6 +1178,13 @@ async function processMessage(
   // and the stored number usually does not, so a raw comparison sent the owner
   // down the customer path and Emma answered her own boss as a patient.
   if (samePhone(business.ownerWhatsappNumber, phone)) {
+    // Un negocio cuyo archivo apaga el asistente del dueño: Emma solo le
+    // notifica, nunca le contesta (Tecmin, 2026-10-01: el dueño reenvía los
+    // avisos, y una respuesta de la IA en ese hilo solo confunde).
+    if (fileConfigFor(businessId)?.ownerAssistant === false) {
+      log.info({ kind: payload.kind }, 'owner message ignored: owner assistant disabled by file')
+      return
+    }
     const ownerThread = await conversationService.findOrCreateOwnerThread(businessId)
     if (!ownerThread.ok) {
       log.error({ code: ownerThread.error.code }, 'findOrCreateOwnerThread failed')
@@ -1468,7 +1491,10 @@ async function processMessage(
       log,
       humanize: true,
       readKey: raw.key,
-      ...(isAudioFormat(payload.format) ? { text: pickAudioReply() } : {}),
+      // El texto del negocio si su archivo lo declara; si no, las variantes de siempre.
+      ...(isAudioFormat(payload.format)
+        ? { text: fileConfigFor(businessId)?.audioReply ?? pickAudioReply() }
+        : {}),
     })
     return
   }
@@ -1570,6 +1596,7 @@ async function processMessage(
           ? 'OpenAI no respondió a tiempo (mucho tráfico)'
           : 'error al generar la respuesta',
       log,
+      conversationId: conversation.id,
     })
   }
 

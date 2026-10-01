@@ -20,6 +20,11 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
+import {
+  type EscalationGate,
+  escalationAllowed,
+  escalationNotWarrantedInstruction,
+} from './escalationGate.js'
 import { type FixedOutbound, renderFixedMessage, type StepFixedMessage } from './fixedMessage.js'
 
 export interface ToolContext {
@@ -41,6 +46,16 @@ export interface ToolContext {
    * las rutas: el ejecutor rechaza cualquier id que no esté acá.
    */
   fixedMessages?: ReadonlyArray<StepFixedMessage>
+  /**
+   * El portero de la escalada, si el archivo del negocio lo declara. Con él,
+   * escalate_to_human solo se ejecuta con un motivo real en el mensaje del
+   * cliente (ver escalationGate.ts).
+   */
+  escalationGate?: EscalationGate
+  /** El mensaje del cliente de este turno: lo único contra lo que juzga el portero. */
+  customerText?: string
+  /** El último mensaje de Emma antes de este turno, para saber si el cliente insiste. */
+  previousAssistantText?: string | null
 }
 
 export interface ToolAttachment {
@@ -948,6 +963,25 @@ export async function executeTool(
     if (name === 'escalate_to_human') {
       const parsed = escalateArgs.safeParse(args)
       if (!parsed.success) return malformedArgs(name, parsed.error)
+
+      // Sin motivo real en lo que escribió el cliente, no se escala: vuelve
+      // rechazada y el modelo sigue el turno (ver escalationGate.ts).
+      if (context.escalationGate && context.customerText !== undefined) {
+        const decision = escalationAllowed({
+          customerText: context.customerText,
+          previousAssistantText: context.previousAssistantText ?? null,
+          gate: context.escalationGate,
+        })
+        if (!decision.allowed) {
+          return {
+            result: JSON.stringify({
+              error: 'escalation_not_warranted',
+              instruction: escalationNotWarrantedInstruction(context.escalationGate),
+            }),
+            error: 'escalation_not_warranted',
+          }
+        }
+      }
 
       const r = await appointmentService.escalate({
         businessId: context.businessId,

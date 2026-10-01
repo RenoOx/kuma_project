@@ -1,3 +1,4 @@
+import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import { recordSendResult } from './sendTelemetry.js'
 
@@ -23,7 +24,10 @@ const PRIORITY_ORDER: Record<SendPriority, number> = { reply: 0, owner: 1, remin
 export const MIN_GAP_MS = 1_500
 export const MAX_GAP_MS = 2_500
 export const MAX_PER_MINUTE = 25
-export const MAX_PER_HOUR = 200
+// Por entorno desde 2026-10-01 (WA_MAX_PER_HOUR, default 200 = lo auditado): el
+// dueño de Tecmin necesita más leads por hora y sus mensajes no se pueden
+// fusionar. Las pausas entre mensajes y el tope por minuto no cambian.
+export const MAX_PER_HOUR = env.WA_MAX_PER_HOUR
 // Past this depth the number is already talking more than a person would, so
 // the queue stretches its gaps instead of trying to keep up with the backlog.
 export const BACKPRESSURE_DEPTH = 30

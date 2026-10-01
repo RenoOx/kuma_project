@@ -187,6 +187,12 @@ Auditado y cerrado. No modificar sin pedirlo explícitamente:
 Baileys, manejo de sesiones, `sendQueue.ts`, lógica anti-ban, `presence.ts`,
 `healthMonitor.ts`, `sendTelemetry.ts`, `authState.ts`, `sessionPolicy.ts`.
 
+Única excepción, pedida por el dueño de Tecmin (2026-10-01): el tope de mensajes
+por hora de `sendQueue.ts` sale de `WA_MAX_PER_HOUR` (default 200 = lo auditado;
+rango 50–400). Las pausas entre mensajes y el tope por minuto (25) no cambiaron.
+Se sube desde Railway de a poco (300, después 400) y se baja sin deploy si
+WhatsApp avisa algo.
+
 ## Arquitectura del flujo de mensajes (6 capas)
 
 Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
@@ -469,7 +475,7 @@ respuesta y lo que lee el modelo. El chat del dueño no cambia.
 |---|---|
 | Solo emojis (`isEmojiOnly`: "👍", "😂", "🇵🇪") | silencio, ni como "sí" |
 | Sticker, video (y GIF), documento, ubicación, contacto (`IGNORED_CUSTOMER_FORMATS`) | silencio |
-| Audio / nota de voz | "solo puedo leer mensajes escritos…" (`AUDIO_REPLY_VARIANTS`, 1 vez cada 10 min) |
+| Audio / nota de voz | "solo puedo leer mensajes escritos…" (`AUDIO_REPLY_VARIANTS`, 1 vez cada 10 min), o el `audioReply` del archivo del negocio |
 | Foto en un paso con `onImage`, o con pago esperado / cita pendiente / adelanto | se atiende (reenvío, respuesta) |
 | Foto fuera de eso | silencio. Con `earlyImages: 'continue'` en el archivo del negocio (Tecmin): tampoco se reenvía, pero Emma sigue el paso con una marca de que llegó y la pide de nuevo cuando corresponde |
 
@@ -925,6 +931,19 @@ antes del gate de pausa. Guarda en BD, no llama al LLM, no envía nada, early
 return. El dueño recupera el control manualmente o por timeout de 30 min
 (worker `takeoverTimeout.ts`).
 
+### Embudo de ventas (desde 2026-10-01)
+
+Tarjeta del Dashboard, solo para un negocio cuyo archivo declara `funnel`
+(`GET /stats/funnel?period=`, mismo filtro Hoy / Semana / Mes). Cohorte = las
+conversaciones de clientes creadas en el período. Etapas: Leads → las del
+archivo (quién recibió tal mensaje fijo, leído de `messages.tool_calls`) →
+"Mandó la foto pedida" (evento `emma_paused_on_image`) → Pagó / No pagó
+(etiquetas). Debajo, lo que hay que atender HOY ("Por validar" con horas de
+espera, escalados con su motivo) y señales: escaladas, escaladas frenadas por el
+portero, "Emma no pudo responder" (evento `emma_unanswered`, nuevo) y audios.
+Lógica pura en `panel/funnel.ts`, consultas en `panel/funnel.repo.ts`. Un negocio
+que no agenda deja de ver "Citas agendadas" y "Conversión a cita".
+
 ### Polling
 
 Sin WebSockets en V1. Cadencias en `POLL_MS` (`panel/lib/constants.ts`): inbox
@@ -1087,7 +1106,22 @@ respuestas del dueño a las preguntas frecuentes —docentes, horarios, trabajo,
 validez—, una por línea; solo con `leanPrompt`, van como "# Respuestas del negocio"
 después de las instrucciones del dueño. Existen porque `instructions` tiene el tope
 de 2.000 caracteres del panel —Tecmin va en 1.979— y una pregunta sin respuesta
-era una que el modelo inventaba).
+era una que el modelo inventaba) y **`escalationGate`** (`{ patterns, insistAfter }`,
+2026-10-01: `escalate_to_human` solo se ejecuta si el mensaje del CLIENTE coincide
+con un patrón —pide una persona, empresa, reclamo…— o si insiste después de la
+frase `insistAfter`; si no, `toolExecutor` la rechaza con
+`escalation_not_warranted` y el modelo sigue el turno. Nació de dos "sí claro,
+¿dan boleta?" en prod escalados en vez de avanzar al pago: la instrucción sola no
+alcanzaba. Lógica pura en `llm/escalationGate.ts`; patrones sin tildes, se comparan
+contra el texto normalizado).
+
+Y cuatro más del 2026-10-01: **`ownerAssistant: false`** (Emma solo le NOTIFICA
+al dueño: sus mensajes al número del negocio se registran y no se contestan),
+**`audioReply`** (el texto exacto para un audio, en vez de `AUDIO_REPLY_VARIANTS`;
+mismo límite de 1 vez cada 10 min), **`handoff`** (lo que contesta un chat
+escalado, por encima de `messages.handoff`) y **`funnel`** (las etapas del embudo
+de ventas del Dashboard; ver "Embudo de ventas"). Tecmin además tiene `onImage`
+solo en `solicitar_pago`: una foto que no se pidió se guarda y nada más.
 
 Además del flujo, el archivo puede poner **`greeting`, `tone`, `instructions`,
 `collectData` y `requiresDeposit: false`** por encima de `messages.greeting`,

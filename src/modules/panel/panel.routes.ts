@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { logger } from '@/config/logger.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
+import { fileConfigFor } from '@/modules/conversation/flowSource.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import type { Customer } from '@/modules/customer/customer.types.js'
 import { getConnectionState } from '@/modules/whatsapp/clientRegistry.js'
@@ -10,6 +11,7 @@ import type { AppError } from '@/shared/errors.js'
 import { NotFoundError, ValidationError } from '@/shared/errors.js'
 import { normalizePhone } from '@/shared/phone.js'
 import { err, type Result } from '@/shared/result.js'
+import * as funnelRepo from './funnel.repo.js'
 import * as panelRepo from './panel.repo.js'
 import * as panelService from './panel.service.js'
 import { panelAuth, panelBusiness } from './panelAuth.js'
@@ -444,6 +446,22 @@ panelRoutes.get('/api/panel/:businessId/stats', async (c) => {
     window.prevFrom,
   )
   return c.json(stats)
+})
+
+// El embudo de ventas: solo para un negocio cuyo archivo declara `funnel`. Sin
+// etapas devuelve `null` y el panel no muestra la tarjeta. Mismo período que
+// /stats (Hoy / Semana / Mes).
+panelRoutes.get('/api/panel/:businessId/stats/funnel', async (c) => {
+  const query = parseQuery(c, statsSchema)
+  if (!query.ok) return query.res
+
+  const business = panelBusiness(c)
+  const stages = fileConfigFor(business.id)?.funnel
+  if (!stages || stages.length === 0) return c.json({ funnel: null })
+
+  const window = panelService.statsWindow(query.data.period)
+  const funnel = await funnelRepo.getFunnel(business.id, window.from, window.to, stages)
+  return c.json({ funnel })
 })
 
 // Facts the system already knows, rather than a read of how warm each lead is.

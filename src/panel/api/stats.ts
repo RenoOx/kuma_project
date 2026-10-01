@@ -1,5 +1,18 @@
 import { apiGet, type PanelSession } from './client.js'
-import type { ActivityPoint, PanelOverview, PanelStats, StatsPeriod } from './types.js'
+import type {
+  ActivityPoint,
+  FunnelReport,
+  PanelOverview,
+  PanelStats,
+  StatsPeriod,
+} from './types.js'
+
+export function getFunnel(
+  session: PanelSession,
+  period: StatsPeriod,
+): Promise<{ funnel: FunnelReport | null }> {
+  return apiGet<{ funnel: FunnelReport | null }>(session, '/stats/funnel', { period })
+}
 
 export function getStats(session: PanelSession, period: StatsPeriod): Promise<PanelStats> {
   return apiGet<PanelStats>(session, '/stats', { period })

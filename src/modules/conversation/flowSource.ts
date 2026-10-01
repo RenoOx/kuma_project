@@ -52,6 +52,7 @@ export type FileSettingsField =
   | 'instructions'
   | 'collectData'
   | 'requiresDeposit'
+  | 'handoff'
 
 export interface SettingsWithFile {
   settings: BusinessSettings
@@ -76,13 +77,14 @@ export function withFileSettings(
   const file = configs.get(businessId)
   if (!file || file.flowType !== settings.flowType) return { settings, fromFile: [] }
 
-  const { greeting, tone, instructions, collectData, requiresDeposit } = file.settings
+  const { greeting, tone, instructions, collectData, requiresDeposit, handoff } = file.settings
   const fromFile: FileSettingsField[] = []
   if (greeting !== undefined) fromFile.push('greeting')
   if (tone !== undefined) fromFile.push('tone')
   if (instructions !== undefined) fromFile.push('instructions')
   if (collectData !== undefined) fromFile.push('collectData')
   if (requiresDeposit !== undefined) fromFile.push('requiresDeposit')
+  if (handoff !== undefined) fromFile.push('handoff')
   if (fromFile.length === 0) return { settings, fromFile }
 
   return {
@@ -90,7 +92,11 @@ export function withFileSettings(
       ...settings,
       ...(collectData !== undefined ? { collectDataFields: collectData } : {}),
       ...(requiresDeposit !== undefined ? { requiresDeposit } : {}),
-      messages: { ...settings.messages, ...(greeting !== undefined ? { greeting } : {}) },
+      messages: {
+        ...settings.messages,
+        ...(greeting !== undefined ? { greeting } : {}),
+        ...(handoff !== undefined ? { handoff } : {}),
+      },
       assistant: {
         ...settings.assistant,
         ...(tone !== undefined ? { tone } : {}),
