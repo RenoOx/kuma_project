@@ -54,6 +54,24 @@ function pagoCurso(descuento: string): string {
   ].join("\n")
 }
 
+// Los beneficios de un curso, en 3 bloques. Iguales para los tres cursos salvo
+// la duración, que sale de la descripción de cada curso en el panel
+// (2026-09-30): con una sola duración para los tres, la ficha decía "06
+// semanas" y este mensaje "12 semanas" al mismo alumno. {precio} lo completa
+// el código con la inversión semanal del curso elegido.
+function beneficiosDeCurso(duracion: string): string[] {
+  return [
+    [
+      "En este curso la inversión semanal es S/ {precio} que incluye:",
+      "- 03 días de clases teóricas (lunes, martes, miércoles).",
+      "- 01 práctico en el taller (jueves).",
+      "- 01 hora (60 minutos cada estudiante) de operación en el equipo (viernes).",
+    ].join("\n"),
+    `⏳ Duración: ${duracion}.`,
+    "Al final te brindaremos tus certificados y 01 carnet de operador con código QR para que puedas verificar que tus certificados están registrados y subidos al sistema como este 👇😃",
+  ]
+}
+
 // El detalle de una certificación (2026-09-30), en 3 bloques: el precio del
 // curso completo, el "pero como tú ya sabes operar" y el precio promo. Iguales
 // para las 3 opciones salvo los dos montos. La foto del carnet va después del
@@ -273,7 +291,7 @@ export default defineBusinessConfig({
       extraInstructions: [
         "Apenas entrés a este paso, mandá DOS mensajes fijos en el mismo turno, en este orden, con send_fixed_message:",
         "Si eligió un CURSO:",
-        '1. "beneficiosCurso".',
+        '1. Los beneficios de su curso: "beneficiosBasico" (BÁSICO), "beneficiosAvanzado" (AVANZADO), "beneficiosMultiple" (OPERACIÓN MÚLTIPLE).',
         '2. El descuento de su curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
         "Si eligió una CERTIFICACIÓN:",
         '1. El detalle de su opción: "detalleCert1a2" (A, 1 a 2 maquinarias), "detalleCert3a4" (B, 3 a 4 maquinarias), "detalleCert5oMas" (C, 5 maquinarias o más).',
@@ -287,7 +305,9 @@ export default defineBusinessConfig({
       fixedOnly: true,
       cta: false,
       fixedMessages: [
-        "beneficiosCurso",
+        "beneficiosBasico",
+        "beneficiosAvanzado",
+        "beneficiosMultiple",
         "descuentoBasico",
         "descuentoAvanzado",
         "descuentoMultiple",
@@ -355,27 +375,25 @@ export default defineBusinessConfig({
       when: "Al entrar al listado de cursos, antes de las fichas.",
       text: "Genial, ahora te paso un resumen de tus cursos",
     },
-    // La foto de beneficios se sube desde el panel (/asistente → "Fotos de tus
-    // mensajes automáticos"); sin foto, el mensaje sale solo con el texto.
-    // {precio} es la inversión SEMANAL de ese curso (así carga el dueño el
-    // precio de un curso en el panel — no es un monto único por todo el
-    // curso; desde 2026-09-30: Básico 220, Avanzado 260, Múltiple 260). El
-    // cronograma semanal es el mismo para cualquier curso: solo el monto cambia.
-    //
-    // En 3 bloques (2026-09-30): cada uno sale como un mensaje aparte, y la
-    // foto del carnet va después del tercero, justo debajo del "como este 👇".
-    beneficiosCurso: {
-      when: "Eligió un CURSO y ya le mostraste la ruta de cierre.",
-      text: [
-        [
-          "En este curso la inversión semanal es S/ {precio} que incluye:",
-          "- 03 días de clases teóricas (lunes, martes, miércoles).",
-          "- 01 práctico en el taller (jueves).",
-          "- 01 hora (60 minutos cada estudiante) de operación en el equipo (viernes).",
-        ].join("\n"),
-        "⏳ Duración: 12 semanas (03 meses).",
-        "Al final te brindaremos tus certificados y 01 carnet de operador con código QR para que puedas verificar que tus certificados están registrados y subidos al sistema como este 👇😃",
-      ],
+    // Los beneficios, uno por curso porque cambia la duración (ver
+    // beneficiosDeCurso). Las fotos se suben desde el panel (/asistente →
+    // "Fotos de tus mensajes automáticos"), una vez por curso; sin foto, el
+    // mensaje sale solo con el texto. {precio} es la inversión SEMANAL de ese
+    // curso (así carga el dueño el precio en el panel: Básico 220, Avanzado
+    // 260, Múltiple 260). Reemplazan a `beneficiosCurso` (una sola duración).
+    beneficiosBasico: {
+      when: "Eligió el curso BÁSICO.",
+      text: beneficiosDeCurso("6 semanas (01 mes y medio)"),
+      images: true,
+    },
+    beneficiosAvanzado: {
+      when: "Eligió el curso AVANZADO.",
+      text: beneficiosDeCurso("12 semanas (3 meses)"),
+      images: true,
+    },
+    beneficiosMultiple: {
+      when: "Eligió el curso OPERACIÓN MÚLTIPLE.",
+      text: beneficiosDeCurso("22 semanas (5 meses y medio)"),
       images: true,
     },
     // El detalle de cada certificación (2026-09-30): precio del curso completo
