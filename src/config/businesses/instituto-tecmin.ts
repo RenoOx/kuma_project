@@ -87,7 +87,7 @@ function detalleCertificado(precioOriginal: string, precioPromo: string): string
     'Pero como tú ya sabes operar esos equipos',
     [
       `Por solo ${precioPromo} obtienes tus certificados y la inversión incluye:`,
-      '📜 01 certificado físico y digital de cada equipo.',
+      '📜 01 Certificado a nombre del MINEDU.',
       '📖 01 manual digital de cada equipo.',
       '🪪 01 carnet con código QR para que puedas verificar que tu certificado esta registrado y subido al sistema como este 👇😃',
     ].join('\n'),
