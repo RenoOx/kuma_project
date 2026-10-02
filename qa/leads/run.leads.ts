@@ -66,7 +66,7 @@ import { AD_TEXT, type LeadProfile, PROFILES } from './profiles.js'
 import { REGRESSION_PROFILES } from './profiles.regression.js'
 import { type LeadTurn, nextLeadTurn, type TranscriptEntry } from './simulator.js'
 
-const BUSINESS_ID = '4aIwSdMZBY12B06MSSovj'
+const BUSINESS_ID = '33doLX_tC9vrVnaJVfLvZ'
 const LLM_FALLBACK = 'Mmm, algo no salió bien'
 const OWNER_UNANSWERED = 'Emma no pudo responder'
 // Lo que puede tardar en llegar un aviso al dueño que sale "fire-and-forget"

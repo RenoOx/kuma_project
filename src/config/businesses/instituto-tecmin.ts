@@ -1,10 +1,14 @@
 import { defineBusinessConfig } from './define.js'
 
-// Instituto Tecmin (prod, 4aIwSdMZBY12B06MSSovj): el negocio real, con WhatsApp
+// Instituto Tecmin (prod, 33doLX_tC9vrVnaJVfLvZ): el negocio real, con WhatsApp
 // ya conectado. Este archivo manda sobre la base en el flujo, el saludo, los
 // datos a pedir y los mensajes fijos. Los cursos, las certificaciones y sus
 // precios siguen en la base, editables desde el panel
-// (npm run business:show:prod -- 4aIwSdMZBY12B06MSSovj para ver todo junto).
+// (npm run business:show:prod -- 33doLX_tC9vrVnaJVfLvZ para ver todo junto).
+//
+// El 2026-10-02 se mudó acá desde 4aIwSdMZBY12B06MSSovj, que pasó a ser el banco
+// de pruebas ("Instituto Tecmin Test") y se quedó con su configuración. Un
+// negocio no puede estar en dos archivos: el viejo corre su flujo guardado.
 //
 // Es el mismo diseño que Instituto TestIA (dev) — su ensayo — con dos
 // diferencias reales, no cosméticas:
@@ -102,7 +106,7 @@ const FOTO_AL_DUENO = {
 }
 
 export default defineBusinessConfig({
-  businessId: '4aIwSdMZBY12B06MSSovj',
+  businessId: '33doLX_tC9vrVnaJVfLvZ',
   name: 'Instituto Tecmin',
   flowType: 'sales',
 
