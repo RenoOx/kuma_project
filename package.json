@@ -38,6 +38,8 @@
     "business:show:dev": "node scripts/guard-db-env.mjs --expect dev -- tsx scripts/business-show.ts",
     "business:show:prod": "dotenv -e .env -v DATABASE_URL_FROM=PROD_DATABASE_URL -- node scripts/run-with-db.mjs node scripts/guard-db-env.mjs --expect prod -- tsx scripts/business-show.ts",
     "business:clone:dev": "node scripts/guard-db-env.mjs --expect dev -- tsx scripts/business-clone-to-dev.ts",
+    "business:migrate:dev": "node scripts/guard-db-env.mjs --expect dev -- tsx scripts/business-migrate.ts",
+    "business:migrate:prod": "dotenv -e .env -v DATABASE_URL_FROM=PROD_DATABASE_URL -- node scripts/run-with-db.mjs node scripts/guard-db-env.mjs --expect prod -- tsx scripts/business-migrate.ts",
     "qa:evaluate": "tsx qa/leads/evaluate.ts",
     "qa:simulate": "node scripts/guard-db-env.mjs --expect dev -- node qa/leads/cli.mjs",
     "conversation:show:dev": "node scripts/guard-db-env.mjs --expect dev -- tsx scripts/conversation-show.ts",

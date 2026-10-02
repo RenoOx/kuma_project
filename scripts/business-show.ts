@@ -52,7 +52,10 @@ function parseSettings(business: Business): BusinessSettings | null {
 
 function showSummary(business: Business): void {
   const settings = businessSettingsSchema.safeParse(business.settings)
-  const data = settings.success ? settings.data : null
+  // Con lo del archivo encima, igual que el detalle y que businessService: sin
+  // esto, un negocio cuyo archivo aporta `collectData` salía como "ARCHIVO NO
+  // APLICADO" aunque en producción sí se aplique (2026-10-02).
+  const data = settings.success ? withFileSettings(business.id, settings.data).settings : null
   const resolved = compositionFor(business.id, data)
   const flags = [
     resolved.fileSkipped ? `ARCHIVO NO APLICADO: ${resolved.fileSkipped}` : '',
