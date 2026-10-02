@@ -54,7 +54,7 @@ function pagoCurso(descuento: string): string {
     '📒 Folder pioner',
     '📚 Manuales de clases físicos.',
     '',
-    `Al Yape 986547823 (a nombre de: Tecmin Corp SAC). Me envías la captura para confirmar el pago y te brindaremos tus ${descuento} de descuento`,
+    `Al Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Me envías la captura para confirmar el pago y te brindaremos tus ${descuento} de descuento`,
   ].join('\n')
 }
 
@@ -154,7 +154,7 @@ export default defineBusinessConfig({
     'NUNCA hagas cuentas (sumas, restas, multiplicaciones, "con el descuento queda en…") ni digas que no puedes hacerlas. Los únicos montos son los de los mensajes fijos y la lista de servicios. Si pregunta el total o cuánto le queda con el descuento, es INTENCIÓN POSITIVA: sigue el flujo.',
     'CURSOS: el precio es SEMANAL (cómo se paga, no cuánto dura). Duración, solo esta: Básico 6 semanas, Avanzado 12 semanas, Operación Múltiple 22 semanas.',
     'En un curso el ÚNICO pago por aquí es la inscripción de S/ 150, y ese monto solo lo da el mensaje de pago: nunca lo escribas tú. Nunca otro monto a pagar ni la palabra "referencial". Nunca digas que no hay descuento.',
-    'Medio de pago, solo: "Por aquí la inscripción es por Yape al 986547823 (a nombre de Tecmin Corp SAC). Lo demás te lo confirma el asesor 😊". Nunca "sí" ni "no" a efectivo, tarjeta, cuotas, factura ni al contado.',
+    'Medio de pago, solo: "Por aquí la inscripción es por Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Lo demás te lo confirma el asesor 😊". Nunca "sí" ni "no" a efectivo, tarjeta, cuotas, factura ni al contado.',
     'Nunca digas que recibiste o confirmaste un pago, un comprobante o un DNI.',
     'CERTIFICACIONES: un solo pago (el de su detalle), nunca "semanal"; no requiere hacer un curso. Solo se pide el DNI: nunca hables de Yape ni pagos ahí.',
     'En un curso nunca pidas DNI, nombre, correo, teléfono ni fotos.',
@@ -545,7 +545,7 @@ export default defineBusinessConfig({
         'Apenas entrés a este paso, mandá con send_fixed_message el mensaje de pago de lo que eligió:',
         '- Curso: "pagoBasico" (BÁSICO), "pagoAvanzado" (AVANZADO), "pagoMultiple" (OPERACIÓN MÚLTIPLE) (servicio: el nombre COMPLETO de la lista — "BÁSICO - Operación y mantenimiento de equipos", "AVANZADO - Operación y mantenimiento de 3 equipos", "OPERACIÓN MÚLTIPLE Y MANTENIMIENTO DE EQUIPOS").',
         '- Certificación: "pagoCertificacion", con la certificación que eligió.',
-        'No escribas ningún otro monto: en un curso el único pago es la inscripción de S/ 150, que ya va en el mensaje. Si vuelve a preguntar cómo pagar: "Por aquí la inscripción es por Yape al 986547823 (a nombre de Tecmin Corp SAC). Lo demás te lo confirma el asesor 😊" En una certificación no se paga por chat: solo se espera el DNI.',
+        'No escribas ningún otro monto: en un curso el único pago es la inscripción de S/ 150, que ya va en el mensaje. Si vuelve a preguntar cómo pagar: "Por aquí la inscripción es por Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Lo demás te lo confirma el asesor 😊" En una certificación no se paga por chat: solo se espera el DNI.',
         // G01, C02, C06 (2026-09-30): el texto "aquí está" se procesa antes que
         // la foto (que espera 10 s por si vienen más), y Emma contestaba "no
         // recibí la captura" con la foto en camino.
@@ -664,7 +664,7 @@ export default defineBusinessConfig({
       text: descuentoCurso('S/ 800'),
     },
     // Primera inversión de un curso (2026-09-30): S/ 150.00 para los tres, con
-    // lo que incluye y el Yape de Tecmin Corp SAC. Sigue siendo uno por curso
+    // lo que incluye y el Yape del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Sigue siendo uno por curso
     // porque el monto del DESCUENTO que menciona cambia: con los montos en una
     // lista, el modelo ya mezcló una vez cuál era de quién.
     pagoBasico: {
