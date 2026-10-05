@@ -585,7 +585,7 @@ export default defineBusinessConfig({
     // lee el archivo — la IA nunca los ve como opción.
     presentacion: {
       when: 'Al entrar al saludo (conversación nueva, o de vuelta después de 24 h).',
-      text: 'Hola 👋 soy Nicole Perez, asesora comercial del Instituto Tecmin',
+      text: 'Hola 👋👷‍♀️ soy Nicole Perez, asesora comercial del Instituto Tecmin',
     },
     listadoCertificaciones: {
       when: 'Al entrar a la asesoría con experiencia: las 3 certificaciones, sin precio.',
