@@ -35,6 +35,7 @@ import {
   type ImagePurpose,
   type PaymentContext,
 } from '@/modules/whatsapp/imageExpectation.js'
+import { resolveLidPhone } from '@/modules/whatsapp/lidPhone.js'
 import * as mediaForwarder from '@/modules/whatsapp/mediaForwarder.js'
 import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
@@ -66,7 +67,7 @@ import * as presence from '@/modules/whatsapp/presence.js'
 import { markServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { preview } from '@/shared/logRedact.js'
 import { formatPersonName } from '@/shared/name.js'
-import { samePhone } from '@/shared/phone.js'
+import { customerContactLabel, samePhone } from '@/shared/phone.js'
 import { renderTemplate } from '@/shared/templates.js'
 
 // Cuando Emma no puede responder (OpenAI no contestó a tiempo, la base falló),
@@ -1122,7 +1123,8 @@ async function processMessage(
   businessId: string,
   send: SendFn,
   jid: string,
-  phone: string,
+  /** El de `extractPhone`: la clave del candado. Con un LID son sus dígitos. */
+  lidPhone: string,
   payload: Payload,
   /** Suelta el lugar de procesamiento (ver withProcessingSlot). Sin él, se suelta al final. */
   releaseSlot?: () => void,
@@ -1147,6 +1149,28 @@ async function processMessage(
     return
   }
   const business = businessResult.data
+
+  // WhatsApp puede esconder el número detrás de un LID. Si Baileys sabe el real,
+  // o es el del dueño, se usa para rutear y registrar: sin esto el dueño de
+  // Tecmin entró como cliente "+243795362852927" (2026-10-05).
+  const resolvedPhone = await resolveLidPhone(businessId, jid, business.ownerWhatsappNumber)
+  const phone = resolvedPhone ?? lidPhone
+  if (jid.endsWith('@lid') && !resolvedPhone) {
+    // Qué manda WhatsApp cuando no da el número: decide si el @usuario del
+    // cliente sirve para mostrarlo en su lugar.
+    const key = raw.key as WAMessageKey
+    log.info(
+      {
+        jid,
+        remoteJidAlt: key.remoteJidAlt,
+        remoteJidUsername: key.remoteJidUsername,
+        participantUsername: key.participantUsername,
+        addressingMode: key.addressingMode,
+        hasPushName: Boolean(raw.pushName),
+      },
+      'lid without phone: number hidden by WhatsApp',
+    )
+  }
 
   // DEMO COMMAND — #demo <profile> from the verified admin phone switches the
   // business profile instantly. Checked before owner/customer routing so it
@@ -1281,7 +1305,7 @@ async function processMessage(
     notifyOwnerUnanswered({
       businessId,
       customerName: raw.pushName ?? null,
-      phone,
+      phone: customerContactLabel({ phone, waJid: jid }),
       reason: 'no se pudo registrar al cliente en la base',
       log,
     })
@@ -1301,7 +1325,7 @@ async function processMessage(
     notifyOwnerUnanswered({
       businessId,
       customerName: customer.name,
-      phone,
+      phone: customerContactLabel(customer),
       reason: 'no se pudo abrir la conversación en la base',
       log,
     })
@@ -1324,7 +1348,7 @@ async function processMessage(
     notifyOwnerUnanswered({
       businessId,
       customerName: customer.name,
-      phone,
+      phone: customerContactLabel(customer),
       reason: 'no se pudo guardar su mensaje en la base',
       log,
     })
@@ -1440,7 +1464,7 @@ async function processMessage(
     // A nameless customer used to collapse this into "Cliente  - (+51...)",
     // which reads as if the name were the literal word "Cliente".
     const who = formatPersonName(customer.name) ?? '(sin nombre)'
-    const phoneWho = phone
+    const phoneWho = customerContactLabel(customer)
     const pausedText = [
       '⏸️ *Mensaje durante pausa*',
       `Cliente ${who} - (${phoneWho}) escribió mientras el bot está pausado.`,
@@ -1542,7 +1566,7 @@ async function processMessage(
   // la captura" segundos antes de "Recibido ✅" (Tecmin, regresión 4). Si la foto
   // ya está esperando y este paso pausa a Emma al recibirla, la respuesta ES la
   // de la foto: el texto queda guardado (Inbox e historial) y no se llama a la IA.
-  if (payload.kind === 'text' && hasPendingImages(`${businessId}:${phone}`)) {
+  if (payload.kind === 'text' && hasPendingImages(`${businessId}:${lidPhone}`)) {
     const settingsResult = await businessService.getSettings(businessId)
     const flow = resolveBusinessFlow(businessId, settingsResult.ok ? settingsResult.data : null)
     if (getStateConfig(flow, conversation.state).onImage?.pause === true) {
@@ -1590,7 +1614,7 @@ async function processMessage(
     notifyOwnerUnanswered({
       businessId,
       customerName: customer.name,
-      phone,
+      phone: customerContactLabel(customer),
       reason:
         llmResult.error.code === 'llm_unavailable' || llmResult.error.code === 'llm_timeout'
           ? 'OpenAI no respondió a tiempo (mucho tráfico)'

@@ -31,6 +31,7 @@ import { collectedDataOf } from '@/modules/customer/customer.service.js'
 import { toPanelDisplay } from '@/modules/message/messageDisplay.js'
 import * as tagRepo from '@/modules/tag/tag.repo.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
+import { isLidPhone } from '@/shared/phone.js'
 
 // Every query in this file filters on business_id, without exception — the
 // panel is the one surface where a tenant leak would be handing one business
@@ -109,6 +110,8 @@ export interface ConversationListItem {
   /** Names this number has booked under, newest booking first. See `appointmentNamesByCustomer`. */
   appointmentNames: string[]
   phone: string
+  /** El "teléfono" son los dígitos de su LID: WhatsApp no dio el número. */
+  phoneHidden: boolean
   /** The owner's own labels on this thread. Empty for an unlabelled conversation. */
   tags: Tag[]
   status: string
@@ -170,6 +173,7 @@ export async function listConversations(
         customerId: conversations.customerId,
         name: customers.name,
         phone: customers.phone,
+        waJid: customers.waJid,
         status: conversations.status,
         lastMessageAt: conversations.lastMessageAt,
         humanTakeoverAt: conversations.humanTakeoverAt,
@@ -222,6 +226,7 @@ export async function listConversations(
       customerName: formatPersonName(r.name),
       appointmentNames: r.customerId === null ? [] : (names.get(r.customerId) ?? []),
       phone: r.phone ?? '',
+      phoneHidden: isLidPhone(r.phone, r.waJid),
       tags: tagsByConversation.get(r.id) ?? [],
       status: r.status,
       lastMessageAt: r.lastMessageAt?.toISOString() ?? null,
@@ -623,6 +628,8 @@ export interface CustomerListItem {
   /** Names this number has booked under, newest booking first. See `appointmentNamesByCustomer`. */
   appointmentNames: string[]
   phone: string
+  /** El "teléfono" son los dígitos de su LID: WhatsApp no dio el número. */
+  phoneHidden: boolean
   lastSeenAt: string | null
   conversationCount: number
   appointmentCount: number
@@ -650,6 +657,7 @@ export async function listCustomers(
         id: customers.id,
         name: customers.name,
         phone: customers.phone,
+        waJid: customers.waJid,
         lastSeenAt: customers.lastSeenAt,
         whatsappUnreachableAt: customers.whatsappUnreachableAt,
       })
@@ -676,6 +684,7 @@ export async function listCustomers(
       name: formatPersonName(r.name),
       appointmentNames: names.get(r.id) ?? [],
       phone: r.phone,
+      phoneHidden: isLidPhone(r.phone, r.waJid),
       lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
       conversationCount: convCounts.get(r.id) ?? 0,
       appointmentCount: apptCounts.get(r.id) ?? 0,
@@ -814,6 +823,8 @@ function bookedUnderName(businessId: string, term: string, exec: Executor = db) 
 
 export interface CustomerDetail {
   customer: Customer
+  /** El "teléfono" son los dígitos de su LID: WhatsApp no dio el número. */
+  phoneHidden: boolean
   /**
    * What the collect-data step gathered, keyed by the field name the owner
    * wrote. Projected out of `customers.metadata` rather than served raw: the
@@ -870,6 +881,7 @@ export async function getCustomerDetail(
 
   return {
     customer,
+    phoneHidden: isLidPhone(customer.phone, customer.waJid),
     collectedData: collectedDataOf(customer),
     // Derived from the rows already in hand — `appts` is this customer's whole
     // history, newest first, which is exactly what the labels need.
@@ -896,6 +908,8 @@ export interface PanelAppointment {
   customerId: string
   customerName: string | null
   customerPhone: string
+  /** Ver `phoneHidden` de las conversaciones. */
+  customerPhoneHidden: boolean
   service: string
   scheduledAt: string
   durationMinutes: number
@@ -914,6 +928,7 @@ export async function listAppointments(
       appointment: appointments,
       customerName: customers.name,
       customerPhone: customers.phone,
+      customerWaJid: customers.waJid,
     })
     .from(appointments)
     .leftJoin(customers, eq(appointments.customerId, customers.id))
@@ -933,6 +948,7 @@ export async function listAppointments(
       appointmentName(r.appointment, { name: r.customerName ?? null }),
     ),
     customerPhone: r.customerPhone ?? '',
+    customerPhoneHidden: isLidPhone(r.customerPhone, r.customerWaJid),
     service: r.appointment.service,
     scheduledAt: r.appointment.scheduledAt.toISOString(),
     durationMinutes: r.appointment.durationMinutes,

@@ -68,6 +68,8 @@ export interface ConversationListItem {
   /** Names this number has booked under, newest booking first. */
   appointmentNames: string[]
   phone: string
+  /** WhatsApp no dio su número: `phone` son los dígitos de su LID. */
+  phoneHidden: boolean
   /** The owner's own labels on this thread. */
   tags: PanelTag[]
   status: string
@@ -125,6 +127,7 @@ export interface PanelAppointment {
   customerId: string
   customerName: string | null
   customerPhone: string
+  customerPhoneHidden: boolean
   service: string
   scheduledAt: string
   durationMinutes: number
@@ -240,6 +243,8 @@ export interface FunnelPendingItem {
   conversationId: string
   customerName: string | null
   phone: string
+  /** WhatsApp no dio su número: `phone` son los dígitos de su LID. */
+  phoneHidden: boolean
   hoursWaiting: number | null
 }
 
@@ -247,6 +252,8 @@ export interface FunnelEscalatedItem {
   conversationId: string
   customerName: string | null
   phone: string
+  /** WhatsApp no dio su número: `phone` son los dígitos de su LID. */
+  phoneHidden: boolean
   reason: string | null
   escalatedAt: string | null
 }
@@ -271,6 +278,8 @@ export interface CustomerListItem {
   /** Names this number has booked under, newest booking first. */
   appointmentNames: string[]
   phone: string
+  /** WhatsApp no dio su número: `phone` son los dígitos de su LID. */
+  phoneHidden: boolean
   lastSeenAt: string | null
   conversationCount: number
   appointmentCount: number
@@ -289,6 +298,8 @@ export interface CustomerRecord {
 
 export interface CustomerDetail {
   customer: CustomerRecord
+  /** WhatsApp no dio su número: `customer.phone` son los dígitos de su LID. */
+  phoneHidden: boolean
   /**
    * What this customer answered in the capture step, keyed by the field name
    * the owner configured. Empty for a business that collects nothing.

@@ -10,6 +10,7 @@ import type { DateRange } from '../../api/appointments.js'
 import type { OperatingHours, PanelAppointment } from '../../api/types.js'
 import { useIsDesktop } from '../../hooks/useMediaQuery.js'
 import { APPOINTMENT_META, DAY_KEYS } from '../../lib/constants.js'
+import { contactLabel } from '../../lib/utils.js'
 
 interface BusinessHour {
   daysOfWeek: number[]
@@ -75,7 +76,7 @@ export function AppointmentCalendar({
     const meta = APPOINTMENT_META[appointment.status]
     return {
       id: appointment.id,
-      title: `${appointment.customerName ?? appointment.customerPhone} — ${appointment.service}`,
+      title: `${appointment.customerName ?? contactLabel(appointment.customerPhone, appointment.customerPhoneHidden)} — ${appointment.service}`,
       start,
       end,
       backgroundColor: meta.color,

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, like, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import { customers } from '@/db/schema/index.js'
 import type { Customer, NewCustomer } from './customer.types.js'
@@ -14,6 +14,32 @@ export async function findByPhone(
     .where(and(eq(customers.businessId, businessId), eq(customers.phone, phone)))
     .limit(1)
   return row ?? null
+}
+
+/**
+ * La ficha que WhatsApp entrega por este JID. Si hubiera más de una (fichas
+ * anteriores a `wa_jid`), la que escribió último.
+ */
+export async function findByWaJid(
+  businessId: string,
+  waJid: string,
+  exec: Executor = db,
+): Promise<Customer | null> {
+  const [row] = await exec
+    .select()
+    .from(customers)
+    .where(and(eq(customers.businessId, businessId), eq(customers.waJid, waJid)))
+    .orderBy(sql`${customers.lastSeenAt} desc nulls last`)
+    .limit(1)
+  return row ?? null
+}
+
+/** Fichas que llegaron por un `@lid`: las candidatas a tener un teléfono que es el LID. */
+export async function listWithLidJid(businessId: string, exec: Executor = db): Promise<Customer[]> {
+  return exec
+    .select()
+    .from(customers)
+    .where(and(eq(customers.businessId, businessId), like(customers.waJid, '%@lid')))
 }
 
 export async function findById(
@@ -91,6 +117,24 @@ export async function updateMetadata(
   await exec
     .update(customers)
     .set({ metadata, updatedAt: new Date() })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
+/**
+ * Corrige el teléfono de una ficha en el lugar: el LID que se usó como número
+ * pasa a ser el número real, y la ficha conserva su historial, conversaciones y
+ * etiquetas. El que llama verifica antes que ninguna otra ficha tenga ese número
+ * (UNIQUE business_id + phone).
+ */
+export async function updatePhone(
+  businessId: string,
+  id: string,
+  phone: string,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(customers)
+    .set({ phone, updatedAt: new Date() })
     .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
 }
 

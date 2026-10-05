@@ -17,6 +17,7 @@ import {
 } from '@/modules/panel/funnel.js'
 import { QUALIFICATION_TAGS } from '@/modules/tag/tag.types.js'
 import { formatPersonName } from '@/shared/name.js'
+import { isLidPhone } from '@/shared/phone.js'
 
 // El embudo de ventas del panel (Dashboard), para negocios de venta con `funnel`
 // en su archivo. Mismo contrato que panel.repo: TODA consulta filtra por
@@ -32,6 +33,8 @@ export interface FunnelPendingItem {
   conversationId: string
   customerName: string | null
   phone: string
+  /** El "teléfono" son los dígitos de su LID: WhatsApp no dio el número. */
+  phoneHidden: boolean
   /** Horas desde que mandó la foto pedida y Emma se pausó. */
   hoursWaiting: number | null
 }
@@ -40,6 +43,8 @@ export interface FunnelEscalatedItem {
   conversationId: string
   customerName: string | null
   phone: string
+  /** El "teléfono" son los dígitos de su LID: WhatsApp no dio el número. */
+  phoneHidden: boolean
   reason: string | null
   escalatedAt: string | null
 }
@@ -219,6 +224,7 @@ async function getPendingValidation(
       conversationId: conversations.id,
       customerName: customers.name,
       phone: customers.phone,
+      waJid: customers.waJid,
       pausedAt,
     })
     .from(conversationTags)
@@ -241,6 +247,7 @@ async function getPendingValidation(
     conversationId: r.conversationId,
     customerName: formatPersonName(r.customerName),
     phone: r.phone,
+    phoneHidden: isLidPhone(r.phone, r.waJid),
     hoursWaiting:
       r.pausedAt === null
         ? null
@@ -276,6 +283,7 @@ async function getEscalatedInWindow(
       conversationId: conversations.id,
       customerName: customers.name,
       phone: customers.phone,
+      waJid: customers.waJid,
       reason,
       escalatedAt,
     })
@@ -298,6 +306,7 @@ async function getEscalatedInWindow(
     conversationId: r.conversationId,
     customerName: formatPersonName(r.customerName),
     phone: r.phone,
+    phoneHidden: isLidPhone(r.phone, r.waJid),
     reason: r.reason,
     escalatedAt: r.escalatedAt === null ? null : new Date(r.escalatedAt).toISOString(),
   }))

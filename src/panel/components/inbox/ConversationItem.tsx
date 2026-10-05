@@ -1,5 +1,5 @@
 import type { ConversationListItem } from '../../api/types.js'
-import { cn, formatPhone, initials, timeAgo, truncate } from '../../lib/utils.js'
+import { cn, contactLabel, initials, timeAgo, truncate } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Avatar, AvatarFallback } from '../ui/avatar.js'
 import { TagBadge } from './TagBadge.js'
@@ -32,7 +32,7 @@ export function ConversationItem({
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate text-sm font-medium text-emma-text">
-            {formatPhone(conversation.phone)}
+            {contactLabel(conversation.phone, conversation.phoneHidden)}
           </span>
           <span className="text-muted-foreground shrink-0 text-[11px]">
             {timeAgo(conversation.lastMessageAt)}

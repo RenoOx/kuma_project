@@ -3,6 +3,7 @@ import type { Appointment, Business, Customer } from '@/db/schema/index.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { AppError } from '@/shared/errors.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
+import { customerContactLabel } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import type { WhatsappClient } from './baileys.client.js'
 import type { ImagePurpose, PaymentContext } from './imageExpectation.js'
@@ -13,6 +14,10 @@ import { enqueueSend } from './sendQueue.js'
 function ownerJidFromPhone(phone: string): string {
   return `${phone.replace('+', '')}@s.whatsapp.net`
 }
+
+// `waJid` opcional: con él, un cliente cuyo "teléfono" es su LID aparece como
+// número oculto en vez de un +243… que no lleva a nadie.
+type CaptionCustomer = Pick<Customer, 'name' | 'phone'> & { waJid?: string | null }
 
 // Why the owner is seeing this photo at all. Without it they get a picture with
 // no idea what triggered it, which is exactly the noise that makes an owner
@@ -25,7 +30,7 @@ const PURPOSE_LINE: Record<ImagePurpose, string> = {
 export interface ForwardImageParams {
   client: WhatsappClient
   business: Pick<Business, 'id' | 'timezone' | 'ownerWhatsappNumber'>
-  customer: Pick<Customer, 'name' | 'phone'>
+  customer: CaptionCustomer
   image: Buffer
   caption: string | null
   /** Set when the customer has a request still waiting on the owner's call. */
@@ -171,7 +176,7 @@ export function clampSummary(text: string): string {
  */
 export function buildStepImageCaption(params: {
   stepLabel: string
-  customer: Pick<Customer, 'name' | 'phone'>
+  customer: CaptionCustomer
   receivedAt: Date
   timezone: string
   summary: string | null
@@ -189,7 +194,9 @@ export function buildStepImageCaption(params: {
   const said = params.said?.trim()
   const photo = params.photo
   if (photo && photo.total > 1 && photo.index > 0) {
-    const short = [`📷 Foto ${photo.index + 1} de ${photo.total} · ${who ?? params.customer.phone}`]
+    const short = [
+      `📷 Foto ${photo.index + 1} de ${photo.total} · ${who ?? customerContactLabel(params.customer)}`,
+    ]
     if (said) short.push(`💬 "${said}"`)
     return short.join('\n')
   }
@@ -200,7 +207,9 @@ export function buildStepImageCaption(params: {
   const lines = [
     title,
     '',
-    who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
+    who
+      ? `👤 ${who} (${customerContactLabel(params.customer)})`
+      : `👤 ${customerContactLabel(params.customer)}`,
     `🕒 ${formatDateTimeForDisplay(params.receivedAt, params.timezone)}`,
     params.summary?.trim()
       ? `📋 Resumen: ${clampSummary(params.summary)}`
@@ -220,7 +229,7 @@ export function buildStepImageCaption(params: {
  * approve, so it asks the only question left — what should Emma reply?
  */
 export function buildOwnerCaption(params: {
-  customer: Pick<Customer, 'name' | 'phone'>
+  customer: CaptionCustomer
   timezone: string
   caption: string | null
   pendingAppointment: Pick<Appointment, 'service' | 'scheduledAt' | 'customerName'> | null
@@ -250,7 +259,9 @@ export function buildOwnerCaption(params: {
     '',
     // No name worth showing is better than a push name the owner cannot place:
     // the phone is the one identifier that is always true.
-    who ? `👤 ${who} (${params.customer.phone})` : `👤 ${params.customer.phone}`,
+    who
+      ? `👤 ${who} (${customerContactLabel(params.customer)})`
+      : `👤 ${customerContactLabel(params.customer)}`,
   ]
 
   if (params.pendingAppointment) {

@@ -31,6 +31,7 @@ import {
   ValidationError,
 } from '@/shared/errors.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
+import { customerContactLabel } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as appointmentRepo from './appointment.repo.js'
 
@@ -950,6 +951,8 @@ function wallClockMinutesInTimezone(instant: Date, timezone: string): number | n
 interface CustomerContact {
   name: string | null
   phone: string
+  // Con él, un cliente cuyo "teléfono" es su LID se muestra como número oculto.
+  waJid?: string | null
 }
 
 /** Creates the calendar event. Returns its id, or null when it didn't happen. */
@@ -961,12 +964,14 @@ async function mirrorToGoogleCalendar(params: {
 }): Promise<string | null> {
   const { businessId, appointment, customer } = params
   const customerLabel =
-    appointmentName(appointment, customer) || customer?.phone || appointment.customerId
+    appointmentName(appointment, customer) ||
+    (customer ? customerContactLabel(customer) : null) ||
+    appointment.customerId
 
   const result = await googleCalendarService.createEvent({
     businessId,
     summary: `Cita: ${appointment.service} - ${customerLabel}`,
-    description: `Cliente: ${customer?.phone ?? '(sin teléfono)'}\nAgendado vía Kuma (WhatsApp)`,
+    description: `Cliente: ${customer ? customerContactLabel(customer) : '(sin teléfono)'}\nAgendado vía Kuma (WhatsApp)`,
     startDateTime: appointment.scheduledAt,
     durationMinutes: appointment.durationMinutes,
     timezone: params.timezone,
@@ -1059,11 +1064,11 @@ async function notifyOwnerOfPendingRequest(params: {
   service: string
   scheduledAt: Date
   timezone: string
-  customer: { name: string | null; phone: string } | null
+  customer: CustomerContact | null
   displayName: string | null
 }): Promise<void> {
   const who = formatPersonName(params.displayName) ?? '(sin nombre)'
-  const phone = params.customer?.phone ?? '(sin teléfono)'
+  const phone = params.customer ? customerContactLabel(params.customer) : '(sin teléfono)'
 
   const text = [
     '📋 *Nueva solicitud de cita*',
@@ -1104,7 +1109,7 @@ async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
   // template below rendered literally as "Cliente: undefined". Escalations fire
   // for people who never booked, so a missing name is normal here — say so.
   const who = formatPersonName(customer.name) ?? '(sin nombre)'
-  const phone = customer.phone ? `(${customer.phone})` : null
+  const phone = customer.phone ? `(${customerContactLabel(customer)})` : null
   const text = [
     '🔔 *Escalación pendiente*',
     `Cliente: ${who}${phone ? ` ${phone}` : ''}`,
@@ -1789,7 +1794,7 @@ async function notifyOwnerOfPatientConfirmation(params: {
     `👤 ${who} aceptó el nuevo horario`,
     // Carried so the owner can answer with reply_to_customer straight off this
     // card, the same way the pending-request card works.
-    `📱 ${params.customer.phone}`,
+    `📱 ${customerContactLabel(params.customer)}`,
     `${NICHE_SERVICE_EMOJI[params.niche]} ${params.service}`,
     `📅 ${formatRequestDateTime(params.scheduledAt, params.timezone)}`,
   ].join('\n')
