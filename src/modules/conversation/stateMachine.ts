@@ -4,6 +4,7 @@ import { AppError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import {
   blueprintFor,
+  CHOICE_TOOL,
   type ConversationNode,
   EMITTED_TRIGGERS,
   type ExitTarget,
@@ -95,6 +96,41 @@ export interface StateConfig {
   openWith?: string[]
   /** Categoría cuyas fichas manda el código al entrar a este paso (ver llm.service). */
   catalogOnEnter?: string
+  /** Las opciones que se eligen en este paso; la elección la hace el código (ver StepChoices). */
+  choices?: StepChoices
+  /**
+   * En este paso se puede cambiar la elección vigente (la de un paso con
+   * `choices` anterior): mismas opciones, sin cambiar de paso.
+   */
+  rechoose?: boolean
+}
+
+/**
+ * Una opción de un paso con `choices`: su letra, el servicio que es, los
+ * mensajes fijos que salen al elegirla y, si aplica, el rango de cantidad que
+ * la define (ej. 1 a 2 maquinarias; `null` = sin tope).
+ */
+export interface StepChoiceOption {
+  key: string
+  serviceId: string
+  send: string[]
+  count?: [number, number | null]
+  /** Lo que el código manda al entrar a `followUp` si esta es la elección vigente (ej. el pago). */
+  onAccept?: string[]
+}
+
+/**
+ * Las opciones de un paso cuya elección decide el CÓDIGO, no la IA (Tecmin,
+ * 2026-10-06: la IA ofreció la certificación de 5 o más para 2 máquinas, con
+ * gpt-4o-mini y con gpt-4.1-mini). La IA solo dice qué entendió (una letra, o
+ * la lista de lo que el cliente sabe operar); el código elige la opción, avanza
+ * por `route` y manda sus mensajes fijos. Solo desde archivo.
+ */
+export interface StepChoices {
+  route: string
+  options: StepChoiceOption[]
+  /** El paso donde el código manda el `onAccept` de la opción elegida (ej. el pedido de pago). */
+  followUp?: string
 }
 
 export type FlowDefinition = Record<string, StateConfig>
@@ -151,6 +187,10 @@ export interface NodeOverride {
    * archivo. Existe porque si la IA no llamaba show_services, no había fichas.
    */
   catalogOnEnter?: string
+  /** Opciones que elige el código (ver StepChoices). Solo desde archivo. */
+  choices?: StepChoices
+  /** Se puede cambiar la elección vigente en este paso (ver StateConfig.rechoose). */
+  rechoose?: boolean
 }
 
 /** What the owner composed: which nodes, in what order, and their wording. */
@@ -263,6 +303,12 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
     const branches = (override?.branches ?? []).filter(
       (branch) => present.has(branch.to) && branch.to !== id && branch.when.trim() !== '',
     )
+    // Sin la ruta por la que sale, elegir no tendría adónde llevar: se descarta
+    // igual que una ruta a un paso ausente.
+    const choices =
+      override?.choices && branches.some((branch) => branch.id === override.choices?.route)
+        ? override.choices
+        : undefined
     flow[id] = {
       // The routing tool is granted BY having a route, never by the owner
       // picking it: a step with nothing to route to would offer the model a
@@ -272,6 +318,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
         ...(branches.length > 0 ? [ROUTE_TOOL] : []),
         // Igual que la ruta: la herramienta viene con tener algo que mandar.
         ...(fixedMessages.length > 0 ? [FIXED_MESSAGE_TOOL] : []),
+        ...(choices || override?.rechoose ? [CHOICE_TOOL] : []),
       ],
       node: {
         // Objective and steps are the motor and are never the owner's: what
@@ -298,6 +345,8 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(override?.catalogOnEnter?.trim()
         ? { catalogOnEnter: override.catalogOnEnter.trim() }
         : {}),
+      ...(choices ? { choices } : {}),
+      ...(override?.rechoose ? { rechoose: true } : {}),
     }
   })
 
@@ -331,6 +380,7 @@ const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   'correct_field',
   'advance_flow',
   'send_fixed_message',
+  'elegir_opcion',
 ])
 
 export interface FlowProblem {

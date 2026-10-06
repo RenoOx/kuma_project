@@ -92,3 +92,24 @@ export async function getRecentHistory(
     )
   }
 }
+
+/** Las filas con mensajes fijos pedidos, de la más nueva a la más vieja (ver messageRepo). */
+export async function getFixedMessageCalls(
+  businessId: string,
+  conversationId: string,
+  limit = 50,
+): Promise<Result<Array<{ toolCalls: unknown }>>> {
+  try {
+    return ok(await messageRepo.findFixedMessageCalls(businessId, conversationId, limit))
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'message_history_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos cargar el historial.',
+        logContext: { businessId, conversationId },
+        cause,
+      }),
+    )
+  }
+}

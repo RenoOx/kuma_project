@@ -273,11 +273,44 @@ export const kumaTools: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'elegir_opcion',
+      // La IA dice qué entendió; la opción, el precio y los mensajes los pone el
+      // código (ver choices.ts). Por eso pide los datos, no la opción calculada.
+      description:
+        'Registra lo que eligió el cliente entre las opciones de este paso. Pasá UNO de estos datos, tal como lo dijo el cliente: la opción que nombró (aunque la diga con otras palabras), cuántas cosas dijo, o la lista de las que nombró. NO cuentes ni decidas la opción vos: el sistema elige, avanza y le manda la oferta correcta. Después no escribas nada.',
+      parameters: {
+        type: 'object',
+        properties: {
+          opcion: {
+            type: 'string',
+            description:
+              'La letra de la opción que nombró el cliente (A, B, C…), si la nombró, aunque sea con otras palabras ("el básico" → la letra del Básico).',
+          },
+          cantidad: {
+            type: 'integer',
+            description:
+              'Cuántas dijo el cliente, si dio un número ("2 máquinas", "dos", "unas cinco").',
+          },
+          elementos: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Lo que nombró el cliente, uno por elemento, tal cual (ej. ["retroexcavadora", "minicargador"]). No los cuentes.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 export const KUMA_TOOL_NAMES = [
   'advance_flow', // la ruta que escribió el dueño → route_selected
   'send_fixed_message', // un mensaje fijo del negocio, tal cual
+  'elegir_opcion', // elegir una opción del paso (choices) → route_selected
   'check_availability', //revisar horarios
   'book_appointment', // reserrvar
   'confirm_pending_appointment', //confirmar cita pendeinte

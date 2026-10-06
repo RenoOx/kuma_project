@@ -38,6 +38,13 @@ export const ADVANCE_FLOW = 'advance_flow'
  */
 export const SEND_FIXED_MESSAGE = 'send_fixed_message'
 
+/**
+ * Elige una de las opciones de un paso (`choices` en el archivo del negocio).
+ * La IA dice qué entendió; el código elige, avanza y manda los mensajes fijos.
+ * La recibe solo un paso con `choices`.
+ */
+export const ELEGIR_OPCION = 'elegir_opcion'
+
 export const to = (node: string): ExitTarget => ({ node })
 
 /**

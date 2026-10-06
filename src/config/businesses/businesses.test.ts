@@ -186,3 +186,142 @@ describe('compositionFor', () => {
     expect(resolved.fileSkipped).toContain('listado_servicios')
   })
 })
+
+// `choices`: la elección la hace el código, así que un armado imposible tiene
+// que romper al cargar el archivo, no a mitad de una conversación.
+describe('choices in a business file', () => {
+  const certs = [
+    { key: 'A', service: 's1', send: ['m1'], count: [1, 2] },
+    { key: 'B', service: 's2', send: ['m2'], count: [3, 4] },
+    { key: 'C', service: 's3', send: ['m3'], count: [5, null] },
+  ] as const
+
+  function fileWith(choices: unknown) {
+    return () =>
+      defineBusinessConfig({
+        businessId: 'biz-choices',
+        name: 'choices',
+        flowType: 'sales',
+        fixedMessages: { m1: { text: 'uno' }, m2: { text: 'dos' }, m3: { text: 'tres' } },
+        flow: [
+          { node: 'idle' },
+          {
+            node: 'greeting',
+            routes: [{ id: 'elige', when: 'eligió', to: 'informing' }],
+            // biome-ignore lint/suspicious/noExplicitAny: armados inválidos a propósito
+            choices: choices as any,
+          },
+          { node: 'informing' },
+        ],
+      })
+  }
+
+  it('compiles valid choices into the step', () => {
+    const config = fileWith({ route: 'elige', options: certs })()
+    const choices = config.composition.overrides.greeting?.choices
+    expect(choices?.route).toBe('elige')
+    expect(choices?.options.map((o) => [o.key, o.serviceId, o.count])).toEqual([
+      ['A', 's1', [1, 2]],
+      ['B', 's2', [3, 4]],
+      ['C', 's3', [5, null]],
+    ])
+  })
+
+  it.each([
+    ['a route the step does not have', { route: 'otra', options: certs }],
+    [
+      'a repeated letter',
+      { route: 'elige', options: [certs[0], { ...certs[1], key: 'A' }, certs[2]] },
+    ],
+    [
+      'a gap between ranges',
+      { route: 'elige', options: [certs[0], { ...certs[1], count: [4, 4] }, certs[2]] },
+    ],
+    [
+      'an open range that is not the last',
+      { route: 'elige', options: [{ ...certs[0], count: [1, null] }, certs[1]] },
+    ],
+    [
+      'ranges on some options only',
+      { route: 'elige', options: [certs[0], { ...certs[1], count: undefined }] },
+    ],
+    [
+      'an option that sends nothing',
+      { route: 'elige', options: [{ ...certs[0], send: [] }, certs[1]] },
+    ],
+  ])('refuses %s', (_label, choices) => {
+    expect(fileWith(choices)).toThrow()
+  })
+
+  it('gives every file choice a route and messages the file declares', () => {
+    for (const config of BUSINESS_CONFIGS) {
+      for (const [node, override] of Object.entries(config.composition.overrides)) {
+        if (!override.choices) continue
+        expect(
+          override.branches?.map((b) => b.id),
+          node,
+        ).toContain(override.choices.route)
+        for (const option of override.choices.options) {
+          for (const id of option.send)
+            expect(config.fixedMessages[id], `${node}.${id}`).toBeDefined()
+        }
+      }
+    }
+  })
+})
+
+describe('followUp, onAccept and rechoose in a business file', () => {
+  const option = (key: string, extra: Record<string, unknown> = {}) => ({
+    key,
+    service: `s-${key}`,
+    send: ['m1'],
+    ...extra,
+  })
+
+  function fileWith(choices: unknown, rechooseOn: 'informing' | 'confirmed' = 'informing') {
+    return () =>
+      defineBusinessConfig({
+        businessId: 'biz-followup',
+        name: 'followup',
+        flowType: 'sales',
+        fixedMessages: { m1: { text: 'uno' }, pago: { text: 'pago' } },
+        flow: [
+          { node: 'idle' },
+          {
+            node: 'greeting',
+            routes: [{ id: 'elige', when: 'eligió', to: 'informing' }],
+            // biome-ignore lint/suspicious/noExplicitAny: armados inválidos a propósito
+            choices: choices as any,
+          },
+          { node: 'informing', rechoose: rechooseOn === 'informing' },
+          { node: 'confirmed', rechoose: rechooseOn === 'confirmed' },
+        ],
+      })
+  }
+  const valid = {
+    route: 'elige',
+    followUp: 'confirmed',
+    options: [option('A', { onAccept: ['pago'] }), option('B', { onAccept: ['pago'] })],
+  }
+
+  it('compiles followUp, onAccept and rechoose', () => {
+    const config = fileWith(valid)()
+    expect(config.composition.overrides.greeting?.choices?.followUp).toBe('confirmed')
+    expect(config.composition.overrides.greeting?.choices?.options[0]?.onAccept).toEqual(['pago'])
+    expect(config.composition.overrides.informing?.rechoose).toBe(true)
+  })
+
+  it('refuses a followUp that is not a step of the flow', () => {
+    expect(fileWith({ ...valid, followUp: 'collect_data' })).toThrow()
+  })
+
+  it('refuses an option without onAccept when there is a followUp', () => {
+    expect(
+      fileWith({ ...valid, options: [option('A', { onAccept: ['pago'] }), option('B')] }),
+    ).toThrow()
+  })
+
+  it('refuses rechoose on a step no choice leads to', () => {
+    expect(fileWith(valid, 'confirmed')).toThrow()
+  })
+})

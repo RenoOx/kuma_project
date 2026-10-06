@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, lt } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, isNotNull, lt, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import { type Message, messages, type NewMessage } from '@/db/schema/index.js'
 
@@ -35,6 +35,33 @@ export async function findRecentByConversation(
     .orderBy(desc(messages.createdAt))
     .limit(limit)
   return rows.reverse()
+}
+
+/**
+ * Las filas de la conversación con mensajes fijos pedidos (send_fixed_message en
+ * `tool_calls`), de la más nueva a la más vieja. Para la elección vigente
+ * (`currentChoice`): la ventana del historial cuenta filas, y en una charla
+ * larga la oferta puede quedar afuera de esas 20.
+ */
+export async function findFixedMessageCalls(
+  businessId: string,
+  conversationId: string,
+  limit: number,
+  exec: Executor = db,
+): Promise<Array<{ toolCalls: unknown }>> {
+  return exec
+    .select({ toolCalls: messages.toolCalls })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.businessId, businessId),
+        eq(messages.conversationId, conversationId),
+        isNotNull(messages.toolCalls),
+        sql`${messages.toolCalls}::text like '%send_fixed_message%'`,
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(limit)
 }
 
 export async function create(data: NewMessage, exec: Executor = db): Promise<Message> {

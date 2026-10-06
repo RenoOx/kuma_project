@@ -136,6 +136,7 @@ npm run business:show:dev -- --all                      # resumen de todos: fuen
 npm run business:clone:dev -- <id>   # copia config de un negocio de prod (solo lectura) a dev, con números +999
 npm run qa:simulate -- --profiles G01,A01 --runs 1   # test masivo de leads por el handler real (solo dev, gasta OpenAI)
 npm run qa:evaluate -- qa/leads/out/<corrida>        # chequeos automáticos de una corrida (sin OpenAI)
+npm run qa:tecmin -- --runs 3   # prueba fija de Tecmin: chats escritos de punta a punta (solo dev, gasta OpenAI)
 npm run lint             # biome check --write
 npm run typecheck        # tsc --noEmit  +  tsc --noEmit -p src/panel/tsconfig.json
 npm run check            # lint + typecheck + test (ejecutar antes de commit)
@@ -428,6 +429,35 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   repetición** de `sentServiceImages.ts`: entrar al paso es la decisión de
   informar, y en pruebas seguidas la ventana las bloqueaba. El anti-ban sigue
   siendo la cola de envío. En los turnos siguientes dentro del paso no se reenvía nada.
+- **`choices`** (2026-10-06) — las opciones de un paso las elige el **código**, no
+  la IA: `{ route, options: [{ key: 'A', service: '<id>', send: ['msg'], count?: [1, 2] }] }`.
+  Nació de pedirle a la IA "2 máquinas → opción A": con gpt-4o-mini y con
+  gpt-4.1-mini ofreció la de 5 o más (Tecmin). Una letra o un tramo solos ("B",
+  "la c", "1 a 2") se resuelven sin llamar al modelo (`parseChoice` en
+  `llm/choices.ts`, inyectado como si el modelo hubiera llamado la herramienta).
+  Con otras palabras, la IA llama `elegir_opcion` con lo que entendió —la letra,
+  `cantidad` o la lista de `elementos`— y el código cuenta (`countDistinct`,
+  `optionForCount`). Al elegir: sale por `route` y manda los mensajes de `send`
+  con el servicio de la opción, guardados en el historial como
+  `send_fixed_message` (el embudo y el resumen del aviso los leen de ahí).
+  `advance_flow` por esa ruta se rechaza: sin la oferta, el paso siguiente queda
+  vacío. **El mapeo letra → opción vive solo ahí**: no se repite en
+  instrucciones ni en el `when` de los mensajes. Se valida al cargar el archivo
+  (`checkedChoices` en `define.ts`). Prueba fija: `npm run qa:tecmin`.
+  **La elección vigente** (`currentChoice` en `llm/choices.ts`) es la última
+  opción elegida, leída del historial (`messageService.getFixedMessageCalls`): el
+  último mensaje fijo que es de UNA sola opción (los compartidos, como
+  "¿Realizamos tus certificados?", no dicen cuál fue). Sobre ella:
+  - **`followUp` + `onAccept`**: al entrar al paso `followUp` (Tecmin: el pago),
+    el código manda el `onAccept` de la opción vigente (el pago del curso
+    elegido, o el pedido del DNI). Lo elegía la IA con una lista propia y una vez
+    cobró el descuento de otro curso. Sin elección vigente: `log.error` y se deriva.
+    No se llama `then`: un objeto con `then` parece una promesa.
+  - **`rechoose: true`** en un paso (Tecmin: beneficios): se puede cambiar la
+    opción vigente ("mejor la B"), mismas opciones, sin cambiar de paso. Solo en
+    un turno que empezó en ese paso.
+  - Cada oferta de Tecmin empieza con `*{servicio}*`: el alumno ve qué entendió
+    Emma y lo corrige antes de pagar.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese

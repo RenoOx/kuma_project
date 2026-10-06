@@ -1,6 +1,10 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import type { ImageHandling, NodeIdFor } from '@/modules/conversation/nodeCatalog.js'
-import type { FlowComposition, NodeOverride } from '@/modules/conversation/stateMachine.js'
+import type {
+  FlowComposition,
+  NodeOverride,
+  StepChoices,
+} from '@/modules/conversation/stateMachine.js'
 import type { EscalationGate } from '@/modules/llm/escalationGate.js'
 import type { FixedMessage } from '@/modules/llm/fixedMessage.js'
 
@@ -69,6 +73,37 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * ventana de repetición. En ese turno el texto de Emma es exactamente el `cta`.
    */
   catalogOnEnter?: string
+  /**
+   * Opciones que se eligen en este paso, y la elección la hace el CÓDIGO: una
+   * letra o un tramo se resuelven sin la IA; si el cliente lo dice con otras
+   * palabras, la IA solo pasa lo que entendió (la letra, cuántas, o la lista de
+   * lo que nombró) y el código cuenta. Al elegir, sale por `route` y manda los
+   * mensajes de `send` con el servicio de la opción. El mapeo letra → opción vive
+   * SOLO acá: no se repite en instrucciones. Ver StepChoices en stateMachine.
+   */
+  choices?: {
+    route: string
+    /**
+     * El paso donde el código manda el `onAccept` de la opción elegida (ej. el
+     * pedido de pago). Así el mensaje de pago no lo elige la IA.
+     */
+    followUp?: NodeIdFor<F>
+    options: Array<{
+      key: string
+      /** Id del servicio en la lista del negocio. */
+      service: string
+      send: NoInfer<M>[]
+      /** Rango de cantidad que define la opción; `null` = sin tope. */
+      count?: [number, number | null]
+      /** Lo que manda el código al entrar a `followUp` si esta es la opción elegida. */
+      onAccept?: NoInfer<M>[]
+    }>
+  }
+  /**
+   * En este paso el cliente puede cambiar la opción que eligió en un paso con
+   * `choices` anterior ("mejor la B"): mismas opciones, misma etapa, oferta nueva.
+   */
+  rechoose?: boolean
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -170,6 +205,12 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * 1–5 y las suyas siguen desde 6). WhatsApp Business admite 20 en total.
    */
   whatsappLabels?: Record<string, WhatsappLabel>
+  /**
+   * El modelo de OpenAI con que responde Emma a los clientes de este negocio.
+   * Ausente: `gpt-4o-mini`. Lista cerrada a modelos que aceptan los mismos
+   * parámetros (`temperature`, `max_tokens`); la familia GPT-5 pide otros.
+   */
+  model?: CustomerModel
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -183,6 +224,9 @@ export interface BusinessSettingsOverlay {
   requiresDeposit?: false
   handoff?: string
 }
+
+/** Modelos que Emma puede usar con los clientes (ver `model`). */
+export type CustomerModel = 'gpt-4o-mini' | 'gpt-4.1-mini'
 
 /** Una etiqueta del WhatsApp Business del dueño (ver `whatsappLabels`). */
 export interface WhatsappLabel {
@@ -213,6 +257,7 @@ export interface BusinessConfig {
   audioReply?: string
   funnel?: FunnelStage[]
   whatsappLabels?: Record<string, WhatsappLabel>
+  model?: CustomerModel
 }
 
 // Ids propios desde 900: nunca chocan con las etiquetas del dueño.
@@ -259,8 +304,92 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
     ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
     ...(step.catalogOnEnter !== undefined ? { catalogOnEnter: step.catalogOnEnter } : {}),
+    ...(step.choices !== undefined ? { choices: checkedChoices(step) } : {}),
+    ...(step.rechoose ? { rechoose: true } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
+}
+
+/**
+ * Rompe al importar el archivo si las opciones de un paso no pueden funcionar:
+ * así un error de armado sale en el typecheck/tests y no en una conversación.
+ */
+function checkedChoices<F extends FlowType, M extends string>(
+  step: BusinessStep<F, M>,
+): StepChoices {
+  const choices = step.choices
+  if (!choices) throw new Error('checkedChoices without choices')
+  const where = `${step.node}.choices`
+  if (!(step.routes ?? []).some((route) => route.id === choices.route)) {
+    throw new Error(`${where}: route "${choices.route}" is not one of the step routes`)
+  }
+  if (choices.options.length < 2) throw new Error(`${where}: needs at least 2 options`)
+  const keys = new Set<string>()
+  for (const option of choices.options) {
+    const key = option.key.trim().toUpperCase()
+    if (!/^[A-Z]$/.test(key)) throw new Error(`${where}: key "${option.key}" must be one letter`)
+    if (keys.has(key)) throw new Error(`${where}: duplicated key "${key}"`)
+    keys.add(key)
+    if (option.send.length === 0) throw new Error(`${where}.${key}: send is empty`)
+    if (choices.followUp && (option.onAccept ?? []).length === 0) {
+      throw new Error(`${where}.${key}: with followUp, every option needs onAccept`)
+    }
+    if (!option.service.trim()) throw new Error(`${where}.${key}: service is empty`)
+  }
+  // Rangos: todos o ninguno; desde 1, sin huecos ni cruces, solo el último sin tope.
+  const withCount = choices.options.filter((o) => o.count)
+  if (withCount.length > 0) {
+    if (withCount.length !== choices.options.length) {
+      throw new Error(`${where}: count must be set on every option or on none`)
+    }
+    const sorted = [...withCount].sort((a, b) => (a.count?.[0] ?? 0) - (b.count?.[0] ?? 0))
+    let next = 1
+    sorted.forEach((option, i) => {
+      const [from, to] = option.count ?? [0, 0]
+      const last = i === sorted.length - 1
+      if (from !== next) throw new Error(`${where}: ranges must start at ${next} (got ${from})`)
+      if (to === null && !last) throw new Error(`${where}: only the last range can be open`)
+      if (to !== null && to < from) throw new Error(`${where}: range ${from}-${to} is reversed`)
+      next = (to ?? from) + 1
+    })
+  }
+  return {
+    route: choices.route,
+    ...(choices.followUp ? { followUp: choices.followUp } : {}),
+    options: choices.options.map((option) => ({
+      key: option.key.trim().toUpperCase(),
+      serviceId: option.service,
+      send: [...option.send],
+      ...(option.count ? { count: option.count } : {}),
+      ...(option.onAccept ? { onAccept: [...option.onAccept] } : {}),
+    })),
+  }
+}
+
+/**
+ * Lo de `choices` que mira el flujo entero: el `followUp` es un paso del flujo,
+ * y un paso `rechoose` es adonde llega alguna elección (si no, no hay qué
+ * corregir).
+ */
+function checkChoiceSteps<F extends FlowType, M extends string>(
+  flow: ReadonlyArray<BusinessStep<F, M>>,
+): void {
+  const nodes = new Set<string>(flow.map((step) => step.node))
+  const chosenInto = new Set<string>()
+  for (const step of flow) {
+    if (!step.choices) continue
+    const followUp = step.choices.followUp
+    if (followUp && !nodes.has(followUp)) {
+      throw new Error(`${step.node}.choices: followUp "${followUp}" is not a step of the flow`)
+    }
+    const route = (step.routes ?? []).find((r) => r.id === step.choices?.route)
+    if (route) chosenInto.add(route.to)
+  }
+  for (const step of flow) {
+    if (step.rechoose && !chosenInto.has(step.node)) {
+      throw new Error(`${step.node}: rechoose, but no choices route leads here`)
+    }
+  }
 }
 
 /**
@@ -273,6 +402,7 @@ function overrideOf<F extends FlowType, M extends string>(
 export function defineBusinessConfig<const F extends FlowType, const M extends string = never>(
   input: BusinessConfigInput<F, M>,
 ): BusinessConfig {
+  checkChoiceSteps(input.flow)
   const overrides: Record<string, NodeOverride> = {}
   for (const step of input.flow) {
     const override = overrideOf(step)
@@ -322,5 +452,6 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
     ...(input.whatsappLabels !== undefined
       ? { whatsappLabels: checkedLabels(input.whatsappLabels) }
       : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
   }
 }
