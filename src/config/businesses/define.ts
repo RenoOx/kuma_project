@@ -170,6 +170,12 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * 1–5 y las suyas siguen desde 6). WhatsApp Business admite 20 en total.
    */
   whatsappLabels?: Record<string, WhatsappLabel>
+  /**
+   * El modelo de OpenAI con que responde Emma a los clientes de este negocio.
+   * Ausente: `gpt-4o-mini`. Lista cerrada a modelos que aceptan los mismos
+   * parámetros (`temperature`, `max_tokens`); la familia GPT-5 pide otros.
+   */
+  model?: CustomerModel
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -183,6 +189,9 @@ export interface BusinessSettingsOverlay {
   requiresDeposit?: false
   handoff?: string
 }
+
+/** Modelos que Emma puede usar con los clientes (ver `model`). */
+export type CustomerModel = 'gpt-4o-mini' | 'gpt-4.1-mini'
 
 /** Una etiqueta del WhatsApp Business del dueño (ver `whatsappLabels`). */
 export interface WhatsappLabel {
@@ -213,6 +222,7 @@ export interface BusinessConfig {
   audioReply?: string
   funnel?: FunnelStage[]
   whatsappLabels?: Record<string, WhatsappLabel>
+  model?: CustomerModel
 }
 
 // Ids propios desde 900: nunca chocan con las etiquetas del dueño.
@@ -322,5 +332,6 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
     ...(input.whatsappLabels !== undefined
       ? { whatsappLabels: checkedLabels(input.whatsappLabels) }
       : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
   }
 }

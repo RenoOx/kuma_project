@@ -183,6 +183,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   const history = historyResult.data
 
   const fileConfig = fileConfigFor(params.businessId)
+  // El archivo del negocio puede elegir otro modelo; sin eso, el de siempre.
+  const model = fileConfig?.model ?? MODEL
 
   // El último texto de Emma antes de este turno (el mensaje del cliente ya está
   // en el historial, después). El portero de la escalada lo usa para saber si
@@ -481,7 +483,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // en 30 s.
       completion = await createChatCompletion(
         {
-          model: MODEL,
+          model,
           messages: chatMessages,
           tools: toolsParam,
           tool_choice: toolChoiceParam,
@@ -506,7 +508,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
             businessId: params.businessId,
             conversationId: params.conversationId,
             iteration,
-            model: MODEL,
+            model,
             reason: unavailable,
           },
           cause,
