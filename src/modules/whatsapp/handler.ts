@@ -35,7 +35,7 @@ import {
   type ImagePurpose,
   type PaymentContext,
 } from '@/modules/whatsapp/imageExpectation.js'
-import { refreshLidUsername, resolveLidPhone } from '@/modules/whatsapp/lidPhone.js'
+import { resolveLidPhone } from '@/modules/whatsapp/lidPhone.js'
 import * as mediaForwarder from '@/modules/whatsapp/mediaForwarder.js'
 import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
@@ -67,7 +67,14 @@ import * as presence from '@/modules/whatsapp/presence.js'
 import { markServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { preview } from '@/shared/logRedact.js'
 import { formatPersonName } from '@/shared/name.js'
-import { customerContactLabel, samePhone } from '@/shared/phone.js'
+import {
+  customerContactLabel,
+  customerFindHints,
+  isLidPhone,
+  normalizeWaUsername,
+  samePhone,
+  waUsernameOf,
+} from '@/shared/phone.js'
 import { renderTemplate } from '@/shared/templates.js'
 
 // Cuando Emma no puede responder (OpenAI no contestó a tiempo, la base falló),
@@ -84,11 +91,14 @@ function notifyOwnerUnanswered(params: {
   log: HandlerLogger
   /** Si hay conversación, queda un evento `emma_unanswered` que cuenta el embudo del panel. */
   conversationId?: string
+  /** Cómo encontrarlo en el WhatsApp Business sin número (`customerFindHints`). */
+  findHints?: string[]
 }): void {
   const who = formatPersonName(params.customerName) ?? '(sin nombre)'
   const text = [
     '⚠️ *Emma no pudo responder*',
     `Cliente: ${who} (${params.phone})`,
+    ...(params.findHints ?? []),
     `Motivo: ${params.reason}`,
     'Su mensaje está en el Inbox: respóndele desde el panel.',
   ].join('\n')
@@ -963,6 +973,18 @@ async function buildStepImageNotice(params: {
       )
     : null
 
+  // Sin número ni @usuario, el dueño necesita otra forma de encontrar el chat en
+  // su WhatsApp Business: la etiqueta de lo que eligió y una frase para la lupa.
+  const label = await labelRequirementChat({
+    business,
+    customer,
+    serviceId: chosen?.id,
+    // En un grupo de fotos, una sola vez: las demás no repiten la escritura.
+    first: (params.photo?.index ?? 0) === 0,
+    log,
+  })
+  const lastText = history.ok ? lastCustomerTextOf(history.data) : null
+
   return mediaForwarder.buildStepImageCaption({
     stepLabel: blueprintFor(state, settings?.flowType ?? 'appointments')?.label ?? state,
     customer,
@@ -973,7 +995,53 @@ async function buildStepImageNotice(params: {
     said: params.caption,
     paused: params.paused,
     ...(params.photo ? { photo: params.photo } : {}),
+    findHints: customerFindHints(customer, { label, lastText }),
   })
+}
+
+/**
+ * Le pone al chat la etiqueta del WhatsApp Business que corresponde a lo que el
+ * cliente eligió (`whatsappLabels` del archivo del negocio). Solo si no hay
+ * número ni @usuario: con esos el dueño ya lo encuentra (prioridad del dueño,
+ * 2026-10-05). Devuelve el nombre de la etiqueta si quedó puesta, para que el
+ * aviso lo diga; si falla, null y el aviso sale igual.
+ */
+async function labelRequirementChat(params: {
+  business: Business
+  customer: Customer
+  serviceId: string | undefined
+  first: boolean
+  log: HandlerLogger
+}): Promise<string | null> {
+  const { business, customer, serviceId, log } = params
+  if (!params.first || !serviceId || !customer.waJid) return null
+  if (!isLidPhone(customer.phone, customer.waJid) || waUsernameOf(customer.metadata)) return null
+  const label = fileConfigFor(business.id)?.whatsappLabels?.[serviceId]
+  if (!label) return null
+  const client = clientRegistry.getClient(business.id)
+  if (!client) return null
+  try {
+    await client.labelChat(customer.waJid, label)
+    return label.name
+  } catch (err) {
+    log.warn({ err, labelId: label.id }, 'could not label the chat in WhatsApp Business')
+    return null
+  }
+}
+
+/**
+ * Lo último que el cliente escribió en texto, para que el dueño lo busque con la
+ * lupa. Salta las marcas internas de fotos y formatos ("[El cliente envió…]") y
+ * le saca a un mensaje citado el "[Sobre: …]" que le agrega el handler.
+ * `history` viene del más viejo al más nuevo (`getRecentHistory`).
+ */
+function lastCustomerTextOf(history: Array<{ role: string; content: string }>): string | null {
+  for (const message of [...history].reverse()) {
+    if (message.role !== 'user') continue
+    const text = message.content.replace(/^\[Sobre: "[^"]*"\]\s*/, '').trim()
+    if (text !== '' && !text.startsWith('[')) return text
+  }
+  return null
 }
 
 async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
@@ -1306,15 +1374,35 @@ async function processMessage(
       businessId,
       customerName: raw.pushName ?? null,
       phone: customerContactLabel({ phone, waJid: jid }),
+      findHints: customerFindHints(
+        { phone, waJid: jid },
+        { lastText: payload.kind === 'text' ? text : null },
+      ),
       reason: 'no se pudo registrar al cliente en la base',
       log,
     })
     return
   }
-  const customer = customerResult.data
-  // Sin número, su @usuario de WhatsApp para que el dueño lo reconozca. Sin
-  // esperar (no demora la respuesta) y como mucho una consulta por día.
-  void refreshLidUsername(businessId, customer)
+  let customer = customerResult.data
+  // Sin número, su @usuario de WhatsApp para que el dueño lo encuentre en su
+  // WhatsApp Business. Se lee del mensaje que ya llegó: nada de consultar a
+  // WhatsApp (riesgo de baneo, decisión del dueño 2026-10-05).
+  const seenUsername = isLidPhone(customer.phone, customer.waJid)
+    ? normalizeWaUsername((raw.key as WAMessageKey).remoteJidUsername)
+    : null
+  if (seenUsername) {
+    const recorded = await customerService.recordWaUsername(businessId, customer, seenUsername)
+    if (recorded.ok) {
+      const blob =
+        typeof customer.metadata === 'object' && customer.metadata !== null ? customer.metadata : {}
+      customer = {
+        ...customer,
+        metadata: { ...blob, waUsernameSeen: seenUsername, waUsername: recorded.data },
+      }
+    } else {
+      log.warn({ code: recorded.error.code }, 'record wa username failed')
+    }
+  }
 
   const conversationResult = await conversationService.getOrCreateOpen(businessId, customer.id)
   if (!conversationResult.ok) {
@@ -1329,6 +1417,7 @@ async function processMessage(
       businessId,
       customerName: customer.name,
       phone: customerContactLabel(customer),
+      findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       reason: 'no se pudo abrir la conversación en la base',
       log,
     })
@@ -1352,6 +1441,7 @@ async function processMessage(
       businessId,
       customerName: customer.name,
       phone: customerContactLabel(customer),
+      findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       reason: 'no se pudo guardar su mensaje en la base',
       log,
     })
@@ -1471,6 +1561,7 @@ async function processMessage(
     const pausedText = [
       '⏸️ *Mensaje durante pausa*',
       `Cliente ${who} - (${phoneWho}) escribió mientras el bot está pausado.`,
+      ...customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       'Conversación marcada como escalada.',
     ].join('\n')
     ownerNotifier.notifyOwner(businessId, pausedText).catch((err) => {
@@ -1618,6 +1709,7 @@ async function processMessage(
       businessId,
       customerName: customer.name,
       phone: customerContactLabel(customer),
+      findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       reason:
         llmResult.error.code === 'llm_unavailable' || llmResult.error.code === 'llm_timeout'
           ? 'OpenAI no respondió a tiempo (mucho tráfico)'

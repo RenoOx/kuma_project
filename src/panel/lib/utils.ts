@@ -155,7 +155,7 @@ export function contactLabel(
   username: string | null = null,
 ): string {
   if (!hidden) return formatPhone(phone)
-  return username ? `@${username}` : 'Número oculto por WhatsApp'
+  return username ? `@${username}` : 'Sin número'
 }
 
 /**

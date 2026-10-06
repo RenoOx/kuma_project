@@ -1,6 +1,6 @@
 import { db } from '@/db/client.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
-import { isLidPhone } from '@/shared/phone.js'
+import { isLidPhone, waUsernameOf, waUsernameSeenOf } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as customerRepo from './customer.repo.js'
 import type { Customer } from './customer.types.js'
@@ -72,6 +72,45 @@ export async function getOrCreate(
         message: cause instanceof Error ? cause.message : 'unknown error',
         userMessage: 'No pudimos registrar tu información, intenta de nuevo.',
         logContext: { businessId, phone },
+        cause,
+      }),
+    )
+  }
+}
+
+/**
+ * Guarda el @usuario de WhatsApp que trajo el mensaje de un cliente sin número,
+ * y devuelve el que se muestra (null si se descartó).
+ *
+ * Se lee del mensaje que ya llegó (`remoteJidUsername`): cero consultas a
+ * WhatsApp, condición del dueño para no arriesgar el número (2026-10-05). No
+ * está confirmado que ese campo traiga el @ del cliente y no el del negocio, así
+ * que si el mismo @usuario aparece en dos fichas distintas del negocio, es el
+ * del negocio: no se muestra en ninguna. Lo visto se guarda igual, para que una
+ * tercera ficha también lo descarte.
+ */
+export async function recordWaUsername(
+  businessId: string,
+  customer: Pick<Customer, 'id' | 'metadata'>,
+  seen: string,
+): Promise<Result<string | null>> {
+  if (waUsernameSeenOf(customer.metadata) === seen) return ok(waUsernameOf(customer.metadata))
+  try {
+    const shown = await db.transaction(async (tx) => {
+      const others = await customerRepo.listIdsWithWaUsernameSeen(businessId, seen, customer.id, tx)
+      const value = others.length > 0 ? null : seen
+      await customerRepo.setWaUsername(businessId, customer.id, seen, value, tx)
+      await customerRepo.hideWaUsername(businessId, others, tx)
+      return value
+    })
+    return ok(shown)
+  } catch (cause) {
+    return err(
+      new AppError({
+        code: 'customer_update_failed',
+        message: cause instanceof Error ? cause.message : 'unknown error',
+        userMessage: 'No pudimos guardar tus datos.',
+        logContext: { businessId, customerId: customer.id },
         cause,
       }),
     )

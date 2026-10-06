@@ -1,4 +1,4 @@
-import { and, eq, like, sql } from 'drizzle-orm'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db/client.js'
 import { customers } from '@/db/schema/index.js'
 import type { Customer, NewCustomer } from './customer.types.js'
@@ -138,11 +138,12 @@ export async function updatePhone(
     .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
 }
 
-/** El @usuario guardado por `setWaUsername`, para seleccionarlo sin traer todo `metadata`. */
+/** El @usuario que se muestra (ver `setWaUsername`), sin traer todo `metadata`. */
 export const WA_USERNAME_SQL = sql<string | null>`${customers.metadata}->>'waUsername'`
 
 /**
- * Guarda el @usuario de WhatsApp (o que no tiene) y cuándo se consultó.
+ * Guarda el @usuario que trajo el mensaje (`waUsernameSeen`) y el que se muestra
+ * (`waUsername`, null si se descartó).
  *
  * Se mezcla en el mismo UPDATE (`metadata || …`) en vez de leer y reescribir el
  * blob: ahí también viven los datos que recolecta Emma, y un leer-mezclar-escribir
@@ -151,17 +152,53 @@ export const WA_USERNAME_SQL = sql<string | null>`${customers.metadata}->>'waUse
 export async function setWaUsername(
   businessId: string,
   id: string,
-  username: string | null,
-  checkedAt: Date,
+  seen: string,
+  shown: string | null,
   exec: Executor = db,
 ): Promise<void> {
   await exec
     .update(customers)
     .set({
-      metadata: sql`${customers.metadata} || jsonb_build_object('waUsername', ${username}::text, 'waUsernameCheckedAt', ${checkedAt.toISOString()}::text)`,
+      metadata: sql`${customers.metadata} || jsonb_build_object('waUsernameSeen', ${seen}::text, 'waUsername', ${shown}::text)`,
       updatedAt: new Date(),
     })
     .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
+/** Otras fichas del negocio a las que el mensaje trajo el mismo @usuario. */
+export async function listIdsWithWaUsernameSeen(
+  businessId: string,
+  seen: string,
+  excludeId: string,
+  exec: Executor = db,
+): Promise<string[]> {
+  const rows = await exec
+    .select({ id: customers.id })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.businessId, businessId),
+        sql`${customers.metadata}->>'waUsernameSeen' = ${seen}`,
+        sql`${customers.id} <> ${excludeId}`,
+      ),
+    )
+  return rows.map((r) => r.id)
+}
+
+/** Deja de mostrar el @usuario de esas fichas (sin borrar lo que se vio). */
+export async function hideWaUsername(
+  businessId: string,
+  ids: string[],
+  exec: Executor = db,
+): Promise<void> {
+  if (ids.length === 0) return
+  await exec
+    .update(customers)
+    .set({
+      metadata: sql`${customers.metadata} || jsonb_build_object('waUsername', null::text)`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(customers.businessId, businessId), inArray(customers.id, ids)))
 }
 
 export async function updateWaJid(
