@@ -138,6 +138,32 @@ export async function updatePhone(
     .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
 }
 
+/** El @usuario guardado por `setWaUsername`, para seleccionarlo sin traer todo `metadata`. */
+export const WA_USERNAME_SQL = sql<string | null>`${customers.metadata}->>'waUsername'`
+
+/**
+ * Guarda el @usuario de WhatsApp (o que no tiene) y cuándo se consultó.
+ *
+ * Se mezcla en el mismo UPDATE (`metadata || …`) en vez de leer y reescribir el
+ * blob: ahí también viven los datos que recolecta Emma, y un leer-mezclar-escribir
+ * en paralelo con ella podía borrarlos.
+ */
+export async function setWaUsername(
+  businessId: string,
+  id: string,
+  username: string | null,
+  checkedAt: Date,
+  exec: Executor = db,
+): Promise<void> {
+  await exec
+    .update(customers)
+    .set({
+      metadata: sql`${customers.metadata} || jsonb_build_object('waUsername', ${username}::text, 'waUsernameCheckedAt', ${checkedAt.toISOString()}::text)`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(customers.businessId, businessId), eq(customers.id, id)))
+}
+
 export async function updateWaJid(
   businessId: string,
   id: string,

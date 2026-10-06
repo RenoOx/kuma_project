@@ -35,7 +35,7 @@ import {
   type ImagePurpose,
   type PaymentContext,
 } from '@/modules/whatsapp/imageExpectation.js'
-import { resolveLidPhone } from '@/modules/whatsapp/lidPhone.js'
+import { refreshLidUsername, resolveLidPhone } from '@/modules/whatsapp/lidPhone.js'
 import * as mediaForwarder from '@/modules/whatsapp/mediaForwarder.js'
 import { bufferMessage } from '@/modules/whatsapp/messageBuffer.js'
 import {
@@ -1312,6 +1312,9 @@ async function processMessage(
     return
   }
   const customer = customerResult.data
+  // Sin número, su @usuario de WhatsApp para que el dueño lo reconozca. Sin
+  // esperar (no demora la respuesta) y como mucho una consulta por día.
+  void refreshLidUsername(businessId, customer)
 
   const conversationResult = await conversationService.getOrCreateOpen(businessId, customer.id)
   if (!conversationResult.ok) {

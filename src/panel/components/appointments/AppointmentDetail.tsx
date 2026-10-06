@@ -27,7 +27,11 @@ export function AppointmentDetail({
             <SheetHeader>
               <SheetTitle className="pr-8">
                 {appointment.customerName ??
-                  contactLabel(appointment.customerPhone, appointment.customerPhoneHidden)}
+                  contactLabel(
+                    appointment.customerPhone,
+                    appointment.customerPhoneHidden,
+                    appointment.customerWaUsername,
+                  )}
               </SheetTitle>
               <Badge variant="secondary" className={cn('w-fit rounded-full', meta.className)}>
                 {meta.label}
@@ -44,7 +48,11 @@ export function AppointmentDetail({
               <Field
                 icon={Phone}
                 label="Teléfono"
-                value={contactLabel(appointment.customerPhone, appointment.customerPhoneHidden)}
+                value={contactLabel(
+                  appointment.customerPhone,
+                  appointment.customerPhoneHidden,
+                  appointment.customerWaUsername,
+                )}
               />
 
               {appointment.notes && (

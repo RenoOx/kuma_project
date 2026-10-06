@@ -80,14 +80,37 @@ export function isLidPhone(
 
 export const HIDDEN_PHONE_LABEL = 'Número oculto por WhatsApp'
 
+/** El @usuario de WhatsApp guardado en `customers.metadata` (sin "@"), o null. */
+export function waUsernameOf(metadata: unknown): string | null {
+  if (typeof metadata !== 'object' || metadata === null) return null
+  const value = (metadata as Record<string, unknown>).waUsername
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+/** Cuándo se le preguntó a WhatsApp por su @usuario, o null si nunca. */
+export function waUsernameCheckedAtOf(metadata: unknown): Date | null {
+  if (typeof metadata !== 'object' || metadata === null) return null
+  const value = (metadata as Record<string, unknown>).waUsernameCheckedAt
+  if (typeof value !== 'string') return null
+  const at = new Date(value)
+  return Number.isNaN(at.getTime()) ? null : at
+}
+
 /**
- * El número del cliente en un aviso al dueño: el real, o que está oculto.
+ * El número del cliente en un aviso al dueño: el real; si WhatsApp lo oculta, su
+ * @usuario; si tampoco hay, que está oculto.
  *
- * Oculto lleva el ID a la vista: el asistente del dueño contesta con
+ * Sin número lleva el ID a la vista: el asistente del dueño contesta con
  * `reply_to_customer` usando lo que dice el aviso, y ese ID es lo único con lo
  * que encuentra la ficha. Dicho "ID", el dueño no lo confunde con un teléfono.
  */
-export function customerContactLabel(customer: { phone: string; waJid?: string | null }): string {
+export function customerContactLabel(customer: {
+  phone: string
+  waJid?: string | null
+  metadata?: unknown
+}): string {
   if (!isLidPhone(customer.phone, customer.waJid)) return customer.phone
-  return `${HIDDEN_PHONE_LABEL} · ID ${customer.phone.replace(/\D/g, '')}`
+  const username = waUsernameOf(customer.metadata)
+  const id = `ID ${customer.phone.replace(/\D/g, '')}`
+  return username ? `@${username} · ${id}` : `${HIDDEN_PHONE_LABEL} · ${id}`
 }

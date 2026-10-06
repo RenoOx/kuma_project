@@ -1,6 +1,9 @@
+import { USyncQuery, USyncUser } from '@whiskeysockets/baileys'
 import { logger } from '@/config/logger.js'
+import type { Customer } from '@/db/schema/index.js'
+import * as customerRepo from '@/modules/customer/customer.repo.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
-import { jidUserOf, normalizePhone } from '@/shared/phone.js'
+import { isLidPhone, jidUserOf, normalizePhone, waUsernameCheckedAtOf } from '@/shared/phone.js'
 import { withTimeout } from '@/shared/withTimeout.js'
 
 // El número real detrás de un `<lid>@lid`, cuando existe.
@@ -105,4 +108,72 @@ export function resolveLidPhone(
 /** El traductor de Baileys del negocio, o null si no hay socket. */
 export function lidLookupFor(businessId: string): LidLookup | null {
   return clientRegistry.getClient(businessId)?.sock.signalRepository.lidMapping ?? null
+}
+
+/**
+ * El @usuario de WhatsApp de un `<lid>@lid` (sin el "@"), o null.
+ *
+ * Para mostrar algo reconocible cuando WhatsApp no da el número. Le pregunta a
+ * WhatsApp por ESE usuario (USync, protocolo `username`) en vez de leer
+ * `remoteJidUsername` del mensaje, que por su nombre puede ser el del negocio.
+ * Baileys define la consulta pero no la usa en ningún lado, y no está
+ * comprobado que WhatsApp conteste por alguien que no es contacto: null es una
+ * respuesta normal. Es una consulta a WhatsApp, así que quien llama la limita
+ * (una por cliente por día).
+ */
+export async function fetchLidUsername(businessId: string, lidJid: string): Promise<string | null> {
+  if (!lidJid.endsWith('@lid')) return null
+  const sock = clientRegistry.getClient(businessId)?.sock
+  if (!sock) return null
+  try {
+    const query = new USyncQuery()
+      .withContext('background')
+      .withUsernameProtocol()
+      .withUser(new USyncUser().withId(lidJid))
+    const result = await withTimeout(
+      sock.executeUSyncQuery(query),
+      LID_LOOKUP_TIMEOUT_MS,
+      'username usync',
+    )
+    const raw = result?.list[0]?.username
+    const username = typeof raw === 'string' ? raw.trim().replace(/^@/, '') : ''
+    log.info({ businessId, lidJid, found: username.length > 0 }, 'lid username lookup')
+    return username.length > 0 ? username : null
+  } catch (err) {
+    log.warn({ err, businessId, lidJid }, 'lid username lookup failed')
+    return null
+  }
+}
+
+// Una consulta de @usuario por cliente por día, como máximo. Sin respuesta, se
+// vuelve a intentar al día siguiente: el cliente puede crearse uno después.
+const USERNAME_RECHECK_MS = 24 * 60 * 60 * 1000
+
+/** True si este cliente no tiene número y toca preguntar por su @usuario. */
+export function needsUsernameLookup(
+  customer: Pick<Customer, 'phone' | 'waJid' | 'metadata'>,
+  now: Date,
+): boolean {
+  if (!isLidPhone(customer.phone, customer.waJid)) return false
+  const checkedAt = waUsernameCheckedAtOf(customer.metadata)
+  return checkedAt === null || now.getTime() - checkedAt.getTime() >= USERNAME_RECHECK_MS
+}
+
+/**
+ * Pregunta y guarda el @usuario de un cliente sin número, si toca. Nunca falla:
+ * corre sin que nadie lo espere (no demora la respuesta al cliente) y un error
+ * queda en el log.
+ */
+export async function refreshLidUsername(
+  businessId: string,
+  customer: Pick<Customer, 'id' | 'phone' | 'waJid' | 'metadata'>,
+  now: Date = new Date(),
+): Promise<void> {
+  if (!customer.waJid || !needsUsernameLookup(customer, now)) return
+  try {
+    const username = await fetchLidUsername(businessId, customer.waJid)
+    await customerRepo.setWaUsername(businessId, customer.id, username, now)
+  } catch (err) {
+    log.warn({ err, businessId, customerId: customer.id }, 'refresh lid username failed')
+  }
 }

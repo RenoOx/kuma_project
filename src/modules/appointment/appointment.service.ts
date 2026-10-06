@@ -953,6 +953,7 @@ interface CustomerContact {
   phone: string
   // Con él, un cliente cuyo "teléfono" es su LID se muestra como número oculto.
   waJid?: string | null
+  metadata?: unknown
 }
 
 /** Creates the calendar event. Returns its id, or null when it didn't happen. */

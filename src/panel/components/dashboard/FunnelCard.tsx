@@ -66,6 +66,7 @@ export function FunnelCard({
             name: p.customerName,
             phone: p.phone,
             phoneHidden: p.phoneHidden,
+            waUsername: p.waUsername,
             detail: p.hoursWaiting === null ? null : `${p.hoursWaiting} h esperando`,
           }))}
         />
@@ -77,6 +78,7 @@ export function FunnelCard({
             name: e.customerName,
             phone: e.phone,
             phoneHidden: e.phoneHidden,
+            waUsername: e.waUsername,
             detail: [e.reason, e.escalatedAt ? formatDateTime(e.escalatedAt) : null]
               .filter(Boolean)
               .join(' · '),
@@ -106,6 +108,7 @@ function AttentionList({
     name: string | null
     phone: string
     phoneHidden: boolean
+    waUsername: string | null
     detail: string | null
   }>
 }): React.JSX.Element {
@@ -129,7 +132,7 @@ function AttentionList({
                   className="hover:bg-emma-elevated -mx-1.5 block rounded px-1.5 py-0.5"
                 >
                   <span className="text-emma-text block text-xs">
-                    {item.name ?? contactLabel(item.phone, item.phoneHidden)}
+                    {item.name ?? contactLabel(item.phone, item.phoneHidden, item.waUsername)}
                   </span>
                   {item.detail && (
                     <span className="text-muted-foreground block text-xs">{item.detail}</span>

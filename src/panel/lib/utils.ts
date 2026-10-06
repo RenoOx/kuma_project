@@ -146,10 +146,16 @@ export function formatPhone(raw: string | null | undefined): string {
 /**
  * El número de un cliente en pantalla. Con `hidden`, WhatsApp no lo dio y lo
  * guardado son los dígitos de su LID: formateados parecían un número real
- * ("+243795 362 852 927") y no llevaban a nadie.
+ * ("+243795 362 852 927") y no llevaban a nadie. Sin número, su @usuario de
+ * WhatsApp si lo hay.
  */
-export function contactLabel(phone: string | null | undefined, hidden: boolean): string {
-  return hidden ? 'Número oculto por WhatsApp' : formatPhone(phone)
+export function contactLabel(
+  phone: string | null | undefined,
+  hidden: boolean,
+  username: string | null = null,
+): string {
+  if (!hidden) return formatPhone(phone)
+  return username ? `@${username}` : 'Número oculto por WhatsApp'
 }
 
 /**

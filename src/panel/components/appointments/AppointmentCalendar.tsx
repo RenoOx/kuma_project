@@ -76,7 +76,7 @@ export function AppointmentCalendar({
     const meta = APPOINTMENT_META[appointment.status]
     return {
       id: appointment.id,
-      title: `${appointment.customerName ?? contactLabel(appointment.customerPhone, appointment.customerPhoneHidden)} — ${appointment.service}`,
+      title: `${appointment.customerName ?? contactLabel(appointment.customerPhone, appointment.customerPhoneHidden, appointment.customerWaUsername)} — ${appointment.service}`,
       start,
       end,
       backgroundColor: meta.color,

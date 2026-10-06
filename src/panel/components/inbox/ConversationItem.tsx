@@ -32,7 +32,7 @@ export function ConversationItem({
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
           <span className="truncate text-sm font-medium text-emma-text">
-            {contactLabel(conversation.phone, conversation.phoneHidden)}
+            {contactLabel(conversation.phone, conversation.phoneHidden, conversation.waUsername)}
           </span>
           <span className="text-muted-foreground shrink-0 text-[11px]">
             {timeAgo(conversation.lastMessageAt)}

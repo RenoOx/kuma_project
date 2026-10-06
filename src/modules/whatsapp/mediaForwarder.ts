@@ -17,7 +17,10 @@ function ownerJidFromPhone(phone: string): string {
 
 // `waJid` opcional: con él, un cliente cuyo "teléfono" es su LID aparece como
 // número oculto en vez de un +243… que no lleva a nadie.
-type CaptionCustomer = Pick<Customer, 'name' | 'phone'> & { waJid?: string | null }
+type CaptionCustomer = Pick<Customer, 'name' | 'phone'> & {
+  waJid?: string | null
+  metadata?: unknown
+}
 
 // Why the owner is seeing this photo at all. Without it they get a picture with
 // no idea what triggered it, which is exactly the noise that makes an owner

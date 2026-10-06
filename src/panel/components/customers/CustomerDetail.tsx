@@ -24,7 +24,9 @@ export function CustomerDetail({
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle className="pr-8">
-            {data ? contactLabel(data.customer.phone, data.phoneHidden) : 'Contacto'}
+            {data
+              ? contactLabel(data.customer.phone, data.phoneHidden, data.waUsername)
+              : 'Contacto'}
           </SheetTitle>
           {data && (
             <>
