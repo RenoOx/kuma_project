@@ -154,7 +154,7 @@ export function contactLabel(
   hidden: boolean,
   username: string | null = null,
 ): string {
-  if (!hidden) return formatPhone(phone)
+  if (!hidden) return username ? `${formatPhone(phone)} · @${username}` : formatPhone(phone)
   return username ? `@${username}` : 'Sin número'
 }
 
