@@ -109,9 +109,10 @@ export function normalizeWaUsername(raw: unknown): string | null {
  * dueño, 2026-10-05): 1. su número (con su @usuario al lado si lo hay); 2. su
  * @usuario de WhatsApp; 3. "sin número".
  *
- * Sin número lleva el ID a la vista: el asistente del dueño contesta con
- * `reply_to_customer` usando lo que dice el aviso, y ese ID es lo único con lo
- * que encuentra la ficha. Dicho "ID", el dueño no lo confunde con un teléfono.
+ * Sin número no se muestra el ID del LID (decisión del dueño, 2026-10-06: no
+ * le sirve). Costo conocido: `reply_to_customer` del asistente del dueño busca
+ * la ficha por lo que dice el aviso, y sin número ni ID no la encuentra. En
+ * Tecmin el asistente está apagado (`ownerAssistant: false`).
  */
 export function customerContactLabel(customer: {
   phone: string
@@ -122,8 +123,7 @@ export function customerContactLabel(customer: {
   if (!isLidPhone(customer.phone, customer.waJid)) {
     return username ? `${customer.phone} · @${username}` : customer.phone
   }
-  const id = `ID ${customer.phone.replace(/\D/g, '')}`
-  return username ? `@${username} · ${id}` : `sin número · ${id}`
+  return username ? `@${username}` : 'sin número'
 }
 
 // Lo justo para buscarlo con la lupa de WhatsApp: una frase, no el mensaje entero.
