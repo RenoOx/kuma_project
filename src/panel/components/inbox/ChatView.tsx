@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChatMessage, ConversationListItem } from '../../api/types.js'
 import { useMessages } from '../../hooks/useMessages.js'
 import { useReply, useReturnToEmma } from '../../hooks/useReply.js'
-import { formatPhone } from '../../lib/utils.js'
+import { contactLabel } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Button } from '../ui/button.js'
 import { EmmaToggle } from './EmmaToggle.js'
@@ -104,7 +104,7 @@ export function ChatView({
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">
-            {formatPhone(conversation.phone)}
+            {contactLabel(conversation.phone, conversation.phoneHidden, conversation.waUsername)}
           </p>
           <NameTags names={conversation.appointmentNames} />
         </div>

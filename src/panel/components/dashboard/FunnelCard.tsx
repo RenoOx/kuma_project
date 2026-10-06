@@ -1,6 +1,6 @@
 import type { FunnelReport } from '../../api/types.js'
 import { PanelLink } from '../../lib/session.js'
-import { cn, formatDateTime, formatPhone } from '../../lib/utils.js'
+import { cn, contactLabel, formatDateTime } from '../../lib/utils.js'
 import { Card, CardContent } from '../ui/card.js'
 import { Skeleton } from '../ui/skeleton.js'
 
@@ -65,6 +65,8 @@ export function FunnelCard({
             key: p.conversationId,
             name: p.customerName,
             phone: p.phone,
+            phoneHidden: p.phoneHidden,
+            waUsername: p.waUsername,
             detail: p.hoursWaiting === null ? null : `${p.hoursWaiting} h esperando`,
           }))}
         />
@@ -75,6 +77,8 @@ export function FunnelCard({
             key: e.conversationId,
             name: e.customerName,
             phone: e.phone,
+            phoneHidden: e.phoneHidden,
+            waUsername: e.waUsername,
             detail: [e.reason, e.escalatedAt ? formatDateTime(e.escalatedAt) : null]
               .filter(Boolean)
               .join(' · '),
@@ -99,7 +103,14 @@ function AttentionList({
 }: {
   title: string
   empty: string
-  items: Array<{ key: string; name: string | null; phone: string; detail: string | null }>
+  items: Array<{
+    key: string
+    name: string | null
+    phone: string
+    phoneHidden: boolean
+    waUsername: string | null
+    detail: string | null
+  }>
 }): React.JSX.Element {
   return (
     <Card>
@@ -121,7 +132,7 @@ function AttentionList({
                   className="hover:bg-emma-elevated -mx-1.5 block rounded px-1.5 py-0.5"
                 >
                   <span className="text-emma-text block text-xs">
-                    {item.name ?? formatPhone(item.phone)}
+                    {item.name ?? contactLabel(item.phone, item.phoneHidden, item.waUsername)}
                   </span>
                   {item.detail && (
                     <span className="text-muted-foreground block text-xs">{item.detail}</span>

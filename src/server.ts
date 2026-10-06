@@ -33,6 +33,7 @@ import {
 import { ValidationError } from './shared/errors.js'
 import { isSandboxNumber } from './shared/phone.js'
 import { cleanupOwnerThreadMessages } from './workers/cleanupOwnerThread.js'
+import { healLidPhonesGuarded } from './workers/healLidPhones.js'
 import { sendDueReminders } from './workers/sendReminders.js'
 import { runTakeoverTimeoutGuarded } from './workers/takeoverTimeout.js'
 
@@ -443,6 +444,15 @@ setInterval(() => {
   })
 }, REMINDER_INTERVAL_MS).unref()
 logger.info({ intervalMs: REMINDER_INTERVAL_MS }, 'takeover timeout worker scheduled (setInterval)')
+
+// Fichas con el LID como teléfono: si Baileys ya sabe el número real, se corrige.
+// Solo lee lo guardado en la sesión; no consulta a WhatsApp.
+setInterval(() => {
+  healLidPhonesGuarded().catch((err) => {
+    logger.error({ err }, 'heal lid phones job failed')
+  })
+}, REMINDER_INTERVAL_MS).unref()
+logger.info({ intervalMs: REMINDER_INTERVAL_MS }, 'heal lid phones worker scheduled (setInterval)')
 
 // Offline-number alerting. Does not reconnect anything — see healthMonitor.ts
 // for why recycling on silence would make things worse.

@@ -2,7 +2,7 @@ import { MessageSquare } from 'lucide-react'
 import { useCustomerDetail } from '../../hooks/useCustomers.js'
 import { APPOINTMENT_META } from '../../lib/constants.js'
 import { PanelLink } from '../../lib/session.js'
-import { cn, formatLongDateTime, formatPhone, timeAgo } from '../../lib/utils.js'
+import { cn, contactLabel, formatLongDateTime, timeAgo } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Badge } from '../ui/badge.js'
 import { Button } from '../ui/button.js'
@@ -24,7 +24,9 @@ export function CustomerDetail({
       <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle className="pr-8">
-            {data ? formatPhone(data.customer.phone) : 'Contacto'}
+            {data
+              ? contactLabel(data.customer.phone, data.phoneHidden, data.waUsername)
+              : 'Contacto'}
           </SheetTitle>
           {data && (
             <>

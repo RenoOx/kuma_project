@@ -2,7 +2,7 @@ import { Search } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import type { CustomerListItem } from '../../api/types.js'
 import { useCustomers } from '../../hooks/useCustomers.js'
-import { formatPhone, timeAgo } from '../../lib/utils.js'
+import { contactLabel, timeAgo } from '../../lib/utils.js'
 import { NameTags } from '../NameTags.js'
 import { Badge } from '../ui/badge.js'
 import { Button } from '../ui/button.js'
@@ -155,7 +155,9 @@ function CustomerRow({
     >
       <TableCell>
         <div className="flex flex-col gap-1">
-          <span className="font-medium">{formatPhone(customer.phone)}</span>
+          <span className="font-medium">
+            {contactLabel(customer.phone, customer.phoneHidden, customer.waUsername)}
+          </span>
           <NameTags names={customer.appointmentNames} />
           {customer.unreachable && (
             <Badge variant="secondary" className="bg-q-lost/15 text-q-lost w-fit rounded-full">

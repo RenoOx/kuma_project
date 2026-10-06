@@ -154,7 +154,6 @@ export default defineBusinessConfig({
     'NUNCA hagas cuentas (sumas, restas, multiplicaciones, "con el descuento queda en…") ni digas que no puedes hacerlas. Los únicos montos son los de los mensajes fijos y la lista de servicios. Si pregunta el total o cuánto le queda con el descuento, es INTENCIÓN POSITIVA: sigue el flujo.',
     'CURSOS: el precio es SEMANAL (cómo se paga, no cuánto dura). Duración, solo esta: Básico 6 semanas, Avanzado 12 semanas, Operación Múltiple 22 semanas.',
     'En un curso el ÚNICO pago por aquí es la inscripción de S/ 150, y ese monto solo lo da el mensaje de pago: nunca lo escribas tú. Nunca otro monto a pagar ni la palabra "referencial". Nunca digas que no hay descuento.',
-    'Medio de pago, solo: "Por aquí la inscripción es por Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Lo demás te lo confirma el asesor 😊". Nunca "sí" ni "no" a efectivo, tarjeta, cuotas, factura ni al contado.',
     'Nunca digas que recibiste o confirmaste un pago, un comprobante o un DNI.',
     'CERTIFICACIONES: un solo pago (el de su detalle), nunca "semanal"; no requiere hacer un curso. Solo se pide el DNI: nunca hables de Yape ni pagos ahí.',
     'En un curso nunca pidas DNI, nombre, correo, teléfono ni fotos.',
@@ -176,6 +175,9 @@ export default defineBusinessConfig({
     '¿Si falto se recupera?: "Sí, la clase se recupera 😊".',
     '¿Cuántos alumnos por grupo o por máquina?: "Las clases son personalizadas 😊".',
     'Equipos del Básico o del Avanzado: "Los equipos de mayor demanda en el sector." Nunca nombres una máquina. Los de Operación Múltiple: minicargador, montacargas, compactador de suelos, retroexcavadora, cargador sobre ruedas, motoniveladora y excavadora hidráulica.',
+    // Vivía en `instructions`; con el nombre del Director (2026-10-02) las pasó
+    // del tope de 2.000 caracteres. Mismo texto, sin tope acá.
+    'Medio de pago, solo: "Por aquí la inscripción es por Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Lo demás te lo confirma el asesor 😊". Nunca "sí" ni "no" a efectivo, tarjeta, cuotas, factura ni al contado.',
     'Cómo se pagan las semanas, efectivo, tarjeta, cuotas, boleta o factura: "Esa consulta te la confirma el asesor 😊". Por aquí solo se hace la inscripción (curso) o se pide el DNI (certificación).',
     '¿Hasta cuándo vale el descuento? (solo CURSOS): "Es válido solo por hoy 😊". No lo digas si no lo pregunta. Nunca expliques sobre qué se aplica el descuento.',
     'En una CERTIFICACIÓN nunca hables de descuento ni de precios de cursos: su precio es el de su detalle.',
@@ -289,8 +291,11 @@ export default defineBusinessConfig({
       cta: false,
       extraInstructions: [
         'La presentación (tu nombre y el instituto) ya le llegó sola, antes de tu mensaje: no te vuelvas a presentar.',
+        // Prod, 2026-10-05 21:45: "información de los cursos de maquinaria
+        // pesada" recibió la pregunta de la experiencia. La regla de "ya dijo qué
+        // busca" iba después de la del saludo solo, y el modelo tomaba la primera.
+        'LO PRIMERO: si su mensaje ya pide los cursos o información de cursos ("información de los cursos", "quiero un curso", "cursos de maquinaria") o dice que no tiene experiencia, llamá advance_flow con la ruta "sin-experiencia" en este mismo turno; si pide certificación o certificados, o dice que ya opera maquinaria, la ruta "con-experiencia". En esos casos NUNCA hagas la pregunta de la experiencia.',
         '- Si el alumno solo saludó o todavía no dijo qué busca, tu mensaje es exactamente: "Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?"',
-        '- Si ya dijo qué busca, NO le hagas esa pregunta: llamá advance_flow con la ruta que corresponda en este mismo turno y respondé desde ese paso.',
         '- No uses show_services en este paso: los cursos y las certificaciones se muestran en su propio paso.',
         // A10 (2026-09-30): "precio de la certificación?" como primer mensaje
         // dejaba a Emma listando precios en este paso, sin llegar nunca a A/B/C.
@@ -298,8 +303,15 @@ export default defineBusinessConfig({
         // C03/D04 (2026-09-30): "quiero el curso avanzado" se iba a certificaciones.
         '- Si pide un CURSO por su nombre o su letra ("el básico", "el avanzado", "la C"), es la ruta "sin-experiencia", aunque cuente que ya manejó alguna máquina.',
       ].join('\n'),
+      // El ejemplo es lo último que lee el modelo en el paso, y era solo la
+      // pregunta de la experiencia: la copiaba aunque el alumno ya hubiera pedido
+      // los cursos (prod 2026-10-05; en dev, 2 de 3 veces). Los casos especiales
+      // del catálogo ("preguntá qué necesita") empujaban para el mismo lado.
+      edgeCases: [
+        'Si su primer mensaje ya pide cursos o certificados, no hay nada que preguntar: advance_flow con su ruta.',
+      ],
       example:
-        'Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?',
+        'Solo saludó ("hola", "buenas noches"): "Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?". Pidió cursos ("información de los cursos de maquinaria"): advance_flow "sin-experiencia", sin esa pregunta. Pidió certificación: advance_flow "con-experiencia".',
       routes: [
         {
           id: 'con-experiencia',
@@ -320,21 +332,29 @@ export default defineBusinessConfig({
       node: 'informing',
       extraInstructions: [
         'El saludo ya le preguntó si tiene experiencia operando maquinaria o si quiere un curso desde cero. Tu único trabajo acá es saber la respuesta.',
-        // R14 (regresión 4): respondía lo de los docentes y la conversación se
-        // apagaba; sin la invitación rotativa (cta: false) nadie la retomaba.
+        // Decisión del dueño (2026-10-05): dos salidas y ninguna se confirma. La
+        // regla vieja ("si además pregunta algo, respondé y cerrá con '¿Te paso la
+        // información de nuestros cursos?'") hizo que "No tengo exp", sin ninguna
+        // pregunta, recibiera esa confirmación en prod.
+        '- Si NO tiene experiencia ("no", "no tengo exp", "ninguna", "desde cero") o pregunta por los cursos: llamá advance_flow con la ruta "sin-experiencia" en este mismo turno, aunque también pregunte otra cosa. Nunca le preguntes si quiere la información: al pasar le llegan los cursos solos.',
+        '- Si TIENE experiencia, o pregunta por certificación: pasá al paso de certificación.',
         // R06#1 (regresión 5): "kiero el curso básico, ¿cuántas cuotas y cuánto en
         // total?" se quedó acá respondiendo precios hasta que el lead se fue.
         '- Si nombra un curso o pregunta precio, cuotas, total o pago, es INTENCIÓN POSITIVA: pasa al paso de cursos en este mismo turno, sin responder esas preguntas.',
-        '- Solo si no nombró un curso ni preguntó por precio o pago: si dice que no tiene experiencia y además pregunta algo, responde su pregunta y cierra con: "¿Te paso la información de nuestros cursos? 😊". Si después dice que sí, pasa al paso de cursos.',
-        '- Si dice que no o que lo piensa, solo la frase del "no", sin invitación.',
-        '- Si TIENE experiencia, o pregunta por certificación: pasá al paso de certificación.',
-        '- Si NO tiene experiencia, o pregunta por los cursos: pasá al paso de cursos.',
+        '- Si dice que no le interesa o que lo piensa, solo la frase del "no", sin invitación.',
         '- No uses show_services en este paso: los cursos y las certificaciones se muestran en su propio paso.',
         '- Si la respuesta no es clara, preguntale de nuevo si tiene experiencia operando maquinaria.',
-        '- Si antes de contestar pregunta por la ubicación o cómo llegar, dale la dirección y el link de Google Maps de arriba en una línea, y volvé a preguntarle si tiene experiencia.',
+        // Si ya dijo que no tiene experiencia, va a cursos aunque pregunte la
+        // dirección (decisión del dueño, 2026-10-05): esta regla le ganaba.
+        '- Solo si pregunta por la ubicación o cómo llegar SIN decir si tiene experiencia: dale la dirección y el link de Google Maps de arriba en una línea, y volvé a preguntarle si tiene experiencia.',
         '- Si pregunta el precio de la certificación, no lo des acá: pasá al paso de certificación.',
         '- Si pide un CURSO por su nombre o su letra ("el básico", "el avanzado", "la C"), pasá al paso de cursos aunque cuente que ya manejó alguna máquina.',
       ].join('\n'),
+      // En dev (2026-10-05), "No tengo experiencia, ¿dónde queda?" se respondía
+      // con la dirección + "¿Te gustaría saber sobre los cursos?" 5 de 5 veces.
+      edgeCases: [
+        '"No tengo experiencia, ¿dónde queda?" (o cualquier pregunta junto al "no tengo experiencia"): advance_flow "sin-experiencia" y nada más. No respondas la pregunta en este turno ni le preguntes si quiere saber de los cursos: los cursos le llegan solos y la pregunta la responderás si la repite.',
+      ],
       example: '¡Genial! ¿Ya operas alguna maquinaria o quieres empezar desde cero?',
       // R14 (2026-10-01): la invitación rotativa se pegaba detrás del "no"
       // ("Entendido, estaré al tanto… ¿Te cuento más de alguno?"). Este paso ya

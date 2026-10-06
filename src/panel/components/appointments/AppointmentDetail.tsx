@@ -2,7 +2,7 @@ import { CalendarClock, Phone, Stethoscope, User } from 'lucide-react'
 import type { PanelAppointment } from '../../api/types.js'
 import { APPOINTMENT_META } from '../../lib/constants.js'
 import { PanelLink } from '../../lib/session.js'
-import { cn, formatLongDateTime } from '../../lib/utils.js'
+import { cn, contactLabel, formatLongDateTime } from '../../lib/utils.js'
 import { Badge } from '../ui/badge.js'
 import { Button } from '../ui/button.js'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet.js'
@@ -26,7 +26,12 @@ export function AppointmentDetail({
           <>
             <SheetHeader>
               <SheetTitle className="pr-8">
-                {appointment.customerName ?? appointment.customerPhone}
+                {appointment.customerName ??
+                  contactLabel(
+                    appointment.customerPhone,
+                    appointment.customerPhoneHidden,
+                    appointment.customerWaUsername,
+                  )}
               </SheetTitle>
               <Badge variant="secondary" className={cn('w-fit rounded-full', meta.className)}>
                 {meta.label}
@@ -40,7 +45,15 @@ export function AppointmentDetail({
                 label="Fecha y hora"
                 value={`${formatLongDateTime(appointment.scheduledAt)} · ${appointment.durationMinutes} min`}
               />
-              <Field icon={Phone} label="Teléfono" value={appointment.customerPhone} />
+              <Field
+                icon={Phone}
+                label="Teléfono"
+                value={contactLabel(
+                  appointment.customerPhone,
+                  appointment.customerPhoneHidden,
+                  appointment.customerWaUsername,
+                )}
+              />
 
               {appointment.notes && (
                 <div>

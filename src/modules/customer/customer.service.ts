@@ -1,5 +1,6 @@
 import { db } from '@/db/client.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
+import { isLidPhone } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as customerRepo from './customer.repo.js'
 import type { Customer } from './customer.types.js'
@@ -33,6 +34,27 @@ export async function getOrCreate(
         lastSeenAt: now,
         whatsappUnreachableAt: null,
         ...(jidChanged ? { waJid } : {}),
+      })
+    }
+
+    // Mismo JID, otro "teléfono": es la misma persona. Pasa en los dos sentidos
+    // con un LID — la ficha se guardó con los dígitos del LID y ahora sabemos el
+    // número real, o ya tenía el real y esta vez WhatsApp no lo dio. Sin esto,
+    // cada cambio abría una ficha nueva y partía el historial en dos.
+    const sameJid = waJid?.endsWith('@lid')
+      ? await customerRepo.findByWaJid(businessId, waJid)
+      : null
+    if (sameJid) {
+      const now = new Date()
+      await customerRepo.updateLastSeen(businessId, sameJid.id, now)
+      // Solo se corrige hacia el número real, nunca de vuelta al LID.
+      const learnedPhone = isLidPhone(sameJid.phone, waJid) && !isLidPhone(phone, waJid)
+      if (learnedPhone) await customerRepo.updatePhone(businessId, sameJid.id, phone)
+      return ok({
+        ...sameJid,
+        lastSeenAt: now,
+        whatsappUnreachableAt: null,
+        ...(learnedPhone ? { phone } : {}),
       })
     }
     const created = await customerRepo.create({
