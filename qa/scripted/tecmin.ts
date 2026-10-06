@@ -33,11 +33,9 @@ function chosen(turn: SimulatorTurn | undefined): string | null {
   }
 }
 
-/** Los mensajes fijos que pidió la IA en ese turno (send_fixed_message). */
-function fixedSent(turn: SimulatorTurn | undefined): string[] {
-  return (turn?.tools ?? [])
-    .filter((t) => t.name === 'send_fixed_message' && !t.error)
-    .map((t) => String((t.args as { message?: unknown }).message))
+/** El texto de todos los mensajes fijos que le llegaron al cliente en ese turno. */
+function fixedTexts(turn: SimulatorTurn | undefined): string {
+  return (turn?.fixedMessages ?? []).map((m) => m.text).join('\n')
 }
 
 function expectOption(turn: SimulatorTurn | undefined, key: string, from: string): string | null {
@@ -49,28 +47,41 @@ function expectOption(turn: SimulatorTurn | undefined, key: string, from: string
   return null
 }
 
-function expectPayment(turn: SimulatorTurn | undefined, message: string): string | null {
+/** El pedido de pago o de DNI: lo manda el código, así que se revisa por su texto. */
+function expectPayment(
+  turn: SimulatorTurn | undefined,
+  mustInclude: string,
+  mustNotInclude?: string,
+): string | null {
   if (turn?.stateAfter !== 'solicitar_pago')
     return `no llegó a solicitar_pago (${turn?.stateAfter})`
-  if (!fixedSent(turn).includes(message))
-    return `no salió ${message} (${fixedSent(turn).join(', ') || 'nada'})`
+  const text = fixedTexts(turn)
+  if (!text.includes(mustInclude)) return `el pago no dice "${mustInclude}": "${text.slice(0, 80)}"`
+  if (mustNotInclude && text.includes(mustNotInclude))
+    return `el pago dice "${mustNotInclude}" (de otra opción)`
   return null
 }
+
+/** Sin la IA: el turno no gastó tokens (la letra la resolvió el código). */
+function withoutModel(turn: SimulatorTurn | undefined, what: string): string | null {
+  return turn?.tokens.input !== 0 ? `${what} pasó por la IA (${turn?.tokens.input} tokens)` : null
+}
+
+const DNI = 'foto de tu DNI'
 
 const CASES: Case[] = [
   {
     name: 'retro + minicargador → certificación A → DNI',
     messages: ['Hola', 'Tengo experiencia', 'retroexcavadora y minicargador', 'sí'],
-    check: (t) =>
-      expectOption(t[2], 'A', 'asesoria_perfil') ?? expectPayment(t[3], 'pagoCertificacion'),
+    check: (t) => expectOption(t[2], 'A', 'asesoria_perfil') ?? expectPayment(t[3], DNI),
   },
   {
     name: '"B" → certificación B sin la IA → DNI',
     messages: ['Hola', 'Tengo experiencia', 'B', 'sí'],
     check: (t) =>
       expectOption(t[2], 'B', 'asesoria_perfil') ??
-      (t[2]?.tokens.input !== 0 ? `"B" pasó por la IA (${t[2]?.tokens.input} tokens)` : null) ??
-      expectPayment(t[3], 'pagoCertificacion'),
+      withoutModel(t[2], '"B"') ??
+      expectPayment(t[3], DNI),
   },
   {
     name: '3 máquinas → certificación B',
@@ -89,9 +100,10 @@ const CASES: Case[] = [
     },
   },
   {
-    name: 'sin experiencia → "el básico" → curso A → pago',
+    name: 'sin experiencia → "el básico" → curso A → pago del Básico',
     messages: ['Hola', 'No tengo exp', 'el básico', 'sí'],
-    check: (t) => expectOption(t[2], 'A', 'listado_servicios') ?? expectPayment(t[3], 'pagoBasico'),
+    check: (t) =>
+      expectOption(t[2], 'A', 'listado_servicios') ?? expectPayment(t[3], 'descuento de S/ 100'),
   },
   {
     name: 'sin experiencia → "C" es un CURSO, no una certificación',
@@ -107,6 +119,38 @@ const CASES: Case[] = [
         : (t[0]?.attachments.length ?? 0) < 3
           ? `llegaron ${t[0]?.attachments.length} fichas, no 3`
           : null,
+  },
+  {
+    name: 'corrige con una letra: A → "B" (sin la IA)',
+    messages: ['Hola', 'Tengo experiencia', 'A', 'B'],
+    check: (t) =>
+      expectOption(t[2], 'A', 'asesoria_perfil') ??
+      expectOption(t[3], 'B', 'mostrar_beneficios') ??
+      withoutModel(t[3], '"B"') ??
+      (fixedTexts(t[3]).includes('3 a 4') ? null : 'la oferta nueva no dice "3 a 4"'),
+  },
+  {
+    name: 'corrige con palabras: A → "mejor la de 3 a 4" → DNI',
+    messages: ['Hola', 'Tengo experiencia', 'A', 'mejor la de 3 a 4', 'sí'],
+    check: (t) => expectOption(t[3], 'B', 'mostrar_beneficios') ?? expectPayment(t[4], DNI),
+  },
+  {
+    name: 'curso A → "sí" → pago del Básico',
+    messages: ['Hola', 'No tengo exp', 'A', 'sí'],
+    check: (t) => expectPayment(t[3], 'descuento de S/ 100', 'descuento de S/ 800'),
+  },
+  {
+    name: 'curso C → "sí" → pago de Operación Múltiple, nunca el del Básico',
+    messages: ['Hola', 'No tengo exp', 'C', 'sí'],
+    check: (t) => expectPayment(t[3], 'descuento de S/ 800', 'descuento de S/ 100'),
+  },
+  {
+    name: 'la oferta dice qué opción es',
+    messages: ['Hola', 'Tengo experiencia', 'B'],
+    check: (t) =>
+      fixedTexts(t[2]).includes('3 a 4 maquinarias')
+        ? null
+        : `la oferta no nombra la opción: "${fixedTexts(t[2]).slice(0, 60)}"`,
   },
 ]
 

@@ -15,6 +15,7 @@ import { IDLE_TRIGGER } from '@/modules/conversation/nodeCatalog.js'
 import {
   getStateConfig,
   INITIAL_STATE,
+  type StepChoiceOption,
   type TransitionEvidence,
 } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
@@ -27,7 +28,7 @@ import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
 import { historyToChatMessages } from './chatHistory.js'
-import { parseChoice } from './choices.js'
+import { type ChoiceStep, type CurrentChoice, currentChoice, parseChoice } from './choices.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
 import {
   type FixedOutbound,
@@ -42,6 +43,7 @@ import { buildSystemPrompt, renderNodeBlock } from './prompts.js'
 import {
   executeTool,
   MAX_SERVICE_CARDS_PER_TURN,
+  renderChoiceMessages,
   serviceCardsForCategory,
   type ToolAttachment,
   type ToolContext,
@@ -50,6 +52,11 @@ import {
 import { kumaTools, withBusinessEscalation } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
+
+// Si al entrar a un paso `followUp` no hay elección vigente (no debería pasar),
+// nada de improvisar un pago: se deriva.
+const FOLLOW_UP_UNAVAILABLE_INSTRUCTION =
+  'No se pudo armar el mensaje de pago de lo que eligió. NO escribas montos ni datos de pago: decile que un asesor le confirma los detalles y escalá.'
 
 /**
  * Una respuesta del modelo armada por el código (ver `codeChoice` en
@@ -247,6 +254,19 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // Dónde quedó el turno por el mensaje del cliente, antes de cualquier tool.
   const openingState = effectiveState
 
+  // La elección vigente (`choices`): la última opción que eligió el cliente,
+  // leída del historial. Decide qué se puede re-elegir (`rechoose`) y qué manda
+  // el código al aceptar (`followUp` / `onAccept`). Se actualiza en el turno al elegir.
+  const choiceSteps: ChoiceStep[] = Object.entries(flow).flatMap(([step, config]) =>
+    config.choices ? [{ step, choices: config.choices }] : [],
+  )
+  let vigente: CurrentChoice | null = null
+  if (choiceSteps.length > 0) {
+    const rows = await messageService.getFixedMessageCalls(params.businessId, params.conversationId)
+    if (rows.ok) vigente = currentChoice(rows.data, choiceSteps)
+    else log.warn({ code: rows.error.code }, 'could not read the current choice')
+  }
+
   // Los mensajes fijos de este paso: el id lo da el paso compilado, el texto el
   // archivo del negocio. No depende del estado — se resuelve una vez y se
   // reusa cada vez que se recalcula el resto para un estado nuevo.
@@ -395,11 +415,23 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // nodo, así que esto solo invalida el sufijo (el bloque del nodo).
   function forState(state: string) {
     const config = getStateConfig(flow, state)
+    // Las opciones que se eligen acá: las del paso, o —en un paso `rechoose`— las
+    // de la elección vigente, para corregirla. Re-elegir solo en un turno que
+    // empezó en este paso: en el que se acaba de entrar eligiendo, la oferta
+    // recién salió.
+    const activeChoices: { route?: string; options: StepChoiceOption[] } | undefined =
+      config.choices
+        ? { route: config.choices.route, options: config.choices.options }
+        : config.rechoose && state === turnStart && vigente
+          ? { options: vigente.choices.options }
+          : undefined
     // A tool the state does not list is not refused — it is never offered, so
     // the model never considers it. Different layer from the executor's
     // gates, which judge the calls that do come through: the deposit gate
     // stays the authority over book_appointment.
-    const allowedToolNames = new Set(config.tools)
+    const allowedToolNames = new Set(
+      config.tools.filter((name) => name !== 'elegir_opcion' || activeChoices),
+    )
     const stateTools = kumaTools
       .filter((t) => t.type === 'function' && allowedToolNames.has(t.function.name))
       .map((t) => withBusinessEscalation(t, fileConfig?.escalateWhen))
@@ -423,15 +455,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // a mitad de turno.
       branches: config.branches,
       fixedMessages: stepFixedMessages,
-      ...(config.choices
-        ? {
-            choices: {
-              route: config.choices.route,
-              options: config.choices.options,
-              messages: fileMessages,
-            },
-          }
-        : {}),
+      ...(activeChoices ? { choices: { ...activeChoices, messages: fileMessages } } : {}),
       // El portero juzga contra lo que escribió el cliente, no contra lo que
       // el modelo cree que pidió (ver escalationGate.ts).
       ...(fileConfig?.escalationGate
@@ -465,6 +489,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     const systemPrompt = nodeBlock ? [basePrompt, '', nodeBlock].join('\n') : basePrompt
     return {
       stateConfig: config,
+      activeChoices,
       toolsParam,
       toolChoiceParam,
       stepFixedMessages,
@@ -473,7 +498,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     }
   }
 
-  let { stateConfig, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
+  let { stateConfig, activeChoices, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
     forState(effectiveState)
 
   log.debug(
@@ -517,9 +542,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // hubiera llamado elegir_opcion y después cerrado sin texto. Mismo camino que
   // cualquier herramienta (historial, cambio de paso, mensajes fijos), y una
   // llamada a OpenAI menos. Ver choices.ts.
-  const codeChoice = stateConfig.choices
-    ? parseChoice(params.userMessage, stateConfig.choices.options)
-    : null
+  const codeChoice = activeChoices ? parseChoice(params.userMessage, activeChoices.options) : null
   const codeCompletions: ChatCompletion[] = codeChoice
     ? [
         codeCompletion([
@@ -849,6 +872,17 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         error: toolResult.error,
       })
 
+      // La opción que se acaba de elegir pasa a ser la vigente: es la que manda
+      // su `onAccept` al aceptar. Del paso con `choices`, o la misma que se corrigió.
+      if (toolResult.chosenOption) {
+        const owner = stateConfig.choices
+          ? { step: effectiveState, choices: stateConfig.choices }
+          : vigente
+        if (owner) {
+          vigente = { step: owner.step, choices: owner.choices, option: toolResult.chosenOption }
+        }
+      }
+
       // Deduplicated and capped across the WHOLE turn, not per tool call — see
       // attachmentQueue, which is where both rules and the reason for them live.
       attachmentBudget = Math.max(attachmentBudget, toolResult.maxAttachments ?? 0)
@@ -873,9 +907,40 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           sentInStep = 0
           // El resto de esta vuelta tiene que ver el paso NUEVO — ver el
           // comentario de forState más arriba.
-          ;({ stateConfig, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
+          ;({ stateConfig, activeChoices, toolsParam, toolChoiceParam, toolContext, systemPrompt } =
             forState(effectiveState))
           chatMessages[0] = { role: 'system', content: systemPrompt }
+
+          // Al entrar al paso `followUp` (ej. el pago), el código manda lo que
+          // sigue de la elección vigente: el pago del curso elegido, o el pedido
+          // de DNI. Lo elegía la IA con una lista propia, y una vez cobró el
+          // descuento de otro curso.
+          const isFollowUp = choiceSteps.some((c) => c.choices.followUp === effectiveState)
+          const onAccept =
+            vigente?.choices.followUp === effectiveState ? (vigente.option.onAccept ?? []) : []
+          const follow =
+            onAccept.length > 0 && vigente
+              ? await renderChoiceMessages(
+                  onAccept,
+                  vigente.option,
+                  fileMessages,
+                  params.businessId,
+                )
+              : null
+          if (follow?.ok) {
+            for (const fixed of follow.outbound) {
+              if (fixedOut.length >= MAX_FIXED_MESSAGES_PER_TURN) break
+              fixedOut.push(fixed)
+              sentInStep++
+            }
+            codeFixedCalls.push(...follow.calls)
+          } else if (isFollowUp) {
+            log.error(
+              { state: effectiveState, option: vigente?.option.key ?? null },
+              'followUp step entered without a current choice to follow',
+            )
+            chatMessages.push({ role: 'system', content: FOLLOW_UP_UNAVAILABLE_INSTRUCTION })
+          }
         }
       }
 

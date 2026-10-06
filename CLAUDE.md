@@ -444,6 +444,20 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   vacío. **El mapeo letra → opción vive solo ahí**: no se repite en
   instrucciones ni en el `when` de los mensajes. Se valida al cargar el archivo
   (`checkedChoices` en `define.ts`). Prueba fija: `npm run qa:tecmin`.
+  **La elección vigente** (`currentChoice` en `llm/choices.ts`) es la última
+  opción elegida, leída del historial (`messageService.getFixedMessageCalls`): el
+  último mensaje fijo que es de UNA sola opción (los compartidos, como
+  "¿Realizamos tus certificados?", no dicen cuál fue). Sobre ella:
+  - **`followUp` + `onAccept`**: al entrar al paso `followUp` (Tecmin: el pago),
+    el código manda el `onAccept` de la opción vigente (el pago del curso
+    elegido, o el pedido del DNI). Lo elegía la IA con una lista propia y una vez
+    cobró el descuento de otro curso. Sin elección vigente: `log.error` y se deriva.
+    No se llama `then`: un objeto con `then` parece una promesa.
+  - **`rechoose: true`** en un paso (Tecmin: beneficios): se puede cambiar la
+    opción vigente ("mejor la B"), mismas opciones, sin cambiar de paso. Solo en
+    un turno que empezó en ese paso.
+  - Cada oferta de Tecmin empieza con `*{servicio}*`: el alumno ve qué entendió
+    Emma y lo corrige antes de pagar.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese

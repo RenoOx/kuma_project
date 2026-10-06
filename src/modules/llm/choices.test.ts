@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StepChoiceOption } from '@/modules/conversation/stateMachine.js'
-import { countDistinct, optionForCount, parseChoice } from './choices.js'
+import { countDistinct, currentChoice, optionForCount, parseChoice } from './choices.js'
 
 // Las certificaciones de Tecmin: el caso que nació esto (2026-10-06).
 const certs: StepChoiceOption[] = [
@@ -84,5 +84,75 @@ describe('countDistinct', () => {
     expect(countDistinct(['retroexcavadora', 'minicargador'])).toBe(2)
     expect(countDistinct(['Retroexcavadora', 'retroexcavadora ', ''])).toBe(1)
     expect(countDistinct(['Excavadora', 'cargador frontal', 'retroexcavadora'])).toBe(3)
+  })
+})
+
+describe('currentChoice', () => {
+  // Las certificaciones comparten "pregunta": ese mensaje no dice cuál fue.
+  const certSteps = [
+    {
+      step: 'asesoria_perfil',
+      choices: {
+        route: 'quiere-certificarse',
+        options: [
+          {
+            key: 'A',
+            serviceId: 'a',
+            send: ['detalle1a2', 'pregunta'],
+            count: [1, 2] as [number, number],
+          },
+          {
+            key: 'B',
+            serviceId: 'b',
+            send: ['detalle3a4', 'pregunta'],
+            count: [3, 4] as [number, number],
+          },
+        ],
+      },
+    },
+    {
+      step: 'listado_servicios',
+      choices: {
+        route: 'ruta-cierre',
+        options: [{ key: 'A', serviceId: 'x', send: ['beneficiosBasico', 'descuentoBasico'] }],
+      },
+    },
+  ]
+  const sent = (...messages: string[]) => ({
+    toolCalls: messages.map((message) => ({
+      type: 'function',
+      function: {
+        name: 'send_fixed_message',
+        arguments: JSON.stringify({ message, service: 's' }),
+      },
+    })),
+  })
+
+  it('is null without any choice in the history', () => {
+    expect(currentChoice([], certSteps)).toBeNull()
+    expect(currentChoice([sent('presentacion'), { toolCalls: null }], certSteps)).toBeNull()
+  })
+
+  it('finds the option of the last offer, skipping messages shared by several options', () => {
+    const found = currentChoice([sent('detalle1a2', 'pregunta')], certSteps)
+    expect([found?.step, found?.option.key]).toEqual(['asesoria_perfil', 'A'])
+  })
+
+  it('follows a later correction (rows newest first)', () => {
+    const found = currentChoice(
+      [sent('pagoCertificacion'), sent('detalle3a4', 'pregunta'), sent('detalle1a2', 'pregunta')],
+      certSteps,
+    )
+    expect(found?.option.key).toBe('B')
+  })
+
+  it('tells a course from a certification with the same letter', () => {
+    const found = currentChoice([sent('beneficiosBasico', 'descuentoBasico')], certSteps)
+    expect([found?.step, found?.option.serviceId]).toEqual(['listado_servicios', 'x'])
+  })
+
+  it('skips a broken row instead of failing', () => {
+    const broken = { toolCalls: [{ function: { name: 'send_fixed_message', arguments: '{nope' } }] }
+    expect(currentChoice([broken, sent('detalle1a2')], certSteps)?.option.key).toBe('A')
   })
 })

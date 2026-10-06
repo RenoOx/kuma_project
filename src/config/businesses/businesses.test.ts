@@ -269,3 +269,59 @@ describe('choices in a business file', () => {
     }
   })
 })
+
+describe('followUp, onAccept and rechoose in a business file', () => {
+  const option = (key: string, extra: Record<string, unknown> = {}) => ({
+    key,
+    service: `s-${key}`,
+    send: ['m1'],
+    ...extra,
+  })
+
+  function fileWith(choices: unknown, rechooseOn: 'informing' | 'confirmed' = 'informing') {
+    return () =>
+      defineBusinessConfig({
+        businessId: 'biz-followup',
+        name: 'followup',
+        flowType: 'sales',
+        fixedMessages: { m1: { text: 'uno' }, pago: { text: 'pago' } },
+        flow: [
+          { node: 'idle' },
+          {
+            node: 'greeting',
+            routes: [{ id: 'elige', when: 'eligió', to: 'informing' }],
+            // biome-ignore lint/suspicious/noExplicitAny: armados inválidos a propósito
+            choices: choices as any,
+          },
+          { node: 'informing', rechoose: rechooseOn === 'informing' },
+          { node: 'confirmed', rechoose: rechooseOn === 'confirmed' },
+        ],
+      })
+  }
+  const valid = {
+    route: 'elige',
+    followUp: 'confirmed',
+    options: [option('A', { onAccept: ['pago'] }), option('B', { onAccept: ['pago'] })],
+  }
+
+  it('compiles followUp, onAccept and rechoose', () => {
+    const config = fileWith(valid)()
+    expect(config.composition.overrides.greeting?.choices?.followUp).toBe('confirmed')
+    expect(config.composition.overrides.greeting?.choices?.options[0]?.onAccept).toEqual(['pago'])
+    expect(config.composition.overrides.informing?.rechoose).toBe(true)
+  })
+
+  it('refuses a followUp that is not a step of the flow', () => {
+    expect(fileWith({ ...valid, followUp: 'collect_data' })).toThrow()
+  })
+
+  it('refuses an option without onAccept when there is a followUp', () => {
+    expect(
+      fileWith({ ...valid, options: [option('A', { onAccept: ['pago'] }), option('B')] }),
+    ).toThrow()
+  })
+
+  it('refuses rechoose on a step no choice leads to', () => {
+    expect(fileWith(valid, 'confirmed')).toThrow()
+  })
+})

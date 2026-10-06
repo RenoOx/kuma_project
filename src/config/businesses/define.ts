@@ -83,6 +83,11 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    */
   choices?: {
     route: string
+    /**
+     * El paso donde el código manda el `onAccept` de la opción elegida (ej. el
+     * pedido de pago). Así el mensaje de pago no lo elige la IA.
+     */
+    followUp?: NodeIdFor<F>
     options: Array<{
       key: string
       /** Id del servicio en la lista del negocio. */
@@ -90,8 +95,15 @@ export interface BusinessStep<F extends FlowType, M extends string> {
       send: NoInfer<M>[]
       /** Rango de cantidad que define la opción; `null` = sin tope. */
       count?: [number, number | null]
+      /** Lo que manda el código al entrar a `followUp` si esta es la opción elegida. */
+      onAccept?: NoInfer<M>[]
     }>
   }
+  /**
+   * En este paso el cliente puede cambiar la opción que eligió en un paso con
+   * `choices` anterior ("mejor la B"): mismas opciones, misma etapa, oferta nueva.
+   */
+  rechoose?: boolean
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -293,6 +305,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
     ...(step.catalogOnEnter !== undefined ? { catalogOnEnter: step.catalogOnEnter } : {}),
     ...(step.choices !== undefined ? { choices: checkedChoices(step) } : {}),
+    ...(step.rechoose ? { rechoose: true } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
 }
@@ -318,6 +331,9 @@ function checkedChoices<F extends FlowType, M extends string>(
     if (keys.has(key)) throw new Error(`${where}: duplicated key "${key}"`)
     keys.add(key)
     if (option.send.length === 0) throw new Error(`${where}.${key}: send is empty`)
+    if (choices.followUp && (option.onAccept ?? []).length === 0) {
+      throw new Error(`${where}.${key}: with followUp, every option needs onAccept`)
+    }
     if (!option.service.trim()) throw new Error(`${where}.${key}: service is empty`)
   }
   // Rangos: todos o ninguno; desde 1, sin huecos ni cruces, solo el último sin tope.
@@ -339,12 +355,40 @@ function checkedChoices<F extends FlowType, M extends string>(
   }
   return {
     route: choices.route,
+    ...(choices.followUp ? { followUp: choices.followUp } : {}),
     options: choices.options.map((option) => ({
       key: option.key.trim().toUpperCase(),
       serviceId: option.service,
       send: [...option.send],
       ...(option.count ? { count: option.count } : {}),
+      ...(option.onAccept ? { onAccept: [...option.onAccept] } : {}),
     })),
+  }
+}
+
+/**
+ * Lo de `choices` que mira el flujo entero: el `followUp` es un paso del flujo,
+ * y un paso `rechoose` es adonde llega alguna elección (si no, no hay qué
+ * corregir).
+ */
+function checkChoiceSteps<F extends FlowType, M extends string>(
+  flow: ReadonlyArray<BusinessStep<F, M>>,
+): void {
+  const nodes = new Set<string>(flow.map((step) => step.node))
+  const chosenInto = new Set<string>()
+  for (const step of flow) {
+    if (!step.choices) continue
+    const followUp = step.choices.followUp
+    if (followUp && !nodes.has(followUp)) {
+      throw new Error(`${step.node}.choices: followUp "${followUp}" is not a step of the flow`)
+    }
+    const route = (step.routes ?? []).find((r) => r.id === step.choices?.route)
+    if (route) chosenInto.add(route.to)
+  }
+  for (const step of flow) {
+    if (step.rechoose && !chosenInto.has(step.node)) {
+      throw new Error(`${step.node}: rechoose, but no choices route leads here`)
+    }
   }
 }
 
@@ -358,6 +402,7 @@ function checkedChoices<F extends FlowType, M extends string>(
 export function defineBusinessConfig<const F extends FlowType, const M extends string = never>(
   input: BusinessConfigInput<F, M>,
 ): BusinessConfig {
+  checkChoiceSteps(input.flow)
   const overrides: Record<string, NodeOverride> = {}
   for (const step of input.flow) {
     const override = overrideOf(step)

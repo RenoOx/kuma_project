@@ -68,7 +68,8 @@ export interface ToolContext {
    * se rechaza.
    */
   choices?: {
-    route: string
+    /** Sin ruta: se re-elige en el mismo paso (`rechoose`), sin avanzar. */
+    route?: string
     options: ReadonlyArray<StepChoiceOption>
     messages: Readonly<Record<string, FixedMessage>>
   }
@@ -133,6 +134,8 @@ export interface ToolExecutionResult {
    * dueño leen los mensajes fijos de ahí.
    */
   codeSentFixedMessages?: Array<{ message: string; service: string }>
+  /** La opción que eligió elegir_opcion: pasa a ser la elección vigente del turno. */
+  chosenOption?: StepChoiceOption
 }
 
 // Both optional: no argument means the whole catalogue, which is what the old
@@ -571,29 +574,33 @@ export function groupIntoBlocks(slots: string[], slotDurationMinutes: number): A
 }
 
 /**
- * Ejecuta la opción elegida de un paso con `choices`: avanza por su ruta y manda
- * sus mensajes fijos con el nombre del servicio, por el mismo armado que
- * send_fixed_message (marcadores, bloques, galería). Si un mensaje no se puede
- * armar, no avanza: mejor que la IA derive a que el cliente reciba media oferta.
+ * Arma los mensajes fijos de una opción con el nombre de su servicio, por el
+ * mismo camino que send_fixed_message (marcadores, bloques, galería). Para la
+ * oferta al elegir (`send`) y para lo que sigue al aceptar (`onAccept`). Si uno no
+ * se puede armar, ninguno sale: mejor derivar que mandar media oferta.
  */
-async function executeChoice(
+export async function renderChoiceMessages(
+  ids: ReadonlyArray<string>,
   option: StepChoiceOption,
-  choices: NonNullable<ToolContext['choices']>,
-  context: ToolContext,
-): Promise<ToolExecutionResult> {
-  const settings = await businessService.getSettings(context.businessId)
+  messages: Readonly<Record<string, FixedMessage>>,
+  businessId: string,
+): Promise<
+  | { ok: true; outbound: FixedOutbound[]; calls: Array<{ message: string; service: string }> }
+  | { ok: false }
+> {
+  const settings = await businessService.getSettings(businessId)
   const service = settings.ok
     ? activeServices(settings.data).find((s) => s.id === option.serviceId)
     : undefined
 
   const outbound: FixedOutbound[] = []
-  for (const id of option.send) {
-    const message = choices.messages[id]
+  for (const id of ids) {
+    const message = messages[id]
     const rendered = message && service ? renderFixedMessage(message.text, service) : null
     if (!message || !service || !rendered?.ok) {
       logger.error(
         {
-          businessId: context.businessId,
+          businessId,
           option: option.key,
           message: id,
           reason: !service
@@ -604,19 +611,12 @@ async function executeChoice(
                 ? rendered.reason
                 : 'unknown',
         },
-        'choice could not be sent',
+        'choice message could not be rendered',
       )
-      return {
-        result: JSON.stringify({
-          error: 'fixed_message_unavailable',
-          instruction:
-            'No se pudo mandar esa opción. NO escribas la oferta ni des montos con tus palabras: decile al cliente que un asesor le confirma los detalles y escalá.',
-        }),
-        error: 'fixed_message_unavailable',
-      }
+      return { ok: false }
     }
     const gallery = message.images
-      ? await serviceMediaService.listForOwner(context.businessId, 'fixedMessage', id)
+      ? await serviceMediaService.listForOwner(businessId, 'fixedMessage', id)
       : []
     outbound.push({
       text: rendered.text,
@@ -624,22 +624,51 @@ async function executeChoice(
       ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
     })
   }
+  return {
+    ok: true,
+    outbound,
+    calls: ids.map((message) => ({ message, service: service?.name ?? '' })),
+  }
+}
+
+/**
+ * Ejecuta la opción elegida: manda su oferta y, si el paso tiene ruta, avanza
+ * por ella. Sin ruta es una corrección (`rechoose`): misma etapa, oferta nueva.
+ */
+async function executeChoice(
+  option: StepChoiceOption,
+  choices: NonNullable<ToolContext['choices']>,
+  context: ToolContext,
+): Promise<ToolExecutionResult> {
+  const rendered = await renderChoiceMessages(
+    option.send,
+    option,
+    choices.messages,
+    context.businessId,
+  )
+  if (!rendered.ok) {
+    return {
+      result: JSON.stringify({
+        error: 'fixed_message_unavailable',
+        instruction:
+          'No se pudo mandar esa opción. NO escribas la oferta ni des montos con tus palabras: decile al cliente que un asesor le confirma los detalles y escalá.',
+      }),
+      error: 'fixed_message_unavailable',
+    }
+  }
 
   return {
     result: JSON.stringify({
       status: 'chosen',
       option: option.key,
-      service: service?.name,
+      service: rendered.calls[0]?.service,
       instruction:
         'La oferta de esa opción ya le llega al cliente tal cual. No escribas nada más en este turno.',
     }),
-    trigger: ROUTE_TRIGGER,
-    evidence: { branch: choices.route },
-    fixedMessages: outbound,
-    codeSentFixedMessages: option.send.map((message) => ({
-      message,
-      service: service?.name ?? '',
-    })),
+    ...(choices.route ? { trigger: ROUTE_TRIGGER, evidence: { branch: choices.route } } : {}),
+    fixedMessages: rendered.outbound,
+    codeSentFixedMessages: rendered.calls,
+    chosenOption: option,
   }
 }
 

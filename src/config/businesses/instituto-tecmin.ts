@@ -66,6 +66,9 @@ function pagoCurso(descuento: string): string {
 function beneficiosDeCurso(duracion: string): string[] {
   return [
     [
+      // Primero, qué curso es (2026-10-06): si Emma entendió mal, el alumno lo
+      // ve acá y lo corrige antes de pagar.
+      '*{servicio}*',
       'En este curso la inversión semanal es S/ {precio} que incluye:',
       '- 03 días de clases teóricas (lunes, martes, miércoles).',
       '- 01 práctico en el taller (jueves).',
@@ -83,7 +86,9 @@ function beneficiosDeCurso(duracion: string): string[] {
 // que salga DESPUÉS de la foto.
 function detalleCertificado(precioOriginal: string, precioPromo: string): string[] {
   return [
-    `Te comento: El curso que incluye teoría y práctica para *aprender a operar de forma básica* ese equipo tiene una duración de 05 meses y medio con una inversión total de *${precioOriginal}*`,
+    // Primero, qué certificación es (2026-10-06): si Emma entendió mal la
+    // cantidad de máquinas, el alumno lo ve acá y lo corrige antes de pagar.
+    `*{servicio}*\nTe comento: El curso que incluye teoría y práctica para *aprender a operar de forma básica* ese equipo tiene una duración de 05 meses y medio con una inversión total de *${precioOriginal}*`,
     'Pero como tú ya sabes operar esos equipos',
     [
       `Por solo ${precioPromo} obtienes tus certificados y la inversión incluye:`,
@@ -424,21 +429,26 @@ export default defineBusinessConfig({
       // beneficios y su descuento y sale por "ruta-cierre".
       choices: {
         route: 'ruta-cierre',
+        // Al aceptar, el pago lo manda el código según el curso elegido (`onAccept`).
+        followUp: 'solicitar_pago',
         options: [
           {
             key: 'A',
             service: 'MgyYkPSaQggEnBhWoDis3',
             send: ['beneficiosBasico', 'descuentoBasico'],
+            onAccept: ['pagoBasico'],
           },
           {
             key: 'B',
             service: 'O0tfF05VumgUtDsm_98Et',
             send: ['beneficiosAvanzado', 'descuentoAvanzado'],
+            onAccept: ['pagoAvanzado'],
           },
           {
             key: 'C',
             service: 'cBP8HP8IdgIWgV54wWkBu',
             send: ['beneficiosMultiple', 'descuentoMultiple'],
+            onAccept: ['pagoMultiple'],
           },
         ],
       },
@@ -512,23 +522,28 @@ export default defineBusinessConfig({
       // opción manda el detalle de su certificación y la pregunta de cierre.
       choices: {
         route: 'quiere-certificarse',
+        // Al aceptar, el pedido del DNI lo manda el código (`onAccept`).
+        followUp: 'solicitar_pago',
         options: [
           {
             key: 'A',
             service: 'hF9Vywr6oNFbN1ILSeIEc',
             send: ['detalleCert1a2', 'preguntaCertificado'],
+            onAccept: ['pagoCertificacion'],
             count: [1, 2],
           },
           {
             key: 'B',
             service: '9By_80n__49szE5uTsoS4',
             send: ['detalleCert3a4', 'preguntaCertificado'],
+            onAccept: ['pagoCertificacion'],
             count: [3, 4],
           },
           {
             key: 'C',
             service: 'JRUhh01nF0N2fS4xNONMk',
             send: ['detalleCert5oMas', 'preguntaCertificado'],
+            onAccept: ['pagoCertificacion'],
             count: [5, null],
           },
         ],
@@ -566,6 +581,10 @@ export default defineBusinessConfig({
         // el detalle de la certificación) la elige y la manda el código al entrar
         // (`choices` del paso anterior): acá ya no se decide qué mensaje mandar.
         'La oferta de lo que eligió ya le llegó sola al entrar a este paso: nunca la repitas ni la resumas, y no inventes ningún monto.',
+        // 2026-10-06: la oferta dice arriba qué opción es; si el alumno ve que no
+        // era esa, la corrige acá (`rechoose`). Una letra sola la resuelve el
+        // código sin la IA.
+        'Si quiere OTRA opción ("mejor la B", "en realidad son 3 máquinas", "prefiero el avanzado"), llamá elegir_opcion con lo que dijo: el sistema le manda la oferta nueva. No escribas nada más.',
         'Nunca pidas el DNI ni datos de pago con tus palabras: eso lo hace el paso siguiente con su mensaje fijo.',
       ].join('\n'),
       // El genérico ("Esto es lo que vas a tener. ¿Seguimos con tu
@@ -582,6 +601,7 @@ export default defineBusinessConfig({
       // turno se descarta en código — pedírselo por instrucción falló 4 veces.
       fixedOnly: true,
       cta: false,
+      rechoose: true,
       routes: [
         {
           id: 'continua',
@@ -594,9 +614,10 @@ export default defineBusinessConfig({
     {
       node: 'solicitar_pago',
       extraInstructions: [
-        'Apenas entrés a este paso, mandá con send_fixed_message el mensaje de pago de lo que eligió:',
-        '- Curso: "pagoBasico" (BÁSICO), "pagoAvanzado" (AVANZADO), "pagoMultiple" (OPERACIÓN MÚLTIPLE) (servicio: el nombre COMPLETO de la lista — "BÁSICO - Operación y mantenimiento de equipos", "AVANZADO - Operación y mantenimiento de 3 equipos", "OPERACIÓN MÚLTIPLE Y MANTENIMIENTO DE EQUIPOS").',
-        '- Certificación: "pagoCertificacion", con la certificación que eligió.',
+        // 2026-10-06: el mensaje de pago (o el pedido del DNI) lo manda el código
+        // al entrar, según lo que eligió (`choices.onAccept`). Antes lo elegía la IA
+        // con una lista propia, y una vez cobró el descuento de otro curso.
+        'El mensaje de pago (curso) o el pedido del DNI (certificación) ya le llegó solo al entrar a este paso: no lo repitas ni lo escribas vos.',
         'No escribas ningún otro monto: en un curso el único pago es la inscripción de S/ 150, que ya va en el mensaje. Si vuelve a preguntar cómo pagar: "Por aquí la inscripción es por Yape 934833829, a nombre del Director Ejecutivo del Instituto: Alexis Gamaniel Pérez Palacios. Lo demás te lo confirma el asesor 😊" En una certificación no se paga por chat: solo se espera el DNI.',
         // G01, C02, C06 (2026-09-30): el texto "aquí está" se procesa antes que
         // la foto (que espera 10 s por si vienen más), y Emma contestaba "no
@@ -620,7 +641,6 @@ export default defineBusinessConfig({
       // respuesta entera: termina en "me mandas la captura", sin nada atrás.
       fixedOnly: true,
       cta: false,
-      fixedMessages: ['pagoBasico', 'pagoAvanzado', 'pagoMultiple', 'pagoCertificacion'],
       // Con la primera foto (DNI o voucher): se la reenvía al dueño y Emma se
       // pausa en ese chat. El dueño la vuelve a prender desde el Inbox.
       // `reply` (2026-10-01): lo de siempre era "¡Recibí tu imagen! Dame un
@@ -720,19 +740,19 @@ export default defineBusinessConfig({
     // porque el monto del DESCUENTO que menciona cambia: con los montos en una
     // lista, el modelo ya mezcló una vez cuál era de quién.
     pagoBasico: {
-      when: 'Eligió el curso BÁSICO y quiere seguir con la inscripción.',
+      when: 'Lo manda el código al entrar a solicitar_pago, según la opción elegida (`choices.onAccept`).',
       text: pagoCurso('S/ 100'),
     },
     pagoAvanzado: {
-      when: 'Eligió el curso AVANZADO y quiere seguir con la inscripción.',
+      when: 'Lo manda el código al entrar a solicitar_pago, según la opción elegida (`choices.onAccept`).',
       text: pagoCurso('S/ 300'),
     },
     pagoMultiple: {
-      when: 'Eligió el curso OPERACIÓN MÚLTIPLE y quiere seguir con la inscripción.',
+      when: 'Lo manda el código al entrar a solicitar_pago, según la opción elegida (`choices.onAccept`).',
       text: pagoCurso('S/ 800'),
     },
     pagoCertificacion: {
-      when: 'Eligió una CERTIFICACIÓN y quiere seguir con la inscripción.',
+      when: 'Lo manda el código al entrar a solicitar_pago, según la opción elegida (`choices.onAccept`).',
       text: [
         'Para empezar a realizar el tramite de tus certificados. Enviame la foto de tu DNI.',
       ].join('\n'),
