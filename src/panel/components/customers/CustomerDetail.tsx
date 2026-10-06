@@ -25,7 +25,12 @@ export function CustomerDetail({
         <SheetHeader>
           <SheetTitle className="pr-8">
             {data
-              ? contactLabel(data.customer.phone, data.phoneHidden, data.waUsername)
+              ? contactLabel(
+                  data.customer.phone,
+                  data.phoneHidden,
+                  data.waUsername,
+                  data.customer.name,
+                )
               : 'Contacto'}
           </SheetTitle>
           {data && (
