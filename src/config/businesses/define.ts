@@ -1,6 +1,10 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import type { ImageHandling, NodeIdFor } from '@/modules/conversation/nodeCatalog.js'
-import type { FlowComposition, NodeOverride } from '@/modules/conversation/stateMachine.js'
+import type {
+  FlowComposition,
+  NodeOverride,
+  StepChoices,
+} from '@/modules/conversation/stateMachine.js'
 import type { EscalationGate } from '@/modules/llm/escalationGate.js'
 import type { FixedMessage } from '@/modules/llm/fixedMessage.js'
 
@@ -69,6 +73,25 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    * ventana de repetición. En ese turno el texto de Emma es exactamente el `cta`.
    */
   catalogOnEnter?: string
+  /**
+   * Opciones que se eligen en este paso, y la elección la hace el CÓDIGO: una
+   * letra o un tramo se resuelven sin la IA; si el cliente lo dice con otras
+   * palabras, la IA solo pasa lo que entendió (la letra, cuántas, o la lista de
+   * lo que nombró) y el código cuenta. Al elegir, sale por `route` y manda los
+   * mensajes de `send` con el servicio de la opción. El mapeo letra → opción vive
+   * SOLO acá: no se repite en instrucciones. Ver StepChoices en stateMachine.
+   */
+  choices?: {
+    route: string
+    options: Array<{
+      key: string
+      /** Id del servicio en la lista del negocio. */
+      service: string
+      send: NoInfer<M>[]
+      /** Rango de cantidad que define la opción; `null` = sin tope. */
+      count?: [number, number | null]
+    }>
+  }
 }
 
 export interface BusinessConfigInput<F extends FlowType, M extends string> {
@@ -269,8 +292,60 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
     ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
     ...(step.catalogOnEnter !== undefined ? { catalogOnEnter: step.catalogOnEnter } : {}),
+    ...(step.choices !== undefined ? { choices: checkedChoices(step) } : {}),
   }
   return Object.keys(override).length > 0 ? override : null
+}
+
+/**
+ * Rompe al importar el archivo si las opciones de un paso no pueden funcionar:
+ * así un error de armado sale en el typecheck/tests y no en una conversación.
+ */
+function checkedChoices<F extends FlowType, M extends string>(
+  step: BusinessStep<F, M>,
+): StepChoices {
+  const choices = step.choices
+  if (!choices) throw new Error('checkedChoices without choices')
+  const where = `${step.node}.choices`
+  if (!(step.routes ?? []).some((route) => route.id === choices.route)) {
+    throw new Error(`${where}: route "${choices.route}" is not one of the step routes`)
+  }
+  if (choices.options.length < 2) throw new Error(`${where}: needs at least 2 options`)
+  const keys = new Set<string>()
+  for (const option of choices.options) {
+    const key = option.key.trim().toUpperCase()
+    if (!/^[A-Z]$/.test(key)) throw new Error(`${where}: key "${option.key}" must be one letter`)
+    if (keys.has(key)) throw new Error(`${where}: duplicated key "${key}"`)
+    keys.add(key)
+    if (option.send.length === 0) throw new Error(`${where}.${key}: send is empty`)
+    if (!option.service.trim()) throw new Error(`${where}.${key}: service is empty`)
+  }
+  // Rangos: todos o ninguno; desde 1, sin huecos ni cruces, solo el último sin tope.
+  const withCount = choices.options.filter((o) => o.count)
+  if (withCount.length > 0) {
+    if (withCount.length !== choices.options.length) {
+      throw new Error(`${where}: count must be set on every option or on none`)
+    }
+    const sorted = [...withCount].sort((a, b) => (a.count?.[0] ?? 0) - (b.count?.[0] ?? 0))
+    let next = 1
+    sorted.forEach((option, i) => {
+      const [from, to] = option.count ?? [0, 0]
+      const last = i === sorted.length - 1
+      if (from !== next) throw new Error(`${where}: ranges must start at ${next} (got ${from})`)
+      if (to === null && !last) throw new Error(`${where}: only the last range can be open`)
+      if (to !== null && to < from) throw new Error(`${where}: range ${from}-${to} is reversed`)
+      next = (to ?? from) + 1
+    })
+  }
+  return {
+    route: choices.route,
+    options: choices.options.map((option) => ({
+      key: option.key.trim().toUpperCase(),
+      serviceId: option.service,
+      send: [...option.send],
+      ...(option.count ? { count: option.count } : {}),
+    })),
+  }
 }
 
 /**

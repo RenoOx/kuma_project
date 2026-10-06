@@ -13,19 +13,25 @@ import {
   serviceCategories,
 } from '@/modules/business/business.settings.js'
 import { ROUTE_TRIGGER } from '@/modules/conversation/nodeCatalog.js'
-import type { TransitionEvidence } from '@/modules/conversation/stateMachine.js'
+import type { StepChoiceOption, TransitionEvidence } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
 import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/imageExpectation.js'
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
+import { countDistinct, optionForCount } from './choices.js'
 import {
   type EscalationGate,
   escalationAllowed,
   escalationNotWarrantedInstruction,
 } from './escalationGate.js'
-import { type FixedOutbound, renderFixedMessage, type StepFixedMessage } from './fixedMessage.js'
+import {
+  type FixedMessage,
+  type FixedOutbound,
+  renderFixedMessage,
+  type StepFixedMessage,
+} from './fixedMessage.js'
 
 export interface ToolContext {
   businessId: string
@@ -56,6 +62,16 @@ export interface ToolContext {
   customerText?: string
   /** El último mensaje de Emma antes de este turno, para saber si el cliente insiste. */
   previousAssistantText?: string | null
+  /**
+   * Las opciones del paso actual (`choices`), con el texto de los mensajes fijos
+   * que manda cada una. Solo en un paso con `choices`; sin esto, elegir_opcion
+   * se rechaza.
+   */
+  choices?: {
+    route: string
+    options: ReadonlyArray<StepChoiceOption>
+    messages: Readonly<Record<string, FixedMessage>>
+  }
 }
 
 export interface ToolAttachment {
@@ -110,6 +126,13 @@ export interface ToolExecutionResult {
   attachments?: ToolAttachment[]
   /** Mensajes fijos ya completos: salen ANTES de la respuesta de Emma, tal cual. */
   fixedMessages?: FixedOutbound[]
+  /**
+   * Los mensajes fijos que mandó el CÓDIGO (elegir_opcion), como si la IA
+   * hubiera llamado send_fixed_message con estos datos. llm.service los deja en
+   * el historial con esa forma: el embudo del panel y el resumen del aviso al
+   * dueño leen los mensajes fijos de ahí.
+   */
+  codeSentFixedMessages?: Array<{ message: string; service: string }>
 }
 
 // Both optional: no argument means the whole catalogue, which is what the old
@@ -130,6 +153,12 @@ const confirmSummaryArgs = z.object({
 // The id is echoed back from the prompt, so it is bounded but not enumerated:
 // which ids are valid depends on the step, and only context.branches knows.
 const advanceFlowArgs = z.object({ branch: z.string().min(1).max(64) })
+
+const elegirOpcionArgs = z.object({
+  opcion: z.string().trim().min(1).max(20).optional(),
+  cantidad: z.number().int().min(0).max(100).optional(),
+  elementos: z.array(z.string().max(80)).max(30).optional(),
+})
 
 const sendFixedMessageArgs = z.object({
   message: z.string().min(1).max(64),
@@ -539,6 +568,79 @@ export function groupIntoBlocks(slots: string[], slotDurationMinutes: number): A
   if (run.length > 0) blocks.push(makeBlock(run, slotDurationMinutes))
 
   return blocks
+}
+
+/**
+ * Ejecuta la opción elegida de un paso con `choices`: avanza por su ruta y manda
+ * sus mensajes fijos con el nombre del servicio, por el mismo armado que
+ * send_fixed_message (marcadores, bloques, galería). Si un mensaje no se puede
+ * armar, no avanza: mejor que la IA derive a que el cliente reciba media oferta.
+ */
+async function executeChoice(
+  option: StepChoiceOption,
+  choices: NonNullable<ToolContext['choices']>,
+  context: ToolContext,
+): Promise<ToolExecutionResult> {
+  const settings = await businessService.getSettings(context.businessId)
+  const service = settings.ok
+    ? activeServices(settings.data).find((s) => s.id === option.serviceId)
+    : undefined
+
+  const outbound: FixedOutbound[] = []
+  for (const id of option.send) {
+    const message = choices.messages[id]
+    const rendered = message && service ? renderFixedMessage(message.text, service) : null
+    if (!message || !service || !rendered?.ok) {
+      logger.error(
+        {
+          businessId: context.businessId,
+          option: option.key,
+          message: id,
+          reason: !service
+            ? 'service not found'
+            : !message
+              ? 'undeclared'
+              : rendered?.ok === false
+                ? rendered.reason
+                : 'unknown',
+        },
+        'choice could not be sent',
+      )
+      return {
+        result: JSON.stringify({
+          error: 'fixed_message_unavailable',
+          instruction:
+            'No se pudo mandar esa opción. NO escribas la oferta ni des montos con tus palabras: decile al cliente que un asesor le confirma los detalles y escalá.',
+        }),
+        error: 'fixed_message_unavailable',
+      }
+    }
+    const gallery = message.images
+      ? await serviceMediaService.listForOwner(context.businessId, 'fixedMessage', id)
+      : []
+    outbound.push({
+      text: rendered.text,
+      ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
+      ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+    })
+  }
+
+  return {
+    result: JSON.stringify({
+      status: 'chosen',
+      option: option.key,
+      service: service?.name,
+      instruction:
+        'La oferta de esa opción ya le llega al cliente tal cual. No escribas nada más en este turno.',
+    }),
+    trigger: ROUTE_TRIGGER,
+    evidence: { branch: choices.route },
+    fixedMessages: outbound,
+    codeSentFixedMessages: option.send.map((message) => ({
+      message,
+      service: service?.name ?? '',
+    })),
+  }
 }
 
 export async function executeTool(
@@ -1175,6 +1277,19 @@ export async function executeTool(
         }
       }
 
+      // La ruta de una elección (`choices`) solo la toma elegir_opcion: por acá
+      // el cliente llegaría al paso siguiente sin la oferta de lo que eligió.
+      if (context.choices?.route === chosen.id) {
+        return {
+          result: JSON.stringify({
+            error: 'use_elegir_opcion',
+            instruction:
+              'Esa ruta se toma con elegir_opcion, pasando lo que dijo el cliente (la letra, cuántas o la lista). Llamá elegir_opcion.',
+          }),
+          error: 'use_elegir_opcion',
+        }
+      }
+
       return {
         result: JSON.stringify({
           status: 'advanced',
@@ -1186,6 +1301,42 @@ export async function executeTool(
         // the trigger says "the owner's routing fired", this says which one.
         evidence: { branch: chosen.id },
       }
+    }
+
+    if (name === 'elegir_opcion') {
+      const parsed = elegirOpcionArgs.safeParse(args)
+      if (!parsed.success) return malformedArgs(name, parsed.error)
+      const choices = context.choices
+      if (!choices) {
+        return {
+          result: JSON.stringify({
+            error: 'no_choices',
+            instruction:
+              'Este paso no tiene opciones para elegir. No vuelvas a llamar esta herramienta acá.',
+          }),
+          error: 'no_choices',
+        }
+      }
+
+      // La letra que nombró, o el rango que corresponde a lo que contó el código.
+      const { opcion, cantidad, elementos } = parsed.data
+      const byKey = opcion
+        ? choices.options.find((o) => o.key.toUpperCase() === opcion.trim().toUpperCase())
+        : undefined
+      const count = elementos && elementos.length > 0 ? countDistinct(elementos) : cantidad
+      const option = byKey ?? (count !== undefined ? optionForCount(count, choices.options) : null)
+      if (!option) {
+        return {
+          result: JSON.stringify({
+            error: 'no_option',
+            available: choices.options.map((o) => o.key),
+            instruction:
+              'No se pudo saber qué opción eligió. Preguntale cuál quiere, por su letra, sin precios. No elijas vos.',
+          }),
+          error: 'no_option',
+        }
+      }
+      return executeChoice(option, choices, context)
     }
 
     if (name === 'send_fixed_message') {

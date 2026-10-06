@@ -1,7 +1,7 @@
 import type { BusinessSettings, FlowType } from '@/modules/business/business.settings.js'
 import { activeServices } from '@/modules/business/business.settings.js'
 import { APPOINTMENT_CORE_EXTENSIONS, APPOINTMENT_NODES } from './nodes/appointments.nodes.js'
-import { ADVANCE_FLOW, SEND_FIXED_MESSAGE } from './nodes/building-blocks.js'
+import { ADVANCE_FLOW, ELEGIR_OPCION, SEND_FIXED_MESSAGE } from './nodes/building-blocks.js'
 import { CORE_ENTRY_NODES, CORE_EXIT_NODES, type CoreNodeId } from './nodes/core.nodes.js'
 import { SALES_CORE_EXTENSIONS, SALES_NODES } from './nodes/sales.nodes.js'
 import type { NodeBlueprint, NodeExtension, NodeRequirement } from './nodes/types.js'
@@ -59,7 +59,7 @@ export const EMITTED_TRIGGERS: ReadonlyMap<string, string> = new Map([
   ['summary_confirmed', 'toolExecutor.ts — confirm_summary'],
   ['correction_requested', 'toolExecutor.ts — confirm_summary (customer said no)'],
   ['field_corrected', 'toolExecutor.ts — correct_field'],
-  ['route_selected', 'toolExecutor.ts — advance_flow'],
+  ['route_selected', 'toolExecutor.ts — advance_flow, elegir_opcion'],
 ])
 
 /**
@@ -78,6 +78,9 @@ export const ROUTE_TOOL = ADVANCE_FLOW
 
 /** La herramienta que recibe un paso cuando el archivo del negocio le asigna mensajes fijos. */
 export const FIXED_MESSAGE_TOOL = SEND_FIXED_MESSAGE
+
+/** La herramienta que recibe un paso cuando el archivo del negocio le da `choices`. */
+export const CHOICE_TOOL = ELEGIR_OPCION
 
 // Universal exit. Added by the compiler to every node, so no blueprint declares
 // it and no owner can remove it.

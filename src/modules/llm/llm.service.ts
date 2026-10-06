@@ -1,6 +1,7 @@
 import type {
   ChatCompletion,
   ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions.js'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
@@ -26,6 +27,7 @@ import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
 import { historyToChatMessages } from './chatHistory.js'
+import { parseChoice } from './choices.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
 import {
   type FixedOutbound,
@@ -48,6 +50,32 @@ import {
 import { kumaTools, withBusinessEscalation } from './tools.js'
 
 const MODEL = 'gpt-4o-mini'
+
+/**
+ * Una respuesta del modelo armada por el código (ver `codeChoice` en
+ * generateReply): con herramientas, o vacía para cerrar el turno.
+ */
+function codeCompletion(toolCalls: ChatCompletionMessageToolCall[]): ChatCompletion {
+  return {
+    id: 'code',
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: 'code',
+    choices: [
+      {
+        index: 0,
+        finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
+        logprobs: null,
+        message: {
+          role: 'assistant',
+          content: toolCalls.length > 0 ? null : '',
+          refusal: null,
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+        },
+      },
+    ],
+  }
+}
 const TEMPERATURE = 0.4
 // Raised from 300: a catalogue answer that lists up to 8 services with names
 // and prices does not fit in 300, and the reply reached the customer cut off
@@ -395,6 +423,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // a mitad de turno.
       branches: config.branches,
       fixedMessages: stepFixedMessages,
+      ...(config.choices
+        ? {
+            choices: {
+              route: config.choices.route,
+              options: config.choices.options,
+              messages: fileMessages,
+            },
+          }
+        : {}),
       // El portero juzga contra lo que escribió el cliente, no contra lo que
       // el modelo cree que pidió (ver escalationGate.ts).
       ...(fileConfig?.escalationGate
@@ -475,23 +512,56 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // cliente sin respuesta.
   let nudged = false
 
+  // Una elección que es SOLO una letra o un tramo ("B", "la c", "1 a 2") la
+  // resuelve el código, sin preguntarle al modelo: se ejecuta como si el modelo
+  // hubiera llamado elegir_opcion y después cerrado sin texto. Mismo camino que
+  // cualquier herramienta (historial, cambio de paso, mensajes fijos), y una
+  // llamada a OpenAI menos. Ver choices.ts.
+  const codeChoice = stateConfig.choices
+    ? parseChoice(params.userMessage, stateConfig.choices.options)
+    : null
+  const codeCompletions: ChatCompletion[] = codeChoice
+    ? [
+        codeCompletion([
+          {
+            id: `code_choice_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: 'elegir_opcion',
+              arguments: JSON.stringify({ opcion: codeChoice.key }),
+            },
+          },
+        ]),
+        codeCompletion([]),
+      ]
+    : []
+  if (codeChoice) {
+    log.info(
+      { state: effectiveState, option: codeChoice.key },
+      'choice resolved by code, no model call',
+    )
+  }
+
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
+    const fromCode = codeCompletions.shift()
     try {
       // Por el freno (openaiGate): espera en fila si la cuenta está cerca del
       // límite y reintenta un 429 hasta el plazo del turno, en vez de rendirse
       // en 30 s.
-      completion = await createChatCompletion(
-        {
-          model,
-          messages: chatMessages,
-          tools: toolsParam,
-          tool_choice: toolChoiceParam,
-          temperature: TEMPERATURE,
-          max_tokens: MAX_TOKENS,
-        },
-        turnDeadline,
-      )
+      completion =
+        fromCode ??
+        (await createChatCompletion(
+          {
+            model,
+            messages: chatMessages,
+            tools: toolsParam,
+            tool_choice: toolChoiceParam,
+            temperature: TEMPERATURE,
+            max_tokens: MAX_TOKENS,
+          },
+          turnDeadline,
+        ))
     } catch (cause) {
       const unavailable = cause instanceof OpenAIUnavailableError ? cause.reason : null
       return err(
@@ -730,6 +800,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       tool_calls: toolCalls,
     })
 
+    // Los mensajes fijos que mandó el código en esta vuelta (elegir_opcion).
+    const codeFixedCalls: Array<{ message: string; service: string }> = []
     for (const call of toolCalls) {
       if (call.type !== 'function') continue
 
@@ -782,15 +854,6 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       attachmentBudget = Math.max(attachmentBudget, toolResult.maxAttachments ?? 0)
       queueAttachments(attachments, toolResult.attachments ?? [], attachmentBudget)
 
-      for (const fixed of toolResult.fixedMessages ?? []) {
-        if (fixedOut.length >= MAX_FIXED_MESSAGES_PER_TURN) {
-          log.warn({ tool: call.function.name }, 'fixed message beyond per-turn cap ignored')
-          continue
-        }
-        fixedOut.push(fixed)
-        sentInStep++
-      }
-
       // Folded over the turn's own variable rather than re-read from the row:
       // when the model calls two tools in one iteration, the second has to be
       // evaluated against the state the first one left behind. Persisted at the
@@ -816,6 +879,20 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         }
       }
 
+      // Después del cambio de paso, no antes: una herramienta que avanza Y manda
+      // mensajes (elegir_opcion) los manda para el paso NUEVO. Contados antes,
+      // el reinicio de sentInStep los borraba y el paso nuevo creía que todavía
+      // debía su mensaje fijo.
+      for (const fixed of toolResult.fixedMessages ?? []) {
+        if (fixedOut.length >= MAX_FIXED_MESSAGES_PER_TURN) {
+          log.warn({ tool: call.function.name }, 'fixed message beyond per-turn cap ignored')
+          continue
+        }
+        fixedOut.push(fixed)
+        sentInStep++
+      }
+      codeFixedCalls.push(...(toolResult.codeSentFixedMessages ?? []))
+
       if (call.function.name === 'escalate_to_human' && !toolResult.error) {
         escalated = true
       }
@@ -834,6 +911,41 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         tool_call_id: call.id,
         content: toolResult.result,
       })
+    }
+
+    // Lo que mandó el código queda en el historial con la forma de un
+    // send_fixed_message de la IA: el embudo del panel (funnel.ts) y el resumen
+    // del aviso al dueño (mediaForwarder.fixedMessageServicesOf) leen los
+    // mensajes fijos de ahí, y el modelo ve en el turno siguiente qué salió.
+    // Después de todos los resultados de esta vuelta, por la misma regla de
+    // OpenAI que el bloque de abajo.
+    if (codeFixedCalls.length > 0) {
+      const calls = codeFixedCalls.map((c, i) => ({
+        id: `code_fixed_${Date.now()}_${i}`,
+        type: 'function' as const,
+        function: { name: 'send_fixed_message', arguments: JSON.stringify(c) },
+      }))
+      const persistCalls = await messageService.append({
+        businessId: params.businessId,
+        conversationId: params.conversationId,
+        role: 'assistant',
+        content: '',
+        toolCalls: calls,
+      })
+      if (!persistCalls.ok) return persistCalls
+      chatMessages.push({ role: 'assistant', content: null, tool_calls: calls })
+      for (const call of calls) {
+        const sent = JSON.stringify({ status: 'sent' })
+        const persistSent = await messageService.append({
+          businessId: params.businessId,
+          conversationId: params.conversationId,
+          role: 'tool',
+          content: sent,
+          toolCallId: call.id,
+        })
+        if (!persistSent.ok) return persistSent
+        chatMessages.push({ role: 'tool', tool_call_id: call.id, content: sent })
+      }
     }
 
     // El mensaje fijo queda en el historial como dicho por Emma: así el próximo
