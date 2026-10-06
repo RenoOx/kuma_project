@@ -40,6 +40,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     async sendVideo(jid, video, caption) {
       sent.push({ jid, text: `[video ${video.length}b] ${caption || ''}` })
     },
+    async labelChat() {
+      // noop
+    },
     onMessage() {
       // noop
     },

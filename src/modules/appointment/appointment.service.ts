@@ -31,7 +31,7 @@ import {
   ValidationError,
 } from '@/shared/errors.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
-import { customerContactLabel } from '@/shared/phone.js'
+import { customerContactLabel, customerFindHints } from '@/shared/phone.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as appointmentRepo from './appointment.repo.js'
 
@@ -1114,6 +1114,7 @@ async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
   const text = [
     '🔔 *Escalación pendiente*',
     `Cliente: ${who}${phone ? ` ${phone}` : ''}`,
+    ...customerFindHints(customer),
     `Motivo: ${params.reason}`,
     'Revisá la conversación cuando puedas.',
   ].join('\n')

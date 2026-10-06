@@ -208,6 +208,20 @@ export default defineBusinessConfig({
   audioReply: 'No puedo escuchar audios por el momento, te agradecería que me mandaras texto 😊',
   handoff: 'Un asesor se comunicará contigo 😊',
 
+  // Etiquetas del WhatsApp Business de Tecmin (2026-10-05). Solo para el alumno
+  // sin número ni @usuario: al mandar su requisito (captura o DNI), su chat queda
+  // con la etiqueta de lo que eligió y el dueño lo encuentra filtrando. Una por
+  // servicio, para distinguir a cinco alumnos etiquetados sin abrir el chat. Las
+  // claves son los ids de los servicios del negocio.
+  whatsappLabels: {
+    MgyYkPSaQggEnBhWoDis3: { id: '901', name: 'Envió requisito: Curso Básico' },
+    O0tfF05VumgUtDsm_98Et: { id: '902', name: 'Envió requisito: Curso Avanzado' },
+    cBP8HP8IdgIWgV54wWkBu: { id: '903', name: 'Envió requisito: Curso Op. Múltiple' },
+    hF9Vywr6oNFbN1ILSeIEc: { id: '904', name: 'Envió requisito: Certificado 1-2 máq.' },
+    '9By_80n__49szE5uTsoS4': { id: '905', name: 'Envió requisito: Certificado 3-4 máq.' },
+    JRUhh01nF0N2fS4xNONMk: { id: '906', name: 'Envió requisito: Certificado 5+ máq.' },
+  },
+
   // El embudo del panel (Dashboard): quién recibió la oferta y quién recibió el
   // pedido de pago o del DNI. El panel suma adelante los leads y atrás la foto
   // pedida y Pagó / No pagó.

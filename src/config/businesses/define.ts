@@ -161,6 +161,15 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * panel no muestra el embudo.
    */
   funnel?: { label: string; fixedMessages: NoInfer<M>[] }[]
+  /**
+   * Etiquetas del WhatsApp Business del dueño, por id de servicio. Cuando un
+   * cliente sin número ni @usuario manda la foto de un paso con reenvío, Emma le
+   * pone al chat la etiqueta de lo que eligió, para que el dueño lo encuentre
+   * filtrando por etiqueta (2026-10-05). Ids numéricos desde 900: crear una
+   * etiqueta con un id que ya existe RENOMBRA la del dueño (las de fábrica son
+   * 1–5 y las suyas siguen desde 6). WhatsApp Business admite 20 en total.
+   */
+  whatsappLabels?: Record<string, WhatsappLabel>
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
 }
@@ -173,6 +182,12 @@ export interface BusinessSettingsOverlay {
   collectData?: string[]
   requiresDeposit?: false
   handoff?: string
+}
+
+/** Una etiqueta del WhatsApp Business del dueño (ver `whatsappLabels`). */
+export interface WhatsappLabel {
+  id: string
+  name: string
 }
 
 /** Una etapa del embudo de ventas: las conversaciones que recibieron alguno de estos mensajes fijos. */
@@ -197,6 +212,35 @@ export interface BusinessConfig {
   ownerAssistant?: false
   audioReply?: string
   funnel?: FunnelStage[]
+  whatsappLabels?: Record<string, WhatsappLabel>
+}
+
+// Ids propios desde 900: nunca chocan con las etiquetas del dueño.
+const MIN_LABEL_ID = 900
+const MAX_LABEL_NAME = 40
+
+/** Rompe al importar el archivo si una etiqueta podría pisar otra o no entra. */
+function checkedLabels(labels: Record<string, WhatsappLabel>): Record<string, WhatsappLabel> {
+  const ids = new Set<string>()
+  for (const [serviceId, label] of Object.entries(labels)) {
+    if (!/^\d+$/.test(label.id) || Number(label.id) < MIN_LABEL_ID) {
+      throw new Error(
+        `whatsappLabels[${serviceId}]: id "${label.id}" must be a number >= ${MIN_LABEL_ID}`,
+      )
+    }
+    if (ids.has(label.id)) throw new Error(`whatsappLabels: duplicated label id "${label.id}"`)
+    ids.add(label.id)
+    const name = label.name.trim()
+    if (name.length === 0 || name.length > MAX_LABEL_NAME) {
+      throw new Error(`whatsappLabels[${serviceId}]: name must be 1-${MAX_LABEL_NAME} characters`)
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(labels).map(([serviceId, label]) => [
+      serviceId,
+      { id: label.id, name: label.name.trim() },
+    ]),
+  )
 }
 
 function overrideOf<F extends FlowType, M extends string>(
@@ -274,6 +318,9 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
             fixedMessages: [...stage.fixedMessages],
           })),
         }
+      : {}),
+    ...(input.whatsappLabels !== undefined
+      ? { whatsappLabels: checkedLabels(input.whatsappLabels) }
       : {}),
   }
 }

@@ -73,6 +73,12 @@ export interface WhatsappClient {
   sendAudio(jid: string, audio: Buffer, mimetype: string): Promise<void>
   /** Relays a video, with an optional caption like an image. */
   sendVideo(jid: string, video: Buffer, caption?: string): Promise<void>
+  /**
+   * Le pone al chat una etiqueta del WhatsApp Business del negocio (la crea la
+   * primera vez). No es un mensaje: el cliente no ve nada. Ver `whatsappLabels`
+   * en `config/businesses/define.ts` (por qué los ids van desde 900).
+   */
+  labelChat(jid: string, label: { id: string; name: string }): Promise<void>
   onMessage(handler: MessageHandler): void
   onDisconnect(handler: DisconnectHandler): void
   onQR(handler: QRHandler): void
@@ -305,6 +311,11 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
   // "send anyway".
   const LID_QUERY_TIMEOUT_MS = 10_000
 
+  // Etiquetas que este socket ya creó en el WhatsApp Business (ver labelChat).
+  const createdLabelIds = new Set<string>()
+  // Uno de los 20 colores de WhatsApp Business; da igual cuál, pero siempre el mismo.
+  const LABEL_COLOR = 5
+
   async function prepareLidSession(jid: string): Promise<void> {
     if (!jid.endsWith('@lid')) return
     try {
@@ -389,6 +400,20 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
         { jid, hasResult: !!result, messageId: result?.key?.id, status: result?.status },
         'sock.sendVideo: returned',
       )
+    },
+    async labelChat(jid, label) {
+      // Crear la etiqueta es una escritura en la app del dueño: una vez por
+      // arranque alcanza, no una por cada chat que se etiqueta.
+      if (!createdLabelIds.has(label.id)) {
+        await withTimeout(
+          sock.addLabel(jid, { id: label.id, name: label.name, color: LABEL_COLOR }),
+          LID_QUERY_TIMEOUT_MS,
+          'addLabel',
+        )
+        createdLabelIds.add(label.id)
+      }
+      await withTimeout(sock.addChatLabel(jid, label.id), LID_QUERY_TIMEOUT_MS, 'addChatLabel')
+      log.info({ jid, labelId: label.id }, 'chat labeled')
     },
     onMessage(handler) {
       messageHandlers.push(handler)

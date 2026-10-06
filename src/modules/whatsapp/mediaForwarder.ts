@@ -192,6 +192,11 @@ export function buildStepImageCaption(params: {
    * foto es ruido para el dueño y más texto saliente del número.
    */
   photo?: { index: number; total: number }
+  /**
+   * Cómo encontrar al cliente en el WhatsApp Business cuando no hay número
+   * (`customerFindHints`). Van debajo de la línea del cliente.
+   */
+  findHints?: string[]
 }): string {
   const who = formatPersonName(params.customer.name)
   const said = params.said?.trim()
@@ -213,6 +218,7 @@ export function buildStepImageCaption(params: {
     who
       ? `👤 ${who} (${customerContactLabel(params.customer)})`
       : `👤 ${customerContactLabel(params.customer)}`,
+    ...(params.findHints ?? []),
     `🕒 ${formatDateTimeForDisplay(params.receivedAt, params.timezone)}`,
     params.summary?.trim()
       ? `📋 Resumen: ${clampSummary(params.summary)}`

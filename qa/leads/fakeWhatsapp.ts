@@ -94,6 +94,8 @@ export function createFakeWhatsappClient(opts: FakeClientOptions): WhatsappClien
         ...(media ? { media } : {}),
       })
     },
+    // Una etiqueta no es un envío: no cuenta como mensaje saliente.
+    labelChat: () => Promise.resolve(),
     onMessage: () => {},
     onDisconnect: () => {},
     onQR: () => {},

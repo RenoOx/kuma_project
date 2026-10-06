@@ -78,8 +78,6 @@ export function isLidPhone(
   return user !== null && normalizePhone(phone) === `+${user}`
 }
 
-export const HIDDEN_PHONE_LABEL = 'Número oculto por WhatsApp'
-
 /** El @usuario de WhatsApp guardado en `customers.metadata` (sin "@"), o null. */
 export function waUsernameOf(metadata: unknown): string | null {
   if (typeof metadata !== 'object' || metadata === null) return null
@@ -87,18 +85,28 @@ export function waUsernameOf(metadata: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-/** Cuándo se le preguntó a WhatsApp por su @usuario, o null si nunca. */
-export function waUsernameCheckedAtOf(metadata: unknown): Date | null {
+/** El @usuario que trajo el último mensaje (aunque no se muestre), o null. */
+export function waUsernameSeenOf(metadata: unknown): string | null {
   if (typeof metadata !== 'object' || metadata === null) return null
-  const value = (metadata as Record<string, unknown>).waUsernameCheckedAt
-  if (typeof value !== 'string') return null
-  const at = new Date(value)
-  return Number.isNaN(at.getTime()) ? null : at
+  const value = (metadata as Record<string, unknown>).waUsernameSeen
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 /**
- * El número del cliente en un aviso al dueño: el real; si WhatsApp lo oculta, su
- * @usuario; si tampoco hay, que está oculto.
+ * Un @usuario de WhatsApp limpio (sin "@"), o null si no tiene esa forma.
+ *
+ * Viene del mensaje (`remoteJidUsername`), o sea de afuera: se exige la forma de
+ * un usuario (letras, números, punto y guion bajo) antes de mostrarlo en un aviso.
+ */
+export function normalizeWaUsername(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const value = raw.trim().replace(/^@/, '')
+  return /^[A-Za-z0-9._]{1,35}$/.test(value) ? value : null
+}
+
+/**
+ * Cómo se nombra al cliente en un aviso al dueño, por prioridad (decisión del
+ * dueño, 2026-10-05): 1. su número; 2. su @usuario de WhatsApp; 3. "sin número".
  *
  * Sin número lleva el ID a la vista: el asistente del dueño contesta con
  * `reply_to_customer` usando lo que dice el aviso, y ese ID es lo único con lo
@@ -112,5 +120,37 @@ export function customerContactLabel(customer: {
   if (!isLidPhone(customer.phone, customer.waJid)) return customer.phone
   const username = waUsernameOf(customer.metadata)
   const id = `ID ${customer.phone.replace(/\D/g, '')}`
-  return username ? `@${username} · ${id}` : `${HIDDEN_PHONE_LABEL} · ${id}`
+  return username ? `@${username} · ${id}` : `sin número · ${id}`
+}
+
+// Lo justo para buscarlo con la lupa de WhatsApp: una frase, no el mensaje entero.
+const LAST_TEXT_MAX = 45
+
+/**
+ * Las líneas que le dicen al dueño cómo encontrar al cliente en el WhatsApp
+ * Business de su celular, cuando no hay número. Con número, ninguna: el número
+ * ya alcanza.
+ *
+ * - Con @usuario: buscarlo por ese @usuario (es único).
+ * - Sin @usuario: la etiqueta que Emma le puso al chat, si se la puso, y una frase
+ *   de su último mensaje para buscarla con la lupa.
+ */
+export function customerFindHints(
+  customer: { phone: string; waJid?: string | null; metadata?: unknown },
+  extra: { label?: string | null; lastText?: string | null } = {},
+): string[] {
+  if (!isLidPhone(customer.phone, customer.waJid)) return []
+  const username = waUsernameOf(customer.metadata)
+  if (username) return [`🔎 Búscalo en tu WA Business como @${username}`]
+  const lines: string[] = []
+  if (extra.label) lines.push(`🏷️ En tu WA Business: «${extra.label}»`)
+  const text = extra.lastText?.replace(/\s+/g, ' ').trim()
+  if (text) {
+    const clipped =
+      text.length <= LAST_TEXT_MAX
+        ? text
+        : `${text.slice(0, text.lastIndexOf(' ', LAST_TEXT_MAX) + 1 || LAST_TEXT_MAX).trim()}…`
+    lines.push(`💬 Su último mensaje: "${clipped}"`)
+  }
+  return lines
 }
