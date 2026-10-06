@@ -1387,24 +1387,12 @@ async function processMessage(
   // Su @usuario de WhatsApp, tenga número o no: con número va al lado, sin número
   // es cómo el dueño lo encuentra en su WhatsApp Business. Se lee del mensaje que
   // ya llegó: nada de consultar a WhatsApp (riesgo de baneo, decisión del dueño
-  // 2026-10-05).
-  const inboundKey = raw.key as WAMessageKey
-  const seenUsername = normalizeWaUsername(inboundKey.remoteJidUsername)
-  // Diagnóstico (2026-10-05): no está confirmado qué trae WhatsApp en el mensaje.
-  // Se busca en Railway por "inbound identity". Sale en cada mensaje de cliente
-  // hasta que se confirme y se quite.
-  log.info(
-    {
-      customerId: customer.id,
-      jidKind: jid.endsWith('@lid') ? 'lid' : 'phone',
-      hasPhone: !isLidPhone(customer.phone, customer.waJid),
-      remoteJidUsername: inboundKey.remoteJidUsername ?? null,
-      participantUsername: inboundKey.participantUsername ?? null,
-      hasRemoteJidAlt: Boolean(inboundKey.remoteJidAlt),
-      addressingMode: inboundKey.addressingMode ?? null,
-    },
-    'inbound identity',
-  )
+  // 2026-10-05). Viene en el atributo `username` del sobre, que Baileys no mapea
+  // y el cliente de WhatsApp anota por LID (`usernameFor`); `remoteJidUsername`
+  // queda por si Baileys empieza a mapearlo.
+  const seenUsername =
+    normalizeWaUsername((raw.key as WAMessageKey).remoteJidUsername) ??
+    normalizeWaUsername(clientRegistry.getClient(businessId)?.usernameFor(jid))
   if (seenUsername) {
     const recorded = await customerService.recordWaUsername(businessId, customer, seenUsername)
     if (recorded.ok) {

@@ -156,7 +156,7 @@ function CustomerRow({
       <TableCell>
         <div className="flex flex-col gap-1">
           <span className="font-medium">
-            {contactLabel(customer.phone, customer.phoneHidden, customer.waUsername)}
+            {contactLabel(customer.phone, customer.phoneHidden, customer.waUsername, customer.name)}
           </span>
           <NameTags names={customer.appointmentNames} />
           {customer.unreachable && (

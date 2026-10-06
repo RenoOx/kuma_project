@@ -144,18 +144,25 @@ export function formatPhone(raw: string | null | undefined): string {
 }
 
 /**
- * El número de un cliente en pantalla. Con `hidden`, WhatsApp no lo dio y lo
- * guardado son los dígitos de su LID: formateados parecían un número real
- * ("+243795 362 852 927") y no llevaban a nadie. Sin número, su @usuario de
- * WhatsApp si lo hay.
+ * Cómo se nombra a un cliente en pantalla: siempre lo que haya, en este orden
+ * (pedido del dueño, 2026-10-06):
+ *   número · @usuario  ›  número  ›  @usuario  ›  ~nombre de perfil  ›  "Sin número"
+ *
+ * Con `hidden`, WhatsApp no dio el número y lo guardado son los dígitos de su
+ * LID: formateados parecían un número real ("+243795 362 852 927") y no llevaban
+ * a nadie, así que no se muestran. La "~" delante del nombre es como WhatsApp
+ * marca el nombre que el cliente se puso, no uno guardado por el negocio.
  */
 export function contactLabel(
   phone: string | null | undefined,
   hidden: boolean,
   username: string | null = null,
+  profileName: string | null = null,
 ): string {
   if (!hidden) return username ? `${formatPhone(phone)} · @${username}` : formatPhone(phone)
-  return username ? `@${username}` : 'Sin número'
+  if (username) return `@${username}`
+  const name = profileName?.trim()
+  return name ? `~${name}` : 'Sin número'
 }
 
 /**

@@ -101,6 +101,11 @@ export interface WhatsappClient {
   onCall(handler: CallHandler): void
   /** Contactos LID que el celular del negocio sincroniza (ver `SyncedContact`). */
   onContact(handler: ContactHandler): void
+  /**
+   * El @usuario que WhatsApp mandó en el sobre del último mensaje de ese LID
+   * (atributo `username`, que Baileys no mapea), o null.
+   */
+  usernameFor(lid: string): string | null
   /** Hangs up an incoming call so the caller isn't left ringing. */
   rejectCall(callId: string, callFrom: string): Promise<void>
   requestPairingCode(phoneNumber: string): Promise<string>
@@ -341,16 +346,26 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
   sock.ev.on('contacts.upsert', onSyncedContacts)
   sock.ev.on('contacts.update', onSyncedContacts)
 
-  // 2. Diagnóstico temporal: los atributos del sobre de un mensaje 1 a 1 de un
-  //    LID, por si WhatsApp manda el @usuario en uno que Baileys no lee. Solo los
-  //    NOMBRES, y el valor de los que dicen "user". Se quita apenas responda.
+  // 2. El @usuario del cliente viene en el sobre del mensaje, en el atributo
+  //    `username` (prueba en prod, 2026-10-06: `username: "emmnuel12"`), pero
+  //    Baileys solo mapea `peer_recipient_username` / `recipient_username`. Se
+  //    anota acá por LID: el sobre llega antes de que Baileys descifre y emita
+  //    messages.upsert, así que el handler ya lo encuentra. Solo hace falta el
+  //    de quien acaba de escribir; el tope evita que el Map crezca sin fin en un
+  //    número con mucho tráfico.
+  const MAX_USERNAMES = 2000
+  const usernameByLid = new Map<string, string>()
   const onRawMessage = (node: BinaryNode): void => {
     const from = node.attrs.from
-    if (!from?.endsWith('@lid') || node.attrs.participant) return
-    const userAttrs = Object.fromEntries(
-      Object.entries(node.attrs).filter(([name]) => name.toLowerCase().includes('user')),
-    )
-    log.info({ from, attrs: Object.keys(node.attrs), userAttrs }, 'CB:message attrs')
+    const username = node.attrs.username
+    if (!from?.endsWith('@lid') || node.attrs.participant || !username) return
+    // Reinsertar lo deja al final: al pasar el tope sale el que escribió hace más.
+    usernameByLid.delete(from)
+    usernameByLid.set(from, username)
+    if (usernameByLid.size > MAX_USERNAMES) {
+      const oldest = usernameByLid.keys().next().value
+      if (oldest !== undefined) usernameByLid.delete(oldest)
+    }
   }
   sock.ws.on('CB:message', onRawMessage)
 
@@ -495,6 +510,9 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     },
     onContact(handler) {
       contactHandlers.push(handler)
+    },
+    usernameFor(lid) {
+      return usernameByLid.get(lid) ?? null
     },
     onCall(handler) {
       callHandlers.push(handler)

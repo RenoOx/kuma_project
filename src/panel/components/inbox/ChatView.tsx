@@ -104,7 +104,12 @@ export function ChatView({
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-foreground">
-            {contactLabel(conversation.phone, conversation.phoneHidden, conversation.waUsername)}
+            {contactLabel(
+              conversation.phone,
+              conversation.phoneHidden,
+              conversation.waUsername,
+              conversation.customerName,
+            )}
           </p>
           <NameTags names={conversation.appointmentNames} />
         </div>

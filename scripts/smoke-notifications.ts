@@ -67,6 +67,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     onContact() {
       // noop
     },
+    usernameFor() {
+      return null
+    },
     async rejectCall() {
       // noop
     },
