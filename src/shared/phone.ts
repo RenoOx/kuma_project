@@ -106,7 +106,8 @@ export function normalizeWaUsername(raw: unknown): string | null {
 
 /**
  * Cómo se nombra al cliente en un aviso al dueño, por prioridad (decisión del
- * dueño, 2026-10-05): 1. su número; 2. su @usuario de WhatsApp; 3. "sin número".
+ * dueño, 2026-10-05): 1. su número (con su @usuario al lado si lo hay); 2. su
+ * @usuario de WhatsApp; 3. "sin número".
  *
  * Sin número lleva el ID a la vista: el asistente del dueño contesta con
  * `reply_to_customer` usando lo que dice el aviso, y ese ID es lo único con lo
@@ -117,8 +118,10 @@ export function customerContactLabel(customer: {
   waJid?: string | null
   metadata?: unknown
 }): string {
-  if (!isLidPhone(customer.phone, customer.waJid)) return customer.phone
   const username = waUsernameOf(customer.metadata)
+  if (!isLidPhone(customer.phone, customer.waJid)) {
+    return username ? `${customer.phone} · @${username}` : customer.phone
+  }
   const id = `ID ${customer.phone.replace(/\D/g, '')}`
   return username ? `@${username} · ${id}` : `sin número · ${id}`
 }
