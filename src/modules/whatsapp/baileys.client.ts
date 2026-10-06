@@ -1,7 +1,9 @@
 import { mkdir } from 'node:fs/promises'
 import type { Boom } from '@hapi/boom'
 import {
+  type BinaryNode,
   Browsers,
+  type Contact,
   fetchLatestBaileysVersion,
   makeWASocket,
   type proto,
@@ -33,6 +35,18 @@ export interface IncomingCall {
   isVideo: boolean
 }
 export type CallHandler = (call: IncomingCall) => Promise<void> | void
+
+/**
+ * Lo que el celular del negocio le sincroniza a sus dispositivos vinculados sobre
+ * un contacto LID (al guardarlo o editarlo): su nombre y su @usuario. Lo empuja
+ * el celular; Emma no lo pide.
+ */
+export interface SyncedContact {
+  lid: string
+  username: string | null
+  name: string | null
+}
+export type ContactHandler = (contact: SyncedContact) => Promise<void> | void
 
 export interface WhatsappClientOptions {
   businessId: string
@@ -85,6 +99,8 @@ export interface WhatsappClient {
   onConnect(handler: ConnectHandler): void
   onPairingCode(handler: PairingCodeHandler): void
   onCall(handler: CallHandler): void
+  /** Contactos LID que el celular del negocio sincroniza (ver `SyncedContact`). */
+  onContact(handler: ContactHandler): void
   /** Hangs up an incoming call so the caller isn't left ringing. */
   rejectCall(callId: string, callFrom: string): Promise<void>
   requestPairingCode(phoneNumber: string): Promise<string>
@@ -202,6 +218,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
   const connectHandlers: ConnectHandler[] = []
   const pairingCodeHandlers: PairingCodeHandler[] = []
   const callHandlers: CallHandler[] = []
+  const contactHandlers: ContactHandler[] = []
   let intentionallyClosed = false
 
   sock.ev.on('creds.update', saveCreds)
@@ -297,6 +314,52 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       }
     }
   })
+
+  // Solo escuchar (2026-10-05): el @usuario de un cliente sin número no viene en
+  // el mensaje, y consultárselo a WhatsApp está descartado por riesgo de baneo.
+  // Estos dos oyentes no envían nada ni cambian la conexión: leen lo que ya llega.
+  //
+  // 1. Contactos que el celular del negocio sincroniza (`lidContactAction` de
+  //    Baileys → contacts.upsert, con nombre y @usuario). Los contacts.update de
+  //    cada mensaje solo traen el pushName: sin @usuario ni nombre guardado, se
+  //    ignoran.
+  const onSyncedContacts = (contacts: Array<Partial<Contact>>): void => {
+    for (const contact of contacts) {
+      const lid = contact.id?.endsWith('@lid') ? contact.id : contact.lid
+      if (!lid?.endsWith('@lid')) continue
+      const username = contact.username ?? null
+      const name = contact.name ?? null
+      if (!username && !name) continue
+      log.info({ lid, hasUsername: Boolean(username), hasName: Boolean(name) }, 'contact sync')
+      for (const handler of contactHandlers) {
+        void Promise.resolve(handler({ lid, username, name })).catch((err) => {
+          log.error({ err }, 'contact handler rejected')
+        })
+      }
+    }
+  }
+  sock.ev.on('contacts.upsert', onSyncedContacts)
+  sock.ev.on('contacts.update', onSyncedContacts)
+
+  // 2. Diagnóstico temporal: los atributos del sobre de un mensaje 1 a 1 de un
+  //    LID, por si WhatsApp manda el @usuario en uno que Baileys no lee. Solo los
+  //    NOMBRES, y el valor de los que dicen "user". Se quita apenas responda.
+  const onRawMessage = (node: BinaryNode): void => {
+    const from = node.attrs.from
+    if (!from?.endsWith('@lid') || node.attrs.participant) return
+    const userAttrs = Object.fromEntries(
+      Object.entries(node.attrs).filter(([name]) => name.toLowerCase().includes('user')),
+    )
+    log.info({ from, attrs: Object.keys(node.attrs), userAttrs }, 'CB:message attrs')
+  }
+  sock.ws.on('CB:message', onRawMessage)
+
+  // Solo los nuestros: Baileys también escucha 'CB:message' y los contactos.
+  const removeOwnListeners = (): void => {
+    sock.ev.off('contacts.upsert', onSyncedContacts)
+    sock.ev.off('contacts.update', onSyncedContacts)
+    sock.ws.off('CB:message', onRawMessage)
+  }
 
   // LID recipients require the sender to have E2E key material fetched and a
   // signal session established. assertSessions alone often isn't enough because
@@ -430,6 +493,9 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     onPairingCode(handler) {
       pairingCodeHandlers.push(handler)
     },
+    onContact(handler) {
+      contactHandlers.push(handler)
+    },
     onCall(handler) {
       callHandlers.push(handler)
     },
@@ -451,6 +517,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       connectHandlers.length = 0
       pairingCodeHandlers.length = 0
       callHandlers.length = 0
+      contactHandlers.length = 0
       // Patient message content must not outlive the socket that sent it.
       sentMessages.clear()
       try {
@@ -463,6 +530,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
         sock.ev.removeAllListeners('messages.upsert')
         sock.ev.removeAllListeners('creds.update')
         sock.ev.removeAllListeners('call')
+        removeOwnListeners()
       } catch (err) {
         log.warn({ err }, 'removeAllListeners threw while closing')
       }
@@ -482,6 +550,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
       connectHandlers.length = 0
       pairingCodeHandlers.length = 0
       callHandlers.length = 0
+      contactHandlers.length = 0
       sentMessages.clear()
 
       try {
@@ -500,6 +569,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
           sock.ev.removeAllListeners('messages.upsert')
           sock.ev.removeAllListeners('creds.update')
           sock.ev.removeAllListeners('call')
+          removeOwnListeners()
         } catch (err) {
           log.warn({ err }, 'removeAllListeners threw after logout')
         }
