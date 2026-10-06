@@ -183,6 +183,9 @@ export default defineBusinessConfig({
     'En una CERTIFICACIÓN nunca hables de descuento ni de precios de cursos: su precio es el de su detalle.',
     'Edad: "No hay edad mínima 😊".',
     'Requisitos: en un curso, solo la inscripción (llega en el mensaje de pago); en una certificación, solo la foto del DNI. No inventes otros ni digas "no hay requisitos".',
+    // Georgina (prod, 2026-10-05) recibió la respuesta del trabajo: "certificado"
+    // está en varias respuestas y ninguna decía que esto ES el producto.
+    '¿Dan certificado de experiencia / por experiencia / de lo que ya sé operar? (no es la pregunta del trabajo): "¡Sí! Justamente nuestras certificaciones son por experiencia: depende de cuántas maquinarias sabes operar. ¿Cuántas quieres certificar? A (1 a 2), B (3 a 4) o C (5 o más)".',
     '¿Cómo comprueban mi experiencia?: no lo expliques; vuelve a ofrecerle la certificación.',
     'Sede: los cursos son presenciales, solo en Huancayo (Junín); no hay otras sedes ni clases virtuales, y no ofrezcas alojamiento. Los certificados de las certificaciones se envían a todo el Perú.',
     'MTC o licencia de conducir: "Nuestro certificado es de operador por maquinaria; no es una licencia de conducir." Nunca nombres al MTC.',
@@ -403,20 +406,42 @@ export default defineBusinessConfig({
       catalogOnEnter: 'Cursos',
       extraInstructions: [
         'La intro, las fichas de los 3 cursos y la pregunta con las opciones ya le llegaron solas al entrar a este paso: no las repitas ni escribas un listado.',
-        'Tu única tarea acá es capturar qué curso elige. Mapeo: A = Básico, B = Avanzado, C = Operación Múltiple, o por su nombre.',
-        'Cuando el alumno nombre UN curso concreto —por su nombre o por letra (A, B o C)— es que lo ELIGIÓ: no le vuelvas a mandar la ficha ni le preguntes si quiere más información. Llamá advance_flow con la ruta "ruta-cierre" en ese mismo turno.',
+        // 2026-10-06: el mapeo letra → curso y el envío de beneficios + descuento
+        // los hace el código (`choices`, abajo). Una letra sola ni pasa por la IA.
+        'Tu única tarea acá es saber qué curso elige. Si lo nombra con palabras ("el básico", "el de 3 equipos"), llamá elegir_opcion con su letra: A Básico, B Avanzado, C Operación Múltiple. El sistema le manda los beneficios y el descuento; no escribas nada más.',
         // Regresión del 2026-10-01 (R04#1, R06): "Me gustaría el básico, ¿cuánto
         // cuesta y hay descuento?" se quedaba respondiendo acá ("no hay
         // descuentos", totales) y nunca llegaba a beneficios.
-        'Si además de elegir pregunta precio, total, descuento, duración, requisitos, cómo pagar, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá "ruta-cierre" en ese mismo turno y NO respondas esas preguntas — los mensajes que siguen ya traen precio, duración, descuento y pago.',
-        'En este paso nunca hables del pago ni digas que no hay descuento.',
-        'Si pregunta otra cosa antes de elegir, respondé corto sin dar precios de varios cursos juntos.',
+        'Si además de elegir pregunta precio, total, descuento, duración, requisitos, cómo pagar, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno y NO respondas esas preguntas — los mensajes que siguen ya las responden.',
+        'En este paso nunca hables del pago ni digas que no hay descuento. Nunca escribas tú el precio, la inscripción ni el Yape.',
         // R23#2 (regresión 4): "¿cuánto cuesta cada uno?" → show_services y los
         // 3 precios; después dio por hecho el Básico sin que lo eligiera.
-        'Si pide el precio de todos o de "cada uno": "Cuéntame cuál te interesa y te paso su inversión 😊". No uses show_services: las fichas ya le llegaron.',
-        'Nunca asumas el curso: si no nombró uno, pregúntale cuál. Pero si nombra UNO, aunque pregunte su precio o cómo es la inscripción, eso es elegirlo: "ruta-cierre" en ese mismo turno. Nunca escribas tú el precio, la inscripción ni el Yape: los mandan los mensajes que siguen.',
+        'Si pregunta otra cosa antes de elegir, respondé corto y volvé a preguntar cuál elige. Si pide el precio de todos o de "cada uno": "Cuéntame cuál te interesa y te paso su inversión 😊". No uses show_services: las fichas ya le llegaron.',
         'Si el alumno está hablando de certificaciones y no de cursos, este no es su paso: llamá advance_flow con la ruta "es-certificacion" en este mismo turno.',
       ].join('\n'),
+      // La elección la hace el código: la letra sola se resuelve sin la IA; por
+      // nombre, la IA pasa la letra a elegir_opcion. Cada curso manda sus
+      // beneficios y su descuento y sale por "ruta-cierre".
+      choices: {
+        route: 'ruta-cierre',
+        options: [
+          {
+            key: 'A',
+            service: 'MgyYkPSaQggEnBhWoDis3',
+            send: ['beneficiosBasico', 'descuentoBasico'],
+          },
+          {
+            key: 'B',
+            service: 'O0tfF05VumgUtDsm_98Et',
+            send: ['beneficiosAvanzado', 'descuentoAvanzado'],
+          },
+          {
+            key: 'C',
+            service: 'cBP8HP8IdgIWgV54wWkBu',
+            send: ['beneficiosMultiple', 'descuentoMultiple'],
+          },
+        ],
+      },
       // Los genéricos del catálogo ("Plan básico. ¿Te cuento de qué se trata o
       // preferís ver otro?") empujaban a describir y comparar en vez de cerrar.
       example: '¡Buena elección! Te cuento lo que incluye 😊',
@@ -430,7 +455,7 @@ export default defineBusinessConfig({
       routes: [
         {
           id: 'ruta-cierre',
-          when: 'El alumno eligió un curso concreto y quiere inscribirse.',
+          when: 'Solo la toma el sistema al elegir un curso con elegir_opcion: nunca la llames con advance_flow.',
           to: 'mostrar_beneficios',
         },
         // Red de seguridad del bug del 2026-09-29: si igual llega acá hablando
@@ -465,44 +490,58 @@ export default defineBusinessConfig({
       extraInstructions: [
         // R23#3 (regresión 4): "no manejo ninguna máquina, me interesa la opción
         // A" recibió la oferta de certificación ("como tú ya sabes operar…").
-        'LO PRIMERO: si dice que NO tiene experiencia operando maquinaria, llamá advance_flow con la ruta "sin-experiencia" en ese mismo turno, AUNQUE elija una letra: la lista de certificaciones es solo para quien ya opera.',
-        'La lista de las 3 certificaciones con su letra (A, B, C) ya le llegó sola al entrar a este paso: no la escribas vos.',
-        'En este paso NUNCA escribas un precio ni un monto — ni al listar ni al hablar de una sola. El precio le llega en el mensaje de beneficios.',
-        'Si tenés que volver a nombrar las opciones, siempre con su letra, sin precio y en este orden: A. Certificación de 1 a 2 maquinarias, B. Certificación de 3 a 4 maquinarias, C. Certificación de 5 maquinarias o más.',
-        'Cuando el alumno elija una —por letra o por tramo—, es que la ELIGIÓ: no le des precio ni detalle, llamá advance_flow con la ruta "quiere-certificarse" en ese mismo turno. El mapeo, contra la lista de servicios:',
-        '- A o "1 a 2" → la certificación de 1 a 2',
-        '- B o "3 a 4" → la certificación de 3 a 4',
-        '- C o "5 o más" → la certificación de 5 o más',
-        'No repreguntes el número de maquinarias en texto libre: esperá la letra o el tramo.',
-        'Para las herramientas usá el nombre del servicio tal como figura en la lista de servicios.',
-        'Si además de elegir pregunta precio, total, requisitos, cómo seguir, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual avanzá en ese mismo turno sin responder esas preguntas — el detalle que sigue ya las responde.',
-        // R23#3 (2026-10-01): "no manejo ninguna máquina" acá no tenía salida a
-        // cursos sin un curso elegido; Emma escribió el listado a mano y dijo
-        // "el curso dura una semana". El listado de cursos manda las fichas.
-        'Si dice que no tiene experiencia o pide ver los cursos sin elegir uno, llamá advance_flow con la ruta "sin-experiencia" en ese mismo turno: allá le llegan las fichas de los cursos. Nunca escribas vos el listado de cursos.',
         // R02#1 (2026-10-01): "no quiero certificación, solo el curso avanzado"
-        // → "en este momento solo ofrecemos certificaciones" y el pago por texto.
-        'Si quiere un CURSO (lo nombra o dice que no quiere certificación), llamá advance_flow con la ruta "prefiere-curso" en ese mismo turno. Nunca digas que solo hay certificaciones ni hables del pago acá.',
+        // → "en este momento solo ofrecemos certificaciones". Desde 2026-10-06
+        // los dos casos van a cursos por la misma ruta: allá elige su curso.
+        'LO PRIMERO: si dice que NO tiene experiencia operando maquinaria, o que quiere un curso en vez de certificarse, llamá advance_flow con la ruta "sin-experiencia" en ese mismo turno, AUNQUE elija una letra: estas opciones son solo para quien ya opera. Nunca escribas vos el listado de cursos ni digas que solo hay certificaciones.',
+        'La lista de las certificaciones con su letra ya le llegó sola al entrar a este paso: no la escribas vos. En este paso NUNCA escribas un precio ni un monto.',
+        // 2026-10-06: el mapeo opción → certificación, contar las máquinas y
+        // mandar la oferta lo hace el código (`choices`, abajo). Con la regla
+        // "no repreguntes el número de maquinarias" y sin decir qué hacer si las
+        // nombraba, Emma ofreció la de 5 o más para 2 máquinas (Georgina).
+        'Si el alumno elige con palabras, dice cuántas maquinarias opera o nombra las que opera, llamá elegir_opcion con eso: la letra, la cantidad, o la lista de las máquinas tal como las nombró. NO las cuentes ni elijas vos: el sistema elige la certificación y le manda la oferta.',
+        'Si además pregunta precio, total, requisitos, cómo seguir, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno sin responder esas preguntas — la oferta que sigue ya las responde.',
+        'Si todavía no dijo cuál quiere ni qué maquinarias opera, preguntale cuántas maquinarias quiere certificar, por la letra de la lista.',
       ].join('\n'),
-      example: '¡Perfecto! Te paso el detalle de esa opción 😊',
+      example: '¡Perfecto! 😊',
       edgeCases: [
-        'Si todavía no eligió, recordale las 3 opciones con su letra, sin precios.',
-        'Si en vez de certificarse quiere un curso (por nombre o letra de curso), es la ruta "prefiere-curso".',
+        'Si pregunta algo antes de elegir, respondé corto (con las "Respuestas del negocio" o "Esa consulta te la confirma el asesor 😊") y volvé a preguntar cuántas maquinarias quiere certificar.',
       ],
+      // La elección la hace el código: la letra o el tramo solos se resuelven
+      // sin la IA; si nombra máquinas, la IA las lista y el código cuenta. Cada
+      // opción manda el detalle de su certificación y la pregunta de cierre.
+      choices: {
+        route: 'quiere-certificarse',
+        options: [
+          {
+            key: 'A',
+            service: 'hF9Vywr6oNFbN1ILSeIEc',
+            send: ['detalleCert1a2', 'preguntaCertificado'],
+            count: [1, 2],
+          },
+          {
+            key: 'B',
+            service: '9By_80n__49szE5uTsoS4',
+            send: ['detalleCert3a4', 'preguntaCertificado'],
+            count: [3, 4],
+          },
+          {
+            key: 'C',
+            service: 'JRUhh01nF0N2fS4xNONMk',
+            send: ['detalleCert5oMas', 'preguntaCertificado'],
+            count: [5, null],
+          },
+        ],
+      },
       routes: [
         {
           id: 'quiere-certificarse',
-          when: 'El alumno eligió una de las certificaciones: por letra (A, B o C) o por tramo (1 a 2, 3 a 4, 5 o más).',
-          to: 'mostrar_beneficios',
-        },
-        {
-          id: 'prefiere-curso',
-          when: 'El alumno prefiere un curso concreto en vez de la certificación y quiere inscribirse.',
+          when: 'Solo la toma el sistema al elegir una certificación con elegir_opcion: nunca la llames con advance_flow.',
           to: 'mostrar_beneficios',
         },
         {
           id: 'sin-experiencia',
-          when: 'El alumno dice que no tiene experiencia operando maquinaria o quiere ver los cursos, sin haber elegido uno.',
+          when: 'El alumno dice que no tiene experiencia operando maquinaria, quiere ver los cursos, o prefiere un curso en vez de certificarse.',
           to: 'listado_servicios',
         },
       ],
@@ -523,19 +562,10 @@ export default defineBusinessConfig({
         '2. DUDOSO: no se sabe si acepta ("ok", "mmm", "puede ser", "lo veo", o solo una pregunta sin un sí). Respondé corto (con las "Respuestas del negocio" o "Esa consulta te la confirma el asesor 😊") y cerrá volviendo a la pregunta del paso: "¿Te gustaría obtener tu descuento? 😊" (curso) o "¿Realizamos tus certificados? 😊" (certificación). No avances ni escales.',
         '3. NO o "lo pienso": "Entendido, estaré al tanto si deseas continuar 😊" y nada más.',
         // G03 ×3 (2026-09-30): "el curso C" recibió el detalle de la
-        // certificación C y el pedido de DNI. La letra se repite en los dos
-        // caminos; la ruta por la que se entró no.
-        'CURSO o CERTIFICACIÓN lo decide la ruta por la que entraste a este paso (la última advance_flow del historial), NUNCA la letra sola: "ruta-cierre" o "prefiere-curso" = CURSO (A Básico, B Avanzado, C Operación Múltiple); "quiere-certificarse" = CERTIFICACIÓN (A 1 a 2, B 3 a 4, C 5 o más).',
-        'Apenas entrés a este paso, mandá DOS mensajes fijos en el mismo turno, en este orden, con send_fixed_message:',
-        'Si eligió un CURSO:',
-        '1. Los beneficios de su curso: "beneficiosBasico" (BÁSICO), "beneficiosAvanzado" (AVANZADO), "beneficiosMultiple" (OPERACIÓN MÚLTIPLE).',
-        '2. El descuento de su curso: "descuentoBasico" (BÁSICO), "descuentoAvanzado" (AVANZADO), "descuentoMultiple" (OPERACIÓN MÚLTIPLE).',
-        'En send_fixed_message usa siempre el nombre COMPLETO del servicio, tal cual la lista: "BÁSICO - Operación y mantenimiento de equipos", "AVANZADO - Operación y mantenimiento de 3 equipos", "OPERACIÓN MÚLTIPLE Y MANTENIMIENTO DE EQUIPOS".',
-        'Si eligió una CERTIFICACIÓN:',
-        '1. El detalle de su opción: "detalleCert1a2" (A, 1 a 2 maquinarias), "detalleCert3a4" (B, 3 a 4 maquinarias), "detalleCert5oMas" (C, 5 maquinarias o más).',
-        '2. "preguntaCertificado".',
-        'No inventes vos ningún monto: todo ya va en los mensajes.',
-        'Nunca vuelvas a mandar un mensaje fijo que ya salió, ni uno del otro camino (a un CURSO nunca "preguntaCertificado").',
+        // certificación C. Desde 2026-10-06 la oferta (beneficios y descuento, o
+        // el detalle de la certificación) la elige y la manda el código al entrar
+        // (`choices` del paso anterior): acá ya no se decide qué mensaje mandar.
+        'La oferta de lo que eligió ya le llegó sola al entrar a este paso: nunca la repitas ni la resumas, y no inventes ningún monto.',
         'Nunca pidas el DNI ni datos de pago con tus palabras: eso lo hace el paso siguiente con su mensaje fijo.',
       ].join('\n'),
       // El genérico ("Esto es lo que vas a tener. ¿Seguimos con tu
@@ -547,23 +577,11 @@ export default defineBusinessConfig({
       edgeCases: [
         'Si pregunta algo antes de decidir, es el caso DUDOSO: contestá corto con lo que sabés (sin repetir mensajes fijos) y volvé a la pregunta del paso.',
       ],
-      // Los 2 mensajes fijos SON la respuesta: el último ya termina con su
-      // pregunta. Cualquier texto propio de Emma en ese turno se descarta en
-      // código — pedírselo por instrucción falló 4 veces seguidas.
+      // Los 2 mensajes fijos SON la respuesta del turno en que se entra: el
+      // último ya termina con su pregunta. Cualquier texto propio de Emma en ese
+      // turno se descarta en código — pedírselo por instrucción falló 4 veces.
       fixedOnly: true,
       cta: false,
-      fixedMessages: [
-        'beneficiosBasico',
-        'beneficiosAvanzado',
-        'beneficiosMultiple',
-        'descuentoBasico',
-        'descuentoAvanzado',
-        'descuentoMultiple',
-        'detalleCert1a2',
-        'detalleCert3a4',
-        'detalleCert5oMas',
-        'preguntaCertificado',
-      ],
       routes: [
         {
           id: 'continua',
@@ -642,17 +660,17 @@ export default defineBusinessConfig({
     // curso (así carga el dueño el precio en el panel: Básico 220, Avanzado
     // 260, Múltiple 260). Reemplazan a `beneficiosCurso` (una sola duración).
     beneficiosBasico: {
-      when: 'Eligió el curso BÁSICO. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: beneficiosDeCurso('6 semanas (01 mes y medio)'),
       images: true,
     },
     beneficiosAvanzado: {
-      when: 'Eligió el curso AVANZADO. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: beneficiosDeCurso('12 semanas (3 meses)'),
       images: true,
     },
     beneficiosMultiple: {
-      when: 'Eligió el curso OPERACIÓN MÚLTIPLE. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: beneficiosDeCurso('22 semanas (5 meses y medio)'),
       images: true,
     },
@@ -663,38 +681,38 @@ export default defineBusinessConfig({
     // Reemplazan a beneficiosCertificado y a los descuentos de certificación:
     // en este camino no hay descuento, el precio promo ES la oferta.
     detalleCert1a2: {
-      when: 'Eligió la certificación A (1 a 2 maquinarias). SOLO si entraste por "quiere-certificarse".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: detalleCertificado('S/. 3000.00', 'S/. 295.00'),
       images: true,
     },
     detalleCert3a4: {
-      when: 'Eligió la certificación B (3 a 4 maquinarias). SOLO si entraste por "quiere-certificarse".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: detalleCertificado('S/. 4000.00', 'S/. 395.00'),
       images: true,
     },
     detalleCert5oMas: {
-      when: 'Eligió la certificación C (5 maquinarias o más). SOLO si entraste por "quiere-certificarse".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: detalleCertificado('S/. 5000.00', 'S/. 495.00'),
       images: true,
     },
     // Aparte del detalle para que salga DESPUÉS de la foto del carnet.
     preguntaCertificado: {
-      when: 'Después del detalle de su certificación, siempre. SOLO si entraste por "quiere-certificarse".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: '¿Realizamos tus certificados?',
     },
     // El gancho de venta: descuento por curso (S/ 100, 300 y 800). Uno por
     // curso porque cada uno tiene el suyo — no hay un campo de "descuento" en
     // el servicio, así que el monto va tal cual acá. Texto del 2026-09-30.
     descuentoBasico: {
-      when: 'Eligió el curso BÁSICO, antes de avanzar. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: descuentoCurso('S/ 100'),
     },
     descuentoAvanzado: {
-      when: 'Eligió el curso AVANZADO, antes de avanzar. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: descuentoCurso('S/ 300'),
     },
     descuentoMultiple: {
-      when: 'Eligió el curso OPERACIÓN MÚLTIPLE, antes de avanzar. SOLO si entraste por "ruta-cierre" o "prefiere-curso".',
+      when: 'Lo manda el código al elegir la opción (`choices`): nunca lo pide la IA.',
       text: descuentoCurso('S/ 800'),
     },
     // Primera inversión de un curso (2026-09-30): S/ 150.00 para los tres, con
