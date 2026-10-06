@@ -17,6 +17,7 @@ import {
   storeQR,
   touchActivity,
 } from './modules/whatsapp/clientRegistry.js'
+import { recordSyncedContact } from './modules/whatsapp/contactSync.js'
 import { handleIncomingMessage } from './modules/whatsapp/handler.js'
 import { HEALTH_CHECK_INTERVAL_MS, startHealthMonitor } from './modules/whatsapp/healthMonitor.js'
 import * as presence from './modules/whatsapp/presence.js'
@@ -135,6 +136,9 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
       send: client.sendMessage,
     })
   })
+
+  // El @usuario de un cliente sin número, si el celular del negocio lo sincroniza.
+  client.onContact((contact) => recordSyncedContact(businessId, contact))
 
   client.onDisconnect((info) => {
     if (info.kind === 'halt') {
