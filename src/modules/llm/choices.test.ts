@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StepChoiceOption } from '@/modules/conversation/stateMachine.js'
-import { countDistinct, currentChoice, optionForCount, parseChoice } from './choices.js'
+import { countDistinct, currentChoice, optionForCount, parseChoice, pickOption } from './choices.js'
 
 // Las certificaciones de Tecmin: el caso que nació esto (2026-10-06).
 const certs: StepChoiceOption[] = [
@@ -154,5 +154,31 @@ describe('currentChoice', () => {
   it('skips a broken row instead of failing', () => {
     const broken = { toolCalls: [{ function: { name: 'send_fixed_message', arguments: '{nope' } }] }
     expect(currentChoice([broken, sent('detalle1a2')], certSteps)?.option.key).toBe('A')
+  })
+})
+
+describe('pickOption', () => {
+  it('counts what was named even when the model also passed a letter', () => {
+    // El caso real (dev, 2026-10-06): anotó bien las máquinas y agregó "B".
+    const picked = pickOption(
+      { elementos: ['retroexcavadora', 'minicargador'], opcion: 'B' },
+      certs,
+    )
+    expect(picked?.key).toBe('A')
+  })
+
+  it('uses the count the client gave', () => {
+    expect(pickOption({ cantidad: 4 }, certs)?.key).toBe('B')
+  })
+
+  it('uses the letter when there is nothing to count', () => {
+    expect(pickOption({ opcion: 'b' }, certs)?.key).toBe('B')
+    expect(pickOption({ opcion: 'C', cantidad: 2 }, courses)?.key).toBe('C')
+  })
+
+  it('has no option when nothing fits', () => {
+    expect(pickOption({}, certs)).toBeNull()
+    expect(pickOption({ elementos: [] }, certs)).toBeNull()
+    expect(pickOption({ opcion: 'Z' }, courses)).toBeNull()
   })
 })

@@ -130,3 +130,24 @@ export function currentChoice(
   }
   return null
 }
+
+/**
+ * La opción según lo que entendió la IA (`elegir_opcion`). Si dio lo que el
+ * cliente nombró o cuántas, MANDA EL CONTEO del código, aunque la IA también
+ * haya pasado una letra: en dev (2026-10-06) anotó bien "retroexcavadora,
+ * minicargador" y agregó por su cuenta la opción B. La letra sola cuenta solo
+ * cuando no hay nada que contar (los cursos: "el básico" → A).
+ */
+export function pickOption(
+  understood: { opcion?: string; cantidad?: number; elementos?: ReadonlyArray<string> },
+  options: ReadonlyArray<StepChoiceOption>,
+): StepChoiceOption | null {
+  const counted =
+    understood.elementos && understood.elementos.length > 0
+      ? countDistinct(understood.elementos)
+      : understood.cantidad
+  const hasCounts = options.some((o) => o.count)
+  if (counted !== undefined && hasCounts) return optionForCount(counted, options)
+  const key = understood.opcion?.trim().toUpperCase()
+  return key ? (options.find((o) => o.key.toUpperCase() === key) ?? null) : null
+}

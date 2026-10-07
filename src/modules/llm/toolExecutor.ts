@@ -20,7 +20,7 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
-import { countDistinct, optionForCount } from './choices.js'
+import { pickOption } from './choices.js'
 import {
   type EscalationGate,
   escalationAllowed,
@@ -1347,13 +1347,9 @@ export async function executeTool(
         }
       }
 
-      // La letra que nombró, o el rango que corresponde a lo que contó el código.
-      const { opcion, cantidad, elementos } = parsed.data
-      const byKey = opcion
-        ? choices.options.find((o) => o.key.toUpperCase() === opcion.trim().toUpperCase())
-        : undefined
-      const count = elementos && elementos.length > 0 ? countDistinct(elementos) : cantidad
-      const option = byKey ?? (count !== undefined ? optionForCount(count, choices.options) : null)
+      // El conteo del código manda sobre una letra que la IA haya puesto por su
+      // cuenta (ver pickOption).
+      const option = pickOption(parsed.data, choices.options)
       if (!option) {
         return {
           result: JSON.stringify({
