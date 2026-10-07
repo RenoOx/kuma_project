@@ -190,7 +190,8 @@ export default defineBusinessConfig({
     'Requisitos: en un curso, solo la inscripción (llega en el mensaje de pago); en una certificación, solo la foto del DNI. No inventes otros ni digas "no hay requisitos".',
     // Georgina (prod, 2026-10-05) recibió la respuesta del trabajo: "certificado"
     // está en varias respuestas y ninguna decía que esto ES el producto.
-    '¿Dan certificado de experiencia / por experiencia / de lo que ya sé operar? (no es la pregunta del trabajo): "¡Sí! Justamente nuestras certificaciones son por experiencia: depende de cuántas maquinarias sabes operar. ¿Cuántas quieres certificar? A (1 a 2), B (3 a 4) o C (5 o más)".',
+    // Cada opción en su línea, como la lista de certificaciones (dueño, 2026-10-06).
+    '¿Dan certificado de experiencia / por experiencia / de lo que ya sé operar? (no es la pregunta del trabajo): copia tal cual, con sus saltos de línea: "¡Sí! Justamente nuestras certificaciones son por experiencia: depende de cuántas maquinarias sabes operar.\n¿Cuántas quieres certificar?\nA. 1 a 2 maquinarias\nB. 3 a 4 maquinarias\nC. 5 maquinarias o más".',
     '¿Cómo comprueban mi experiencia?: no lo expliques; vuelve a ofrecerle la certificación.',
     'Sede: los cursos son presenciales, solo en Huancayo (Junín); no hay otras sedes ni clases virtuales, y no ofrezcas alojamiento. Los certificados de las certificaciones se envían a todo el Perú.',
     'MTC o licencia de conducir: "Nuestro certificado es de operador por maquinaria; no es una licencia de conducir." Nunca nombres al MTC.',
