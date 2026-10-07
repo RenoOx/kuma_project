@@ -172,7 +172,7 @@ async function main(): Promise<void> {
       for (const message of c.messages) {
         const r = await sendMessage(TECMIN, session, message)
         if (!r.ok) {
-          error = `error ${r.error.code} en "${message}"`
+          error = `error ${r.error.code} en "${message}": ${String(r.error.message).slice(0, 120)}`
           break
         }
         turns.push(r.data)
