@@ -1,5 +1,6 @@
 import {
   downloadMediaMessage,
+  NO_MESSAGE_FOUND_ERROR_TEXT,
   proto,
   type WAMessage,
   type WAMessageKey,
@@ -1282,7 +1283,7 @@ async function processMessage(
   if (samePhone(business.ownerWhatsappNumber, phone)) {
     // El respaldo de una entrega vacía es para clientes: al dueño no se le
     // contesta un mensaje que nadie pudo leer.
-    if (payload.kind === 'text' && payload.text.includes(UNREADABLE_MESSAGE_MARKER)) {
+    if (payload.kind === 'text' && isUnreadableMarker(payload.text)) {
       log.info('owner placeholder never filled: ignored')
       return
     }
@@ -1905,7 +1906,25 @@ async function sendServiceImages(params: {
  * Inbox, así el dueño también ve qué pasó.
  */
 export const UNREADABLE_MESSAGE_MARKER =
-  '[El cliente te escribió, pero su mensaje no se pudo leer (pasa con quien llega desde un anuncio). Si es su primer mensaje, salúdalo y preséntate como siempre. Si ya venían conversando, pídele con amabilidad que te lo repita.]'
+  '[El cliente te escribió, pero su mensaje no se pudo leer. Si es su primer mensaje, salúdalo y preséntate como siempre. Si ya venían conversando, pídele con amabilidad que te lo repita.]'
+
+/**
+ * La misma idea para el aviso de un anuncio de Meta ("Message absent from
+ * node"): siempre es el primer contacto y el texto real es el prellenado del
+ * anuncio, así que pedir que lo repita no tiene sentido.
+ */
+export const UNREADABLE_AD_MESSAGE_MARKER =
+  '[El cliente llegó desde un anuncio de Meta y su mensaje no se pudo leer. Casi siempre es "¡Hola! Completé el formulario y me gustaría obtener más información". Salúdalo y preséntate como siempre.]'
+
+function unreadableMarkerFor(reason: string | null): string {
+  return reason === NO_MESSAGE_FOUND_ERROR_TEXT
+    ? UNREADABLE_AD_MESSAGE_MARKER
+    : UNREADABLE_MESSAGE_MARKER
+}
+
+function isUnreadableMarker(text: string): boolean {
+  return text.includes(UNREADABLE_MESSAGE_MARKER) || text.includes(UNREADABLE_AD_MESSAGE_MARKER)
+}
 
 export function handleIncomingMessage(
   raw: WAMessage,
@@ -2090,7 +2109,7 @@ function dispatchText(
 
 /**
  * Anota una entrega vacía y, si su contenido no llega a tiempo, hace que Emma
- * conteste igual con `UNREADABLE_MESSAGE_MARKER`: un lead de anuncio sin
+ * conteste igual con la marca que corresponda (`unreadableMarkerFor`): un lead de anuncio sin
  * respuesta es un lead perdido, y el dueño no tiene cómo enterarse.
  */
 function watchPlaceholder(
@@ -2113,7 +2132,7 @@ function watchPlaceholder(
     }
     log.warn({ jid, phone, reason }, 'placeholder never filled: answering without content')
     presence.markActive(businessId)
-    dispatchText(raw, businessId, send, jid, phone, UNREADABLE_MESSAGE_MARKER, log).catch(
+    dispatchText(raw, businessId, send, jid, phone, unreadableMarkerFor(reason), log).catch(
       (err: unknown) => {
         log.error({ err, jid }, 'placeholder fallback failed')
       },

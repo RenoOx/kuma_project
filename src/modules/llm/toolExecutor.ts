@@ -20,7 +20,7 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
-import { pickOption } from './choices.js'
+import { isDurationCount, pickOption } from './choices.js'
 import {
   type EscalationGate,
   escalationAllowed,
@@ -1344,6 +1344,25 @@ export async function executeTool(
               'Este paso no tiene opciones para elegir. No vuelvas a llamar esta herramienta acá.',
           }),
           error: 'no_choices',
+        }
+      }
+
+      // Un tiempo no es una cantidad: "20 años" de experiencia, leído como 20
+      // máquinas, mandaba la oferta de 5 o más (ver isDurationCount).
+      const { cantidad, elementos } = parsed.data
+      if (
+        cantidad !== undefined &&
+        (elementos === undefined || elementos.length === 0) &&
+        context.customerText !== undefined &&
+        isDurationCount(cantidad, context.customerText)
+      ) {
+        return {
+          result: JSON.stringify({
+            error: 'not_a_count',
+            instruction:
+              'El cliente dijo un tiempo (por ejemplo, sus años de experiencia), no cuántas máquinas. Pregúntale cuántas máquinas quiere certificar, sin precios. No elijas vos.',
+          }),
+          error: 'not_a_count',
         }
       }
 

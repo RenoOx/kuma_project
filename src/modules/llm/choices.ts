@@ -69,6 +69,53 @@ export function countDistinct(items: ReadonlyArray<string>): number {
   return new Set(items.map(normalize).filter((item) => item !== '')).size
 }
 
+const DURATION_UNIT = /^(?:anos?|mes|meses|semanas?|dias?)$/
+
+const NUMBER_WORDS: Readonly<Record<string, number>> = {
+  un: 1,
+  uno: 1,
+  una: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+  quince: 15,
+  veinte: 20,
+  treinta: 30,
+  cuarenta: 40,
+}
+
+function numberOf(token: string): number | null {
+  if (/^\d+$/.test(token)) return Number(token)
+  return NUMBER_WORDS[token] ?? null
+}
+
+/**
+ * Si la cantidad que pasó la IA es, en el mensaje del cliente, un TIEMPO y no
+ * cuántas cosas: "20 años" respondiendo a "1 a 2 / 3 a 4 / 5 o más máquinas"
+ * terminó en la oferta de 5 o más (Tecmin, 2026-10-10). Es tiempo si el número
+ * solo aparece pegado a años, meses, semanas o días; si también aparece suelto
+ * o con otra palabra ("20 años operando 2 máquinas" → el 2), cuenta.
+ */
+export function isDurationCount(n: number, customerText: string): boolean {
+  const tokens = normalize(customerText)
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .split(' ')
+  let asDuration = false
+  let asOther = false
+  tokens.forEach((token, i) => {
+    if (numberOf(token) !== n) return
+    if (DURATION_UNIT.test(tokens[i + 1] ?? '')) asDuration = true
+    else asOther = true
+  })
+  return asDuration && !asOther
+}
+
 /** Un paso con `choices`, como lo ve `currentChoice`. */
 export interface ChoiceStep {
   step: string

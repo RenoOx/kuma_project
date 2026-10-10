@@ -292,7 +292,7 @@ export const kumaTools: ChatCompletionTool[] = [
           cantidad: {
             type: 'integer',
             description:
-              'Cuántas dijo el cliente, si dio un número ("2 máquinas", "dos", "unas cinco").',
+              'Cuántas cosas de las ofrecidas dijo el cliente, si dio un número ("2 máquinas", "dos", "unas cinco"). Años de experiencia, edad o meses NO son una cantidad: si respondió eso, no llames esta herramienta y pregúntale cuántas.',
           },
           elementos: {
             type: 'array',
