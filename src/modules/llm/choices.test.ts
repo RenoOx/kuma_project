@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { StepChoiceOption } from '@/modules/conversation/stateMachine.js'
-import { countDistinct, currentChoice, optionForCount, parseChoice, pickOption } from './choices.js'
+import {
+  countDistinct,
+  currentChoice,
+  isDurationCount,
+  optionForCount,
+  parseChoice,
+  pickOption,
+} from './choices.js'
 
 // Las certificaciones de Tecmin: el caso que nació esto (2026-10-06).
 const certs: StepChoiceOption[] = [
@@ -180,5 +187,33 @@ describe('pickOption', () => {
     expect(pickOption({}, certs)).toBeNull()
     expect(pickOption({ elementos: [] }, certs)).toBeNull()
     expect(pickOption({ opcion: 'Z' }, courses)).toBeNull()
+  })
+})
+
+// Tecmin, 2026-10-10: "20 años" (de experiencia) terminó en la oferta de 5 o más.
+describe('isDurationCount', () => {
+  it('treats a number tied to a time unit as a duration', () => {
+    expect(isDurationCount(20, '20 años')).toBe(true)
+    expect(isDurationCount(20, 'Tengo 20 años de experiencia')).toBe(true)
+    expect(isDurationCount(20, '20años')).toBe(true)
+    expect(isDurationCount(20, 'veinte años')).toBe(true)
+    expect(isDurationCount(3, 'hace 3 meses')).toBe(true)
+    expect(isDurationCount(1, 'un año nomás')).toBe(true)
+  })
+
+  it('keeps a real count', () => {
+    expect(isDurationCount(2, '2 máquinas')).toBe(false)
+    expect(isDurationCount(5, '5')).toBe(false)
+    expect(isDurationCount(3, 'unas tres')).toBe(false)
+    expect(isDurationCount(1, 'una máquina')).toBe(false)
+  })
+
+  it('counts the number that is not a duration in the same message', () => {
+    expect(isDurationCount(2, '20 años operando 2 máquinas')).toBe(false)
+    expect(isDurationCount(20, '20 años operando 2 máquinas')).toBe(true)
+  })
+
+  it('does not block a number the customer never wrote', () => {
+    expect(isDurationCount(2, 'retroexcavadora y minicargador')).toBe(false)
   })
 })

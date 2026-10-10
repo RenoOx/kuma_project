@@ -456,12 +456,12 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       branches: config.branches,
       fixedMessages: stepFixedMessages,
       ...(activeChoices ? { choices: { ...activeChoices, messages: fileMessages } } : {}),
-      // El portero juzga contra lo que escribió el cliente, no contra lo que
-      // el modelo cree que pidió (ver escalationGate.ts).
+      // Lo que escribió el cliente, no lo que el modelo cree que dijo: lo usan el
+      // portero de la escalada (escalationGate.ts) y elegir_opcion (isDurationCount).
+      customerText: params.userMessage,
       ...(fileConfig?.escalationGate
         ? {
             escalationGate: fileConfig.escalationGate,
-            customerText: params.userMessage,
             previousAssistantText: lastAssistantText,
           }
         : {}),
