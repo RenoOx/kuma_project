@@ -1,4 +1,9 @@
-import { downloadMediaMessage, type WAMessage, type WAMessageKey } from '@whiskeysockets/baileys'
+import {
+  downloadMediaMessage,
+  proto,
+  type WAMessage,
+  type WAMessageKey,
+} from '@whiskeysockets/baileys'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
 import type { Appointment, Business, Customer } from '@/db/schema/index.js'
@@ -63,6 +68,11 @@ import {
 } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
 import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
+import {
+  PLACEHOLDER_WAIT_MS,
+  settle as settlePlaceholder,
+  watch as watchPlaceholderMessage,
+} from '@/modules/whatsapp/placeholderWatch.js'
 import * as presence from '@/modules/whatsapp/presence.js'
 import { markServiceImageSent } from '@/modules/whatsapp/sentServiceImages.js'
 import { preview } from '@/shared/logRedact.js'
@@ -1270,6 +1280,12 @@ async function processMessage(
   // and the stored number usually does not, so a raw comparison sent the owner
   // down the customer path and Emma answered her own boss as a patient.
   if (samePhone(business.ownerWhatsappNumber, phone)) {
+    // El respaldo de una entrega vacía es para clientes: al dueño no se le
+    // contesta un mensaje que nadie pudo leer.
+    if (payload.kind === 'text' && payload.text.includes(UNREADABLE_MESSAGE_MARKER)) {
+      log.info('owner placeholder never filled: ignored')
+      return
+    }
     // Un negocio cuyo archivo apaga el asistente del dueño: Emma solo le
     // notifica, nunca le contesta (Tecmin, 2026-10-01: el dueño reenvía los
     // avisos, y una respuesta de la IA en ese hilo solo confunde).
@@ -1883,6 +1899,14 @@ async function sendServiceImages(params: {
   }
 }
 
+/**
+ * Lo que lee Emma en lugar del mensaje cuando una entrega vacía nunca recibió su
+ * contenido (ver placeholderWatch.ts). Va como mensaje del cliente y queda en el
+ * Inbox, así el dueño también ve qué pasó.
+ */
+export const UNREADABLE_MESSAGE_MARKER =
+  '[El cliente te escribió, pero su mensaje no se pudo leer (pasa con quien llega desde un anuncio). Si es su primer mensaje, salúdalo y preséntate como siempre. Si ya venían conversando, pídele con amabilidad que te lo repita.]'
+
 export function handleIncomingMessage(
   raw: WAMessage,
   businessId: string,
@@ -1904,11 +1928,43 @@ export function handleIncomingMessage(
     return Promise.resolve()
   }
 
+  const messageId = raw.key.id
+  const watchKey = messageId ? `${businessId}:${messageId}` : null
+
+  // Se clasifica ANTES de reservar el id. Un lead que llega desde un anuncio de
+  // Meta entra primero como una entrega vacía y, un momento después, como el
+  // mensaje real con el MISMO id (Baileys le pide el contenido al celular). Con
+  // el id reservado por la vacía, el real se descartaba como duplicado: así se
+  // perdieron 10 leads de Tecmin el 2026-10-10. Una entrega sin contenido no
+  // reserva nada; la que trae algo sí.
+  const incoming = classifyIncoming(raw)
+  if (incoming.kind === 'ignorable') {
+    // Unknown shapes are warn-logged rather than dropped quietly: silence here
+    // is what hid the ephemeral-message bug, where ordinary text from anyone
+    // using disappearing messages never reached Emma at all.
+    if (incoming.reason === 'unknown') {
+      log.warn({ jid, msgKeys: incoming.keys }, 'handler skip: unrecognised message shape')
+    } else {
+      log.info({ jid, reason: incoming.reason }, 'handler skip: no answerable payload')
+    }
+    if (
+      incoming.reason === 'empty' &&
+      watchKey &&
+      raw.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT
+    ) {
+      watchPlaceholder(raw, watchKey, businessId, send, jid, log)
+    }
+    return Promise.resolve()
+  }
+
+  if (watchKey && settlePlaceholder(watchKey)) {
+    log.info({ jid, messageId, kind: incoming.kind }, 'placeholder filled')
+  }
+
   // Before the lock on purpose: the lock serialises duplicates, it does not
   // drop them, so a repeat that gets past here is answered a second time.
   // A message with no id cannot be identified — process it rather than guess.
-  const messageId = raw.key.id
-  if (messageId && !claimMessageId(`${businessId}:${messageId}`)) {
+  if (watchKey && !claimMessageId(watchKey)) {
     log.info({ jid, messageId }, 'handler skip: duplicate messages.upsert for this message id')
     return Promise.resolve()
   }
@@ -1932,18 +1988,6 @@ export function handleIncomingMessage(
       },
       'handler skip: no phone extractable from JID',
     )
-    return Promise.resolve()
-  }
-  const incoming = classifyIncoming(raw)
-  if (incoming.kind === 'ignorable') {
-    // Unknown shapes are warn-logged rather than dropped quietly: silence here
-    // is what hid the ephemeral-message bug, where ordinary text from anyone
-    // using disappearing messages never reached Emma at all.
-    if (incoming.reason === 'unknown') {
-      log.warn({ jid, msgKeys: incoming.keys }, 'handler skip: unrecognised message shape')
-    } else {
-      log.info({ jid, reason: incoming.reason }, 'handler skip: no answerable payload')
-    }
     return Promise.resolve()
   }
 
@@ -1999,10 +2043,6 @@ export function handleIncomingMessage(
     )
   }
 
-  // Un texto cierra el grupo de fotos pendiente del mismo cliente: "listo, ahí
-  // están" no se tiene que contestar antes de procesar las fotos que mandó antes.
-  flushImagesNow(senderKey)
-
   // Si el cliente usó "responder" de WhatsApp sobre una ficha, esa cita se
   // pierde apenas se junta con el resto en el buffer de abajo — para cuando
   // se procesa, el `raw` a mano es el ÚLTIMO mensaje de la ráfaga, no el que
@@ -2010,6 +2050,27 @@ export function handleIncomingMessage(
   // dentro del texto que se junta y persiste.
   const quoted = quotedSummaryOf(raw)
   const text = quoted ? `[Sobre: "${quoted}"] ${incoming.text}` : incoming.text
+  return dispatchText(raw, businessId, send, jid, phone, text, log)
+}
+
+/**
+ * Un texto entra por acá, venga del cliente o del respaldo de una entrega vacía:
+ * mismo agrupado, mismo candado, mismo lugar de procesamiento.
+ */
+function dispatchText(
+  raw: WAMessage,
+  businessId: string,
+  send: SendFn,
+  jid: string,
+  phone: string,
+  text: string,
+  log: HandlerLogger,
+): Promise<void> {
+  const senderKey = `${businessId}:${phone}`
+
+  // Un texto cierra el grupo de fotos pendiente del mismo cliente: "listo, ahí
+  // están" no se tiene que contestar antes de procesar las fotos que mandó antes.
+  flushImagesNow(senderKey)
 
   // Debounce sits AFTER dedup (so repeats never enter a burst) and BEFORE the
   // lock (holding the lock while waiting would serialise the very messages we
@@ -2021,19 +2082,42 @@ export function handleIncomingMessage(
     }
     return withSenderLock(senderKey, () =>
       withProcessingSlot((release) =>
-        processMessage(
-          raw,
-          businessId,
-          send,
-          jid,
-          phone,
-          {
-            kind: 'text',
-            text: joined,
-          },
-          release,
-        ),
+        processMessage(raw, businessId, send, jid, phone, { kind: 'text', text: joined }, release),
       ),
     )
   })
+}
+
+/**
+ * Anota una entrega vacía y, si su contenido no llega a tiempo, hace que Emma
+ * conteste igual con `UNREADABLE_MESSAGE_MARKER`: un lead de anuncio sin
+ * respuesta es un lead perdido, y el dueño no tiene cómo enterarse.
+ */
+function watchPlaceholder(
+  raw: WAMessage,
+  watchKey: string,
+  businessId: string,
+  send: SendFn,
+  jid: string,
+  log: HandlerLogger,
+): void {
+  const reason = raw.messageStubParameters?.[0] ?? null
+  const watched = watchPlaceholderMessage(watchKey, PLACEHOLDER_WAIT_MS, () => {
+    // Reservar el id acá es lo que evita la doble respuesta: si el contenido
+    // real aparece después, choca con esta reserva y se descarta.
+    if (!claimMessageId(watchKey)) return
+    const phone = extractPhone(raw)
+    if (!phone) {
+      log.warn({ jid, reason }, 'placeholder never filled and no phone to answer')
+      return
+    }
+    log.warn({ jid, phone, reason }, 'placeholder never filled: answering without content')
+    presence.markActive(businessId)
+    dispatchText(raw, businessId, send, jid, phone, UNREADABLE_MESSAGE_MARKER, log).catch(
+      (err: unknown) => {
+        log.error({ err, jid }, 'placeholder fallback failed')
+      },
+    )
+  })
+  if (watched) log.info({ jid, messageId: raw.key.id, reason }, 'placeholder received')
 }
