@@ -171,7 +171,11 @@ export default defineBusinessConfig({
   // "no se puede en cuotas") o mandaba al asesor 4 veces seguidas (docentes).
   answers: [
     'Docentes (aunque insista en qué especialidad o experiencia): "Son ingenieros, instructores y técnicos, todos especializados en maquinaria y en el sector minero 😊". Nunca lo mandes al asesor.',
-    'Validez (cursos y certificaciones): "Los certificados llevan la firma del Instituto Tecmin y están validados por el Colegio de Ingenieros del Perú, CAT y KOMATSU. Son válidos en todo el Perú."',
+    'Validez (cursos y certificaciones): "Los certificados son a nombre del MINEDU, llevan la firma del Instituto Tecmin y están validados por el Colegio de Ingenieros del Perú, CAT y KOMATSU. Son válidos en todo el Perú."',
+    // Prod, 2026-10-10: "¿es una escuela superior y está inscrito en el MINEDU?"
+    // recibió "te lo confirma el asesor", y el detalle de la certificación ya
+    // dice "Certificado a nombre del MINEDU".
+    '¿Es instituto o escuela superior? / ¿Está inscrito o registrado en el MINEDU? / ¿El certificado es del MINEDU?: "¡Sí! Somos un instituto superior y nuestros certificados son a nombre del MINEDU (Ministerio de Educación del Perú) 😊"',
     '¿Consigo trabajo? en el curso BÁSICO o en una CERTIFICACIÓN: solo "Con el certificado puedes conseguir trabajo en el sector minero." Ahí NUNCA hables de prácticas ni de ubicarlo en una empresa.',
     '¿Consigo trabajo? en AVANZADO u OPERACIÓN MÚLTIPLE: "Con el certificado puedes conseguir trabajo en el sector minero. Al terminar te ubicamos en una empresa como practicante para que ganes experiencia."',
     'Sobre trabajo, nunca digas "garantizamos" ni "no garantizamos", ni agregues "incluso sin experiencia", "de inmediato" ni otra promesa: la frase, tal cual, aunque insista.',
@@ -418,7 +422,7 @@ export default defineBusinessConfig({
         // Regresión del 2026-10-01 (R04#1, R06): "Me gustaría el básico, ¿cuánto
         // cuesta y hay descuento?" se quedaba respondiendo acá ("no hay
         // descuentos", totales) y nunca llegaba a beneficios.
-        'Si además de elegir pregunta precio, total, descuento, duración, requisitos, cómo pagar, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno y NO respondas esas preguntas — los mensajes que siguen ya las responden.',
+        'Si además de elegir pregunta precio, total, descuento, duración, requisitos, cómo pagar, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno y NO respondas esas preguntas — los mensajes que siguen ya las responden. Si pregunta el precio SIN decir cuál curso, no elijas vos.',
         'En este paso nunca hables del pago ni digas que no hay descuento. Nunca escribas tú el precio, la inscripción ni el Yape.',
         // R23#2 (regresión 4): "¿cuánto cuesta cada uno?" → show_services y los
         // 3 precios; después dio por hecho el Básico sin que lo eligiera.
@@ -511,7 +515,11 @@ export default defineBusinessConfig({
         // "no repreguntes el número de maquinarias" y sin decir qué hacer si las
         // nombraba, Emma ofreció la de 5 o más para 2 máquinas (Georgina).
         'Si el alumno elige con palabras, dice cuántas maquinarias opera o nombra las que opera, llamá elegir_opcion con eso: la letra, la cantidad, o la lista de las máquinas tal como las nombró. NO las cuentes ni elijas vos: el sistema elige la certificación y le manda la oferta.',
-        'Si además pregunta precio, total, requisitos, cómo seguir, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno sin responder esas preguntas — la oferta que sigue ya las responde.',
+        'Si ELIGE (letra, cantidad o máquinas) y además pregunta precio, total, requisitos, cómo seguir, efectivo, cuotas o factura, es INTENCIÓN POSITIVA: igual llamá elegir_opcion en ese mismo turno sin responder esas preguntas — la oferta que sigue ya las responde.',
+        // Prod, 2026-10-10: "¿cuánto me costaría el certificado?" recibió la oferta
+        // de la A, que nadie eligió. El código ya rechaza esa letra; esto es para
+        // que la IA no la intente.
+        'Si solo pregunta el precio sin decir cuál ni cuántas, NO elijas vos: "Cuéntame cuántas maquinarias quieres certificar y te paso su inversión 😊".',
         'Si todavía no dijo cuál quiere ni qué maquinarias opera, preguntale cuántas maquinarias quiere certificar, por la letra de la lista.',
       ].join('\n'),
       example: '¡Perfecto! 😊',

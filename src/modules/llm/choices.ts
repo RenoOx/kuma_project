@@ -116,6 +116,60 @@ export function isDurationCount(n: number, customerText: string): boolean {
   return asDuration && !asOther
 }
 
+// Letras que en español también son palabras ("voy a", "sí o no"): como opción
+// solo cuentan con algo delante que las marque ("la a", "opción a").
+const LETTER_WORDS = new Set(['a', 'e', 'o', 'u', 'y'])
+const LETTER_MARKERS = new Set(['la', 'el', 'opcion', 'letra'])
+// "un/una" son artículos casi siempre ("cuánto cuesta un certificado").
+const ARTICLES = new Set(['un', 'una'])
+
+/** Las palabras del nombre de una opción que ninguna otra opción tiene. */
+function ownWords(name: string, others: ReadonlyArray<string>): string[] {
+  const shared = new Set(others.flatMap((other) => normalize(other).split(' ')))
+  return normalize(name)
+    .split(' ')
+    .filter((word) => word.length >= 4 && !shared.has(word))
+}
+
+/**
+ * Si el mensaje del cliente dice CUÁL quiere, de alguna forma: una letra de las
+ * opciones, un número (que no sea un tiempo), o una palabra propia del nombre de
+ * una opción ("básico"). Sin nada de eso, una letra que pase la IA la inventó
+ * ella: "¿cuánto me costaría el certificado?" terminó en la oferta de la A
+ * (Tecmin, 2026-10-10). `options` lleva el nombre del servicio de cada opción.
+ */
+export function hasChoiceSignal(
+  customerText: string,
+  options: ReadonlyArray<{ key: string; name: string }>,
+): boolean {
+  const tokens = normalize(customerText)
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .split(' ')
+    .filter((token) => token !== '')
+  const keys = new Set(options.map((o) => o.key.toLowerCase()))
+
+  const namesLetter = tokens.some(
+    (token, i) =>
+      keys.has(token) &&
+      (!LETTER_WORDS.has(token) || tokens.length === 1 || LETTER_MARKERS.has(tokens[i - 1] ?? '')),
+  )
+  if (namesLetter) return true
+
+  const namesNumber = tokens.some(
+    (token, i) =>
+      !ARTICLES.has(token) && numberOf(token) !== null && !DURATION_UNIT.test(tokens[i + 1] ?? ''),
+  )
+  if (namesNumber) return true
+
+  const words = new Set(tokens)
+  return options.some((option) =>
+    ownWords(
+      option.name,
+      options.filter((other) => other !== option).map((other) => other.name),
+    ).some((word) => words.has(word)),
+  )
+}
+
 /** Un paso con `choices`, como lo ve `currentChoice`. */
 export interface ChoiceStep {
   step: string

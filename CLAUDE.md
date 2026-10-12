@@ -437,7 +437,10 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   `llm/choices.ts`, inyectado como si el modelo hubiera llamado la herramienta).
   Con otras palabras, la IA llama `elegir_opcion` con lo que entendió —la letra,
   `cantidad` o la lista de `elementos`— y el código cuenta (`countDistinct`,
-  `optionForCount`). Al elegir: sale por `route` y manda los mensajes de `send`
+  `optionForCount`). Una letra sola de la IA se rechaza (`no_choice_in_message`)
+  si el mensaje del cliente no trae ninguna señal de cuál —letra, número o una
+  palabra propia del nombre de una opción— (`hasChoiceSignal`): "¿cuánto me
+  costaría el certificado?" recibió la oferta de la A (Tecmin, 2026-10-10). Al elegir: sale por `route` y manda los mensajes de `send`
   con el servicio de la opción, guardados en el historial como
   `send_fixed_message` (el embudo y el resumen del aviso los leen de ahí).
   `advance_flow` por esa ruta se rechaza: sin la oferta, el paso siguiente queda
