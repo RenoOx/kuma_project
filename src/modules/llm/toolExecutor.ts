@@ -20,7 +20,7 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
-import { isDurationCount, pickOption } from './choices.js'
+import { hasChoiceSignal, isDurationCount, pickOption } from './choices.js'
 import {
   type EscalationGate,
   escalationAllowed,
@@ -1363,6 +1363,31 @@ export async function executeTool(
               'El cliente dijo un tiempo (por ejemplo, sus años de experiencia), no cuántas máquinas. Pregúntale cuántas máquinas quiere certificar, sin precios. No elijas vos.',
           }),
           error: 'not_a_count',
+        }
+      }
+
+      // Una letra sola, sin nada en el mensaje que diga cuál: la eligió la IA,
+      // no el cliente (ver hasChoiceSignal).
+      if (
+        cantidad === undefined &&
+        (elementos === undefined || elementos.length === 0) &&
+        context.customerText !== undefined
+      ) {
+        const settings = await businessService.getSettings(context.businessId)
+        const services = settings.ok ? activeServices(settings.data) : []
+        const named = choices.options.map((o) => ({
+          key: o.key,
+          name: services.find((s) => s.id === o.serviceId)?.name ?? '',
+        }))
+        if (!hasChoiceSignal(context.customerText, named)) {
+          return {
+            result: JSON.stringify({
+              error: 'no_choice_in_message',
+              instruction:
+                'El cliente no dijo cuál quiere. NO elijas vos. Preguntale cuál opción quiere, por su letra, sin dar precios. Si preguntó el precio: "Cuéntame cuál te interesa y te paso su inversión 😊".',
+            }),
+            error: 'no_choice_in_message',
+          }
         }
       }
 

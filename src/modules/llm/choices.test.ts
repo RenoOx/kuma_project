@@ -3,6 +3,7 @@ import type { StepChoiceOption } from '@/modules/conversation/stateMachine.js'
 import {
   countDistinct,
   currentChoice,
+  hasChoiceSignal,
   isDurationCount,
   optionForCount,
   parseChoice,
@@ -215,5 +216,50 @@ describe('isDurationCount', () => {
 
   it('does not block a number the customer never wrote', () => {
     expect(isDurationCount(2, 'retroexcavadora y minicargador')).toBe(false)
+  })
+})
+
+// Tecmin, 2026-10-10: "¿cuánto me costaría el certificado?" terminó en la oferta
+// de la A, una letra que el cliente nunca dijo. Nombres tal cual están en prod.
+describe('hasChoiceSignal', () => {
+  const certNames = [
+    { key: 'A', name: 'Certificación - 1 a 2 maquinarias' },
+    { key: 'B', name: 'Certificación - 3 a 4 maquinarias' },
+    { key: 'C', name: 'Certificación - 5 maquinarias o más' },
+  ]
+  const courseNames = [
+    { key: 'A', name: 'BÁSICO - Operación y mantenimiento de equipos' },
+    { key: 'B', name: 'AVANZADO - Operación y mantenimiento de 3 equipos' },
+    { key: 'C', name: 'OPERACIÓN MÚLTIPLE Y MANTENIMIENTO DE EQUIPOS' },
+  ]
+
+  it('rejects a price question that names no option', () => {
+    expect(hasChoiceSignal('Cuanto me costaría  el certificado', certNames)).toBe(false)
+    expect(hasChoiceSignal('¿Cuánto cuesta un certificado?', certNames)).toBe(false)
+    expect(hasChoiceSignal('A cuánto sale?', certNames)).toBe(false)
+    expect(hasChoiceSignal('voy a pensarlo', certNames)).toBe(false)
+    expect(hasChoiceSignal('tengo 20 años de experiencia, cuánto es?', certNames)).toBe(false)
+    expect(hasChoiceSignal('cuánto cuesta el curso de operación?', courseNames)).toBe(false)
+  })
+
+  it('accepts a letter', () => {
+    expect(hasChoiceSignal('la B cuánto cuesta', certNames)).toBe(true)
+    expect(hasChoiceSignal('opción c', certNames)).toBe(true)
+    expect(hasChoiceSignal('c', certNames)).toBe(true)
+    expect(hasChoiceSignal('A', certNames)).toBe(true)
+    expect(hasChoiceSignal('la a, cuánto es?', certNames)).toBe(true)
+  })
+
+  it('accepts a number', () => {
+    expect(hasChoiceSignal('opero 2 máquinas', certNames)).toBe(true)
+    expect(hasChoiceSignal('Más de 5', certNames)).toBe(true)
+    expect(hasChoiceSignal('unas tres', certNames)).toBe(true)
+    expect(hasChoiceSignal('el de 3 equipos', courseNames)).toBe(true)
+  })
+
+  it('accepts a word only one option has', () => {
+    expect(hasChoiceSignal('el básico, ¿hay descuento?', courseNames)).toBe(true)
+    expect(hasChoiceSignal('me interesa el avanzado', courseNames)).toBe(true)
+    expect(hasChoiceSignal('el multiple', courseNames)).toBe(true)
   })
 })
