@@ -176,6 +176,13 @@ export default defineBusinessConfig({
     // recibió "te lo confirma el asesor", y el detalle de la certificación ya
     // dice "Certificado a nombre del MINEDU".
     '¿Es instituto o escuela superior? / ¿Está inscrito o registrado en el MINEDU? / ¿El certificado es del MINEDU?: "¡Sí! Somos un instituto superior y nuestros certificados son a nombre del MINEDU (Ministerio de Educación del Perú) 😊"',
+    // Prod, 2026-10-10: "Está a nombre de la nación" fue al asesor y el dueño
+    // contestó a mano con esta frase, 1h40 después.
+    '¿Está a nombre de la nación? / ¿Es oficial o del Estado?: "Los certificados están a nombre del MINEDU, válidos en todo el Perú 😊"',
+    // Prod, 2026-10-10: "Necesito un certificado de camión volquete" recibió "no
+    // ofrecemos un certificado específico". El dueño certifica cualquier
+    // maquinaria pesada que el alumno ya opere; lo que cambia es cuántas.
+    '¿Certifican tal máquina? (camión volquete, camión minero, excavadora, cargador, la que sea): "¡Sí! Certificamos cualquier maquinaria pesada que ya sepas operar 😊". Cuenta para la opción por cantidad (1 a 2, 3 a 4, 5 o más). Si ya eligió una opción y la máquina entra en esa cantidad, dile que entra en su certificación y vuelve a la pregunta del paso. Nunca digas que no certificamos una máquina.',
     '¿Consigo trabajo? en el curso BÁSICO o en una CERTIFICACIÓN: solo "Con el certificado puedes conseguir trabajo en el sector minero." Ahí NUNCA hables de prácticas ni de ubicarlo en una empresa.',
     '¿Consigo trabajo? en AVANZADO u OPERACIÓN MÚLTIPLE: "Con el certificado puedes conseguir trabajo en el sector minero. Al terminar te ubicamos en una empresa como practicante para que ganes experiencia."',
     'Sobre trabajo, nunca digas "garantizamos" ni "no garantizamos", ni agregues "incluso sin experiencia", "de inmediato" ni otra promesa: la frase, tal cual, aunque insista.',
@@ -321,7 +328,9 @@ export default defineBusinessConfig({
         // Prod, 2026-10-05 21:45: "información de los cursos de maquinaria
         // pesada" recibió la pregunta de la experiencia. La regla de "ya dijo qué
         // busca" iba después de la del saludo solo, y el modelo tomaba la primera.
-        'LO PRIMERO: si su mensaje ya pide los cursos o información de cursos ("información de los cursos", "quiero un curso", "cursos de maquinaria") o dice que no tiene experiencia, llamá advance_flow con la ruta "sin-experiencia" en este mismo turno; si pide certificación o certificados, o dice que ya opera maquinaria, la ruta "con-experiencia". En esos casos NUNCA hagas la pregunta de la experiencia.',
+        // Prod, 2026-10-10: "Tengo 1 año" recibió "¿1 a 2 o 3 a 4 maquinarias?",
+        // escrito por la IA, en vez de pasar a la lista de certificaciones.
+        'LO PRIMERO: si su mensaje ya pide los cursos o información de cursos ("información de los cursos", "quiero un curso", "cursos de maquinaria") o dice que no tiene experiencia, llamá advance_flow con la ruta "sin-experiencia" en este mismo turno; si pide certificación o certificados, o dice que ya opera maquinaria o cuánto tiempo de experiencia tiene ("tengo 1 año", "20 años", "tengo exp"), la ruta "con-experiencia". En esos casos NUNCA hagas la pregunta de la experiencia ni ofrezcas tú las opciones de certificación: al pasar, la lista le llega sola.',
         '- Si el alumno solo saludó o todavía no dijo qué busca, tu mensaje es exactamente: "Cuéntame, ¿tienes experiencia operando maquinaria o deseas realizar un curso desde cero?"',
         '- No uses show_services en este paso: los cursos y las certificaciones se muestran en su propio paso.',
         // A10 (2026-09-30): "precio de la certificación?" como primer mensaje
@@ -364,7 +373,7 @@ export default defineBusinessConfig({
         // información de nuestros cursos?'") hizo que "No tengo exp", sin ninguna
         // pregunta, recibiera esa confirmación en prod.
         '- Si NO tiene experiencia ("no", "no tengo exp", "ninguna", "desde cero") o pregunta por los cursos: llamá advance_flow con la ruta "sin-experiencia" en este mismo turno, aunque también pregunte otra cosa. Nunca le preguntes si quiere la información: al pasar le llegan los cursos solos.',
-        '- Si TIENE experiencia, o pregunta por certificación: pasá al paso de certificación.',
+        '- Si TIENE experiencia (también si solo dice cuánto tiempo: "tengo 1 año", "20 años", "tengo exp"), o pregunta por certificación: pasá al paso de certificación. Nunca ofrezcas tú las opciones de certificación: al pasar, la lista le llega sola.',
         // R06#1 (regresión 5): "kiero el curso básico, ¿cuántas cuotas y cuánto en
         // total?" se quedó acá respondiendo precios hasta que el lead se fue.
         '- Si nombra un curso o pregunta precio, cuotas, total o pago, es INTENCIÓN POSITIVA: pasa al paso de cursos en este mismo turno, sin responder esas preguntas.',
@@ -521,6 +530,8 @@ export default defineBusinessConfig({
         // que la IA no la intente.
         'Si solo pregunta el precio sin decir cuál ni cuántas, NO elijas vos: "Cuéntame cuántas maquinarias quieres certificar y te paso su inversión 😊".',
         'Si todavía no dijo cuál quiere ni qué maquinarias opera, preguntale cuántas maquinarias quiere certificar, por la letra de la lista.',
+        // Prod, 2026-10-10: "Más información" recibió la lista con los 3 precios.
+        'Si pide "más información" o qué es la certificación sin elegir, copia tal cual, con sus saltos de línea: "Nuestras certificaciones son por experiencia: certificamos las maquinarias que ya sabes operar y la inversión depende de cuántas son 😊\n¿Cuántas quieres certificar?\nA. 1 a 2 maquinarias\nB. 3 a 4 maquinarias\nC. 5 maquinarias o más". Sin precios.',
       ].join('\n'),
       example: '¡Perfecto! 😊',
       edgeCases: [
@@ -635,6 +646,9 @@ export default defineBusinessConfig({
         'Nunca confirmes que el pago o el DNI se recibió o se validó: eso lo hace el asesor.',
         // R11 (2026-10-01): "hay cupos disponibles y tienes hasta este lunes".
         'Si pregunta por cupos o cuándo empieza: solo "Empezamos este lunes 😊".',
+        // Prod, 2026-10-10: "Cuando reciba mi pago" (cuando cobre) recibió "no hay
+        // pago por aquí", y la certificación sí cuesta.
+        'Si dice que lo hará después ("en estos días", "cuando cobre", "cuando reciba mi pago", "más tarde"): "Entendido, estaré al tanto si deseas continuar 😊" y nada más. Nunca digas que no hay pago o que es gratis: la certificación tiene su precio; por aquí solo se pide el DNI.',
         // R21 (2026-10-01): "aquí está la captura" sin adjuntarla → 13 "quedo
         // atenta" seguidos. Si la foto hubiera llegado, Emma ya estaría pausada:
         // que vuelva a preguntar es la prueba de que no llegó.

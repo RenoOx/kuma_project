@@ -70,6 +70,8 @@ export interface ToolContext {
   choices?: {
     /** Sin ruta: se re-elige en el mismo paso (`rechoose`), sin avanzar. */
     route?: string
+    /** Al re-elegir: la letra de la elección vigente, cuya oferta ya le llegó. */
+    current?: string
     options: ReadonlyArray<StepChoiceOption>
     messages: Readonly<Record<string, FixedMessage>>
   }
@@ -1403,6 +1405,20 @@ export async function executeTool(
               'No se pudo saber qué opción eligió. Preguntale cuál quiere, por su letra, sin precios. No elijas vos.',
           }),
           error: 'no_option',
+        }
+      }
+
+      // Re-elegir la MISMA opción no reenvía su oferta: "también cargador
+      // frontal" seguía siendo 1 a 2 máquinas y le llegó otra vez el detalle
+      // entero, con foto (Tecmin, 2026-10-10).
+      if (!choices.route && choices.current?.toUpperCase() === option.key.toUpperCase()) {
+        return {
+          result: JSON.stringify({
+            status: 'same_option',
+            option: option.key,
+            instruction:
+              'Ya tiene esa opción y su oferta ya le llegó: no la repitas ni des el precio. Confírmale en una línea que lo que dijo entra en su opción y vuelve a la pregunta del paso ("¿Realizamos tus certificados? 😊" o "¿Te gustaría obtener tu descuento? 😊").',
+          }),
         }
       }
       return executeChoice(option, choices, context)
