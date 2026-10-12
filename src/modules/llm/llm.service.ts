@@ -419,12 +419,13 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     // de la elección vigente, para corregirla. Re-elegir solo en un turno que
     // empezó en este paso: en el que se acaba de entrar eligiendo, la oferta
     // recién salió.
-    const activeChoices: { route?: string; options: StepChoiceOption[] } | undefined =
-      config.choices
-        ? { route: config.choices.route, options: config.choices.options }
-        : config.rechoose && state === turnStart && vigente
-          ? { options: vigente.choices.options }
-          : undefined
+    const activeChoices:
+      | { route?: string; current?: string; options: StepChoiceOption[] }
+      | undefined = config.choices
+      ? { route: config.choices.route, options: config.choices.options }
+      : config.rechoose && state === turnStart && vigente
+        ? { current: vigente.option.key, options: vigente.choices.options }
+        : undefined
     // A tool the state does not list is not refused — it is never offered, so
     // the model never considers it. Different layer from the executor's
     // gates, which judge the calls that do come through: the deposit gate
@@ -542,7 +543,12 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // hubiera llamado elegir_opcion y después cerrado sin texto. Mismo camino que
   // cualquier herramienta (historial, cambio de paso, mensajes fijos), y una
   // llamada a OpenAI menos. Ver choices.ts.
-  const codeChoice = activeChoices ? parseChoice(params.userMessage, activeChoices.options) : null
+  // La letra que ya tiene no: no hay oferta nueva que mandar, y este camino
+  // cierra el turno sin texto. Que la responda el modelo (ver 'same_option').
+  const parsedChoice = activeChoices
+    ? parseChoice(params.userMessage, activeChoices.options)
+    : null
+  const codeChoice = parsedChoice?.key === activeChoices?.current ? null : parsedChoice
   const codeCompletions: ChatCompletion[] = codeChoice
     ? [
         codeCompletion([

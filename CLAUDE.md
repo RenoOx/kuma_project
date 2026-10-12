@@ -458,7 +458,10 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
     No se llama `then`: un objeto con `then` parece una promesa.
   - **`rechoose: true`** en un paso (Tecmin: beneficios): se puede cambiar la
     opción vigente ("mejor la B"), mismas opciones, sin cambiar de paso. Solo en
-    un turno que empezó en ese paso.
+    un turno que empezó en ese paso. Re-elegir la MISMA opción ("también cargador
+    frontal" sigue en 1 a 2) no reenvía la oferta: `same_option`, y la IA confirma
+    en una línea. Una letra sola igual a la vigente no la resuelve el código (cerraría
+    el turno sin texto): la contesta el modelo.
   - Cada oferta de Tecmin empieza con `*{servicio}*`: el alumno ve qué entendió
     Emma y lo corrige antes de pagar.
 
