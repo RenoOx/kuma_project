@@ -184,9 +184,10 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * reales: pide una persona, es empresa, reclamo…) o si insiste después de que
    * Emma ya le dio la frase `insistAfter`. Los patrones son expresiones
    * regulares que se comparan contra el texto sin tildes y en minúsculas, así
-   * que se escriben sin tildes. Vale para todos los pasos.
+   * que se escriben sin tildes. Vale para todos los pasos. `insistAlsoAfter`:
+   * otras frases de Emma tras las que volver a escribir también es insistir.
    */
-  escalationGate?: { patterns: string[]; insistAfter: string }
+  escalationGate?: { patterns: string[]; insistAfter: string; insistAlsoAfter?: string[] }
   /**
    * `false`: Emma no le contesta al dueño. Sus mensajes al número del negocio se
    * registran y nada más; las notificaciones (fotos, escaladas, avisos) le siguen
@@ -508,6 +509,9 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
           escalationGate: {
             patterns: input.escalationGate.patterns.map((p) => new RegExp(p)),
             insistAfter: input.escalationGate.insistAfter,
+            ...(input.escalationGate.insistAlsoAfter !== undefined
+              ? { insistAlsoAfter: [...input.escalationGate.insistAlsoAfter] }
+              : {}),
           },
         }
       : {}),

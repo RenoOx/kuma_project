@@ -235,6 +235,44 @@ export function hasChoiceSignal(
   )
 }
 
+/**
+ * La opción que ofrecía el último mensaje de Emma, si nombraba UNA sola: su
+ * número ("la Opción 3"), una palabra clave ("título") o una palabra propia de
+ * su nombre. Así un "sí" a "¿Te gustaría arrancar con tu inscripción?" después
+ * de ofrecer el Título elige el Título (Tecmin, 2026-10-27), y un "sí" a la
+ * pregunta que lista las tres no elige nada. Null si nombra ninguna o varias.
+ */
+export function offeredOption(
+  assistantText: string,
+  options: ReadonlyArray<{ key: string; name: string; words?: ReadonlyArray<string> }>,
+): string | null {
+  const tokens = normalize(assistantText)
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .split(' ')
+    .filter((token) => token !== '')
+  const text = ` ${tokens.join(' ')} `
+  const words = new Set(tokens)
+
+  const named = options.filter((option) => {
+    const key = option.key.toLowerCase()
+    const keyNumber = /^\d+$/.test(key) ? Number(key) : null
+    const namesKey = tokens.some(
+      (token, i) =>
+        !DURATION_UNIT.test(tokens[i + 1] ?? '') &&
+        (keyNumber === null
+          ? token === key && (!LETTER_WORDS.has(token) || LETTER_MARKERS.has(tokens[i - 1] ?? ''))
+          : !ARTICLES.has(token) && numberOf(token) === keyNumber),
+    )
+    if (namesKey) return true
+    if ((option.words ?? []).some((word) => text.includes(` ${word} `))) return true
+    return ownWords(
+      option.name,
+      options.filter((other) => other !== option).map((other) => other.name),
+    ).some((word) => words.has(word))
+  })
+  return named.length === 1 ? (named[0]?.key ?? null) : null
+}
+
 /** Un paso con `choices`, como lo ve `currentChoice`. */
 export interface ChoiceStep {
   step: string

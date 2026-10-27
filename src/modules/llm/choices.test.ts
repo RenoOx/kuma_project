@@ -6,6 +6,7 @@ import {
   currentChoice,
   hasChoiceSignal,
   isDurationCount,
+  offeredOption,
   optionForCount,
   parseChoice,
   pickOption,
@@ -398,5 +399,47 @@ describe('choiceByWords', () => {
     const names = withWords.map((o) => ({ key: o.key, name: 'Opción', words: o.words }))
     expect(hasChoiceSignal('quiero titularme', names)).toBe(true)
     expect(hasChoiceSignal('cuánto cuesta?', names)).toBe(false)
+  })
+})
+
+describe('offeredOption', () => {
+  // Las opciones de Tecmin (versión 3 opciones), con los nombres de sus servicios.
+  const tecmin = [
+    {
+      key: '1',
+      name: 'Certificación en un equipo',
+      words: ['un equipo', 'una maquina', 'una maquinaria'],
+    },
+    {
+      key: '2',
+      name: 'Certificación de Operador Múltiple',
+      words: ['multiple', 'varias maquinas', 'varias maquinarias', 'varios equipos'],
+    },
+    {
+      key: '3',
+      name: 'Título Técnico de Operador - MINEDU',
+      words: ['titulo', 'titulos', 'titularse', 'titularme', 'titulado', 'tecnico'],
+    },
+  ]
+
+  it('la respuesta a "no tengo experiencia" ofrece solo el Título', () => {
+    const answer =
+      '¡Claro que sí! 🎓 Con la Opción 3 (Título Técnico MINEDU) estudias una carrera formal de 2 años con teoría y práctica, obteniendo tu título oficial a nombre de la nación para postular a las grandes empresas mineras. 🚀\n¿Te gustaría arrancar con tu inscripción de una vez? 😉👇'
+    expect(offeredOption(answer, tecmin)).toBe('3')
+  })
+
+  it.each([
+    [
+      'la pregunta de las tres opciones',
+      '1️⃣ Certificarme en un equipo.\n2️⃣ Certificarte como Operador Múltiple.\n3️⃣ Obtener tu Título Técnico - MINEDU.\n¡Mándame solo el número 1, 2 o 3 y te paso la opción perfecta para ti! 😉👇',
+    ],
+    [
+      'la diferencia entre la 1 y la 2',
+      '¡Excelente pregunta! La diferencia está en tu CV: la Opción 1 te certifica en 1 solo equipo, mientras que la Opción 2 (Operador Múltiple) te certifica en todos los equipos que sabes operar 😃',
+    ],
+    ['la frase del asesor', 'Esa consulta te la confirma el asesor 😊'],
+    ['un tiempo, no una opción', 'Es una carrera de 2 años 😊'],
+  ])('no ofrece una sola: %s', (_, text) => {
+    expect(offeredOption(text, tecmin)).toBeNull()
   })
 })
