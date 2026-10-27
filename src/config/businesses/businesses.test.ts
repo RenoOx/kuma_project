@@ -290,6 +290,32 @@ describe('choices in a business file', () => {
     ])
   })
 
+  // `words` (2026-10-26): con estas frases elige el código, sin la IA.
+  it('normalizes the keywords of an option', () => {
+    const config = fileWith({
+      route: 'elige',
+      options: [certs[0], { ...certs[1], words: ['Título', 'titulo', 'Operador  Múltiple'] }],
+    })()
+    expect(config.composition.overrides.greeting?.choices?.options[1]?.words).toEqual([
+      'titulo',
+      'operador multiple',
+    ])
+  })
+
+  it.each([
+    ['an empty keyword', [certs[0], { ...certs[1], words: ['  '] }]],
+    ['an empty keyword list', [certs[0], { ...certs[1], words: [] }]],
+    [
+      'the same keyword in two options',
+      [
+        { ...certs[0], words: ['título'] },
+        { ...certs[1], words: ['titulo'] },
+      ],
+    ],
+  ])('refuses %s', (_label, options) => {
+    expect(fileWith({ route: 'elige', options })).toThrow()
+  })
+
   it('gives every file choice a route and messages the file declares', () => {
     for (const config of [...BUSINESS_CONFIGS, ...TEST_CONFIGS]) {
       for (const [node, override] of Object.entries(config.composition.overrides)) {

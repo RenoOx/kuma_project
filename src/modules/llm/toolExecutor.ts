@@ -1381,6 +1381,7 @@ export async function executeTool(
         const named = choices.options.map((o) => ({
           key: o.key,
           name: services.find((s) => s.id === o.serviceId)?.name ?? '',
+          ...(o.words ? { words: o.words } : {}),
         }))
         if (!hasChoiceSignal(context.customerText, named)) {
           return {

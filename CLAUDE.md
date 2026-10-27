@@ -448,6 +448,16 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   `llm/choices.ts`, inyectado como si el modelo hubiera llamado la herramienta).
   Un número que no es la key de ninguna opción no se resuelve ahí: en un negocio
   con letras, "2" solo sigue yendo a la IA.
+  **`words`** en una opción (2026-10-26): frases que la eligen sin la IA
+  (`choiceByWords`). Tecmin, Título: `titulo`, `titularme`, `tecnico`… Nació de
+  "quiero obtener un título" en prod: la IA no llamó `elegir_opcion` y armó su
+  propia oferta y su propio cobro con el Yape que estaba en `answers` (por eso los
+  datos de pago salieron de ahí: viven solo en el mensaje de pago). Solo elige si
+  coincide UNA opción ("el título de operador múltiple" va a la IA) y si no hay
+  una negación en las 3 palabras anteriores ("no quiero el título"). Solo en el
+  paso dueño de las `choices`, no en un paso `rechoose`: ahí "el título" puede ser
+  una pregunta sobre lo que ya eligió. `define.ts` rechaza una frase vacía o
+  repetida en dos opciones. Sin "MINEDU": las 3 opciones certifican por el MINEDU.
   Con otras palabras, la IA llama `elegir_opcion` con lo que entendió —la letra,
   `cantidad` o la lista de `elementos`— y el código cuenta (`countDistinct`,
   `optionForCount`). Una letra sola de la IA se rechaza (`no_choice_in_message`)

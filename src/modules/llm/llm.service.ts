@@ -28,7 +28,13 @@ import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import { MAX_ATTACHMENTS_PER_TURN, queueAttachments } from './attachmentQueue.js'
 import { historyToChatMessages } from './chatHistory.js'
-import { type ChoiceStep, type CurrentChoice, currentChoice, parseChoice } from './choices.js'
+import {
+  type ChoiceStep,
+  type CurrentChoice,
+  choiceByWords,
+  currentChoice,
+  parseChoice,
+} from './choices.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
 import {
   type FixedOutbound,
@@ -546,7 +552,14 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // llamada a OpenAI menos. Ver choices.ts.
   // La letra que ya tiene no: no hay oferta nueva que mandar, y este camino
   // cierra el turno sin texto. Que la responda el modelo (ver 'same_option').
-  const parsedChoice = activeChoices ? parseChoice(params.userMessage, activeChoices.options) : null
+  // Las palabras clave (`words`) solo en el paso que elige: en uno `rechoose`
+  // (la oferta), "¿el título tiene validez?" es una pregunta, no un cambio.
+  const parsedChoice = activeChoices
+    ? (parseChoice(params.userMessage, activeChoices.options) ??
+      (activeChoices.route !== undefined
+        ? choiceByWords(params.userMessage, activeChoices.options)
+        : null))
+    : null
   const codeChoice = parsedChoice?.key === activeChoices?.current ? null : parsedChoice
   // Un paso `ctaOnEnter` al que se entró con el mensaje del cliente es entero
   // del código: su `openWith`, su material y el `cta` exacto. El modelo no tiene

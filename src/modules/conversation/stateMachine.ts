@@ -119,6 +119,8 @@ export interface StepChoiceOption {
   count?: [number, number | null]
   /** Lo que el código manda al entrar a `followUp` si esta es la elección vigente (ej. el pago). */
   onAccept?: string[]
+  /** Palabras clave, ya normalizadas: si el mensaje nombra las de UNA sola opción, la elige el código. */
+  words?: string[]
 }
 
 /**
