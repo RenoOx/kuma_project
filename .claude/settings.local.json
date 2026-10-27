@@ -1,5 +1,5 @@
 {
   "permissions": {
-    "allow": ["Bash(pnpm --version)"]
+    "allow": ["Bash(pnpm --version)", "mcp__figma-remote-mcp__create_session"]
   }
 }
