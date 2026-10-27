@@ -287,12 +287,12 @@ export const kumaTools: ChatCompletionTool[] = [
           opcion: {
             type: 'string',
             description:
-              'La letra de la opción que nombró el cliente (A, B, C…), si la nombró, aunque sea con otras palabras ("el básico" → la letra del Básico).',
+              'La letra o el número de la opción que nombró el cliente (A, B, C… o 1, 2, 3…), si la nombró, aunque sea con otras palabras ("el básico" → la letra del Básico).',
           },
           cantidad: {
             type: 'integer',
             description:
-              'Cuántas cosas de las ofrecidas dijo el cliente, si dio un número ("2 máquinas", "dos", "unas cinco"). Años de experiencia, edad o meses NO son una cantidad: si respondió eso, no llames esta herramienta y pregúntale cuántas.',
+              'Cuántas cosas de las ofrecidas dijo el cliente, si dio un número ("2 máquinas", "dos", "unas cinco"). El número de una opción ("la 3", "opción 2") va en opcion, no acá. Años de experiencia, edad o meses NO son una cantidad: si respondió eso, no llames esta herramienta y pregúntale cuántas.',
           },
           elementos: {
             type: 'array',

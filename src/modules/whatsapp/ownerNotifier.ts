@@ -1,5 +1,6 @@
 import { logger } from '@/config/logger.js'
 import * as businessService from '@/modules/business/business.service.js'
+import { simulationScope } from '@/modules/simulator/simulationScope.js'
 import { AppError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -36,6 +37,13 @@ export async function notifyOwner(
   text: string,
   opts: NotifyOwnerOptions = {},
 ): Promise<Result<void>> {
+  // Una prueba del panel no le escribe al dueño: en prod su número es real y el
+  // socket está conectado ("quiero un asesor" en una prueba le llegaba de verdad).
+  if (simulationScope()?.businessId === businessId) {
+    logger.info({ businessId, textPreview: preview(text) }, 'notifyOwner simulated, not sent')
+    return ok(undefined)
+  }
+
   const businessResult = await businessService.getById(businessId)
   if (!businessResult.ok) return businessResult
   const business = businessResult.data

@@ -1,5 +1,6 @@
 import { logger } from '@/config/logger.js'
 import * as customerRepo from '@/modules/customer/customer.repo.js'
+import { simulationScope } from '@/modules/simulator/simulationScope.js'
 import { AppError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { normalizePhone } from '@/shared/phone.js'
@@ -25,6 +26,12 @@ export async function notifyCustomer(
   phone: string,
   text: string,
 ): Promise<Result<void>> {
+  // Mismo criterio que notifyOwner: nada de una prueba del panel sale por WhatsApp.
+  if (simulationScope()?.businessId === businessId) {
+    logger.info({ businessId, textPreview: preview(text) }, 'notifyCustomer simulated, not sent')
+    return ok(undefined)
+  }
+
   const client = clientRegistry.getClient(businessId)
   if (!client) {
     return err(

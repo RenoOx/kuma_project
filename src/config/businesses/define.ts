@@ -74,6 +74,13 @@ export interface BusinessStep<F extends FlowType, M extends string> {
    */
   catalogOnEnter?: string
   /**
+   * En el turno en que se entra a este paso (y termina en él), el texto de Emma
+   * es exactamente el `cta`, sin pasar por la IA. Para una pregunta larga que
+   * tiene que salir tal cual (Tecmin: las 3 opciones numeradas del saludo). En
+   * los turnos siguientes del paso la IA responde normal.
+   */
+  ctaOnEnter?: boolean
+  /**
    * Opciones que se eligen en este paso, y la elección la hace el CÓDIGO: una
    * letra o un tramo se resuelven sin la IA; si el cliente lo dice con otras
    * palabras, la IA solo pasa lo que entendió (la letra, cuántas, o la lista de
@@ -211,8 +218,30 @@ export interface BusinessConfigInput<F extends FlowType, M extends string> {
    * parámetros (`temperature`, `max_tokens`); la familia GPT-5 pide otros.
    */
   model?: CustomerModel
+  /**
+   * Marca el archivo como una VERSIÓN EN PRUEBA del negocio (va en
+   * `TEST_CONFIGS`, no en `BUSINESS_CONFIGS`): WhatsApp nunca la corre, solo la
+   * pestaña "Pruebas" del panel cuando alguien la elige. Así un flujo nuevo se
+   * prueba en prod mientras los clientes reales siguen con el de siempre.
+   */
+  test?: TestVersionInput
   /** The conversation, in order. */
   flow: BusinessStep<F, M>[]
+}
+
+/** Ver `test` en `BusinessConfigInput`. */
+export interface TestVersionInput {
+  /** Lo que viaja en la URL del simulador: minúsculas, números y guiones. */
+  id: string
+  /** Cómo se lista en la pestaña "Pruebas". */
+  label: string
+  /**
+   * Los servicios que ve esta versión: dentro de una prueba, estos son los
+   * activos (aunque en la base estén inactivos) y el resto no existe. Así los
+   * servicios nuevos se crean inactivos y WhatsApp no los ve hasta publicar.
+   * Ausente: los mismos que la versión de siempre.
+   */
+  services?: readonly string[]
 }
 
 /** Lo que el archivo pone por encima de la configuración guardada en la base. */
@@ -258,6 +287,23 @@ export interface BusinessConfig {
   funnel?: FunnelStage[]
   whatsappLabels?: Record<string, WhatsappLabel>
   model?: CustomerModel
+  test?: TestVersion
+}
+
+export interface TestVersion {
+  id: string
+  label: string
+  services?: string[]
+}
+
+/** Rompe al importar el archivo si la versión en prueba no se puede listar. */
+function checkedTest(test: TestVersionInput): TestVersion {
+  if (!/^[a-z0-9-]{1,40}$/.test(test.id)) {
+    throw new Error(`test.id "${test.id}" must be 1-40 lowercase letters, digits or dashes`)
+  }
+  const label = test.label.trim()
+  if (label.length === 0 || label.length > 60) throw new Error('test.label must be 1-60 characters')
+  return { id: test.id, label, ...(test.services ? { services: [...test.services] } : {}) }
 }
 
 // Ids propios desde 900: nunca chocan con las etiquetas del dueño.
@@ -304,6 +350,7 @@ function overrideOf<F extends FlowType, M extends string>(
     ...(step.fixedOnly !== undefined ? { fixedOnly: step.fixedOnly } : {}),
     ...(step.openWith !== undefined ? { openWith: step.openWith } : {}),
     ...(step.catalogOnEnter !== undefined ? { catalogOnEnter: step.catalogOnEnter } : {}),
+    ...(step.ctaOnEnter ? { ctaOnEnter: true } : {}),
     ...(step.choices !== undefined ? { choices: checkedChoices(step) } : {}),
     ...(step.rechoose ? { rechoose: true } : {}),
   }
@@ -327,7 +374,10 @@ function checkedChoices<F extends FlowType, M extends string>(
   const keys = new Set<string>()
   for (const option of choices.options) {
     const key = option.key.trim().toUpperCase()
-    if (!/^[A-Z]$/.test(key)) throw new Error(`${where}: key "${option.key}" must be one letter`)
+    // Una letra o un dígito: "B" o "2" (Tecmin, 2026-10-26: las opciones van numeradas).
+    if (!/^[A-Z0-9]$/.test(key)) {
+      throw new Error(`${where}: key "${option.key}" must be one letter or digit`)
+    }
     if (keys.has(key)) throw new Error(`${where}: duplicated key "${key}"`)
     keys.add(key)
     if (option.send.length === 0) throw new Error(`${where}.${key}: send is empty`)
@@ -336,12 +386,11 @@ function checkedChoices<F extends FlowType, M extends string>(
     }
     if (!option.service.trim()) throw new Error(`${where}.${key}: service is empty`)
   }
-  // Rangos: todos o ninguno; desde 1, sin huecos ni cruces, solo el último sin tope.
+  // Rangos: desde 1, sin huecos ni cruces, solo el último sin tope. Una opción
+  // puede no tener rango si no es una cantidad (Tecmin: el Título Técnico junto a
+  // "1 equipo" y "2 o más"); a esa se llega por su key o su nombre, nunca contando.
   const withCount = choices.options.filter((o) => o.count)
   if (withCount.length > 0) {
-    if (withCount.length !== choices.options.length) {
-      throw new Error(`${where}: count must be set on every option or on none`)
-    }
     const sorted = [...withCount].sort((a, b) => (a.count?.[0] ?? 0) - (b.count?.[0] ?? 0))
     let next = 1
     sorted.forEach((option, i) => {
@@ -453,5 +502,6 @@ export function defineBusinessConfig<const F extends FlowType, const M extends s
       ? { whatsappLabels: checkedLabels(input.whatsappLabels) }
       : {}),
     ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.test !== undefined ? { test: checkedTest(input.test) } : {}),
   }
 }

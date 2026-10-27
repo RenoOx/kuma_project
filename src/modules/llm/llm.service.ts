@@ -294,6 +294,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         text: rendered.text,
         ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
         ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+        ...(gallery.length > 0 && message.imagesFirst ? { imagesFirst: true } : {}),
       })
     }
     return out
@@ -545,10 +546,19 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
   // llamada a OpenAI menos. Ver choices.ts.
   // La letra que ya tiene no: no hay oferta nueva que mandar, y este camino
   // cierra el turno sin texto. Que la responda el modelo (ver 'same_option').
-  const parsedChoice = activeChoices
-    ? parseChoice(params.userMessage, activeChoices.options)
-    : null
+  const parsedChoice = activeChoices ? parseChoice(params.userMessage, activeChoices.options) : null
   const codeChoice = parsedChoice?.key === activeChoices?.current ? null : parsedChoice
+  // Un paso `ctaOnEnter` al que se entró con el mensaje del cliente es entero
+  // del código: su `openWith`, su material y el `cta` exacto. El modelo no tiene
+  // nada que escribir, y lo que sí podía hacer era dañino: con el formulario de
+  // una campaña ("¿Quieres certificarte? Sí") llamaba show_services y mandaba
+  // las fichas encima del saludo (Tecmin, 2026-10-26). Se cierra como si el
+  // modelo hubiera contestado sin texto.
+  const scriptedEntry =
+    !codeChoice &&
+    enteredThisTurn &&
+    stateConfig.ctaOnEnter === true &&
+    typeof stateConfig.cta === 'string'
   const codeCompletions: ChatCompletion[] = codeChoice
     ? [
         codeCompletion([
@@ -563,12 +573,17 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         ]),
         codeCompletion([]),
       ]
-    : []
+    : scriptedEntry
+      ? [codeCompletion([])]
+      : []
   if (codeChoice) {
     log.info(
       { state: effectiveState, option: codeChoice.key },
       'choice resolved by code, no model call',
     )
+  }
+  if (scriptedEntry) {
+    log.info({ state: effectiveState }, 'scripted step entry (ctaOnEnter), no model call')
   }
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
@@ -681,7 +696,9 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // — un cierre sin texto propio es una respuesta válida, no un fallo.
       // Antes esto no existía: el modelo no tenía forma de "no decir nada", así
       // que agregaba una frase de cierre aunque se le pidiera lo contrario.
+      // Un `scriptedEntry` nunca trae texto del modelo: su respuesta es el `cta`.
       if (
+        !scriptedEntry &&
         !assistantContent &&
         fixedOut.length === 0 &&
         openingOut.length === 0 &&
@@ -735,11 +752,15 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         queueAttachments(attachments, cards, attachmentBudget)
       }
 
+      // `ctaOnEnter`: lo mismo sin fichas. Una pregunta de 5 líneas con emojis
+      // (las opciones del saludo de Tecmin) la IA la reescribía a su manera.
+      const exactCta = stepCta && (catalogCategory || (enteredThisTurn && stateConfig.ctaOnEnter))
+
       // Lo que el código ya mandó como mensaje de entrada no se repite en el
       // texto de Emma: la IA volvía a escribir la intro de cursos aunque se le
       // dijera que ya había salido. Queda limpio también en el historial.
       const finalContent =
-        catalogCategory && stepCta
+        exactCta && stepCta
           ? stepCta
           : discardText
             ? ''

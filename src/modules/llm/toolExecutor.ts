@@ -624,6 +624,7 @@ export async function renderChoiceMessages(
       text: rendered.text,
       ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
       ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+      ...(gallery.length > 0 && message.imagesFirst ? { imagesFirst: true } : {}),
     })
   }
   return {
@@ -1495,6 +1496,7 @@ export async function executeTool(
             text: rendered.text,
             ...(rendered.blocks ? { blocks: rendered.blocks } : {}),
             ...(gallery.length > 0 ? { images: gallery.map((row) => row.s3Key) } : {}),
+            ...(gallery.length > 0 && message.imagesFirst ? { imagesFirst: true } : {}),
           },
         ],
       }

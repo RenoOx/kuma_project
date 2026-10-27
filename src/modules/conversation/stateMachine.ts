@@ -96,6 +96,8 @@ export interface StateConfig {
   openWith?: string[]
   /** Categoría cuyas fichas manda el código al entrar a este paso (ver llm.service). */
   catalogOnEnter?: string
+  /** Al entrar a este paso, el texto de Emma es exactamente el `cta` (ver llm.service). */
+  ctaOnEnter?: boolean
   /** Las opciones que se eligen en este paso; la elección la hace el código (ver StepChoices). */
   choices?: StepChoices
   /**
@@ -187,6 +189,11 @@ export interface NodeOverride {
    * archivo. Existe porque si la IA no llamaba show_services, no había fichas.
    */
   catalogOnEnter?: string
+  /**
+   * Al entrar a este paso, el texto de Emma de ese turno es exactamente el
+   * `cta`. Solo desde archivo. Para una pregunta que tiene que salir tal cual.
+   */
+  ctaOnEnter?: boolean
   /** Opciones que elige el código (ver StepChoices). Solo desde archivo. */
   choices?: StepChoices
   /** Se puede cambiar la elección vigente en este paso (ver StateConfig.rechoose). */
@@ -345,6 +352,7 @@ export function compileFlow(composition: FlowComposition, flowType: FlowType): F
       ...(override?.catalogOnEnter?.trim()
         ? { catalogOnEnter: override.catalogOnEnter.trim() }
         : {}),
+      ...(override?.ctaOnEnter ? { ctaOnEnter: true } : {}),
       ...(choices ? { choices } : {}),
       ...(override?.rechoose ? { rechoose: true } : {}),
     }

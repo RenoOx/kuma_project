@@ -170,7 +170,7 @@ async function main(): Promise<void> {
       const turns: SimulatorTurn[] = []
       let error: string | null = null
       for (const message of c.messages) {
-        const r = await sendMessage(TECMIN, session, message)
+        const r = await sendMessage(TECMIN, session, null, message)
         if (!r.ok) {
           error = `error ${r.error.code} en "${message}": ${String(r.error.message).slice(0, 120)}`
           break

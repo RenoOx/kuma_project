@@ -13,15 +13,10 @@ import * as appointmentService from '@/modules/appointment/appointment.service.j
 import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
 import * as businessService from '@/modules/business/business.service.js'
 import type { BusinessSettings } from '@/modules/business/business.settings.js'
-import {
-  activeServices,
-  configuredMessage,
-  shouldForwardImages,
-} from '@/modules/business/business.settings.js'
+import { configuredMessage, shouldForwardImages } from '@/modules/business/business.settings.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
 import { fileConfigFor, resolveBusinessFlow } from '@/modules/conversation/flowSource.js'
-import { blueprintFor } from '@/modules/conversation/nodeCatalog.js'
 import { getStateConfig } from '@/modules/conversation/stateMachine.js'
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as demoService from '@/modules/demo/demo.service.js'
@@ -33,8 +28,14 @@ import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
-import * as tagService from '@/modules/tag/tag.service.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
+import {
+  buildStepImageNotice,
+  decideCustomerImage,
+  EARLY_IMAGE_MARKER,
+  pauseOnImage,
+  shouldPauseAfterImage,
+} from '@/modules/whatsapp/customerImage.js'
 import { bufferImage, flushImagesNow, hasPendingImages } from '@/modules/whatsapp/imageBuffer.js'
 import {
   consumeImageExpectation,
@@ -81,10 +82,8 @@ import { formatPersonName } from '@/shared/name.js'
 import {
   customerContactLabel,
   customerFindHints,
-  isLidPhone,
   normalizeWaUsername,
   samePhone,
-  waUsernameOf,
 } from '@/shared/phone.js'
 import { renderTemplate } from '@/shared/templates.js'
 
@@ -141,12 +140,6 @@ const PAUSED_REPLY =
 const OWNER_FALLBACK_REPLY = 'Uy, no pude completar eso 😅 ¿Lo intentamos de nuevo?'
 
 const ESCALATED_REPLY = 'Ya avisé al encargado, te escribirá en breve 😊'
-
-// Lo que lee el modelo cuando una foto llega en un paso que no la pide, en un
-// negocio con `earlyImages: 'continue'`. Va como mensaje del cliente, igual que
-// las marcas de pago: el modelo nunca ve la foto, y sin esto no sabría que llegó.
-const EARLY_IMAGE_MARKER =
-  '[El cliente mandó una foto antes de que se la pidieras. No la ves y NO se le reenvió a nadie. Esto NO es una respuesta a tu última pregunta: no es un sí ni un no. No digas que la recibiste ni que la revisaste, y no pidas datos ni pagos con tus palabras: seguí el paso actual normalmente, y cuando corresponda pedir el pago o el DNI, pedile que la vuelva a mandar en ese momento.]'
 
 // ── Configured canned replies ────────────────────────────────────────────────
 //
@@ -531,14 +524,18 @@ async function handleCustomerImage(params: {
   // o adelanto (`wanted`). Fuera de eso, silencio: antes Emma contestaba "¡Recibí
   // tu foto! Ya la comparto…" y no la compartía con nadie. El placeholder y el
   // evento de arriba se guardan igual, así el dueño la ve en el Inbox.
-  if (!onImage && !wanted) {
+  const decision = decideCustomerImage({
+    onImage,
+    wanted,
+    earlyImages: fileConfigFor(businessId)?.earlyImages,
+  })
+  if (decision !== 'handle') {
     // Tampoco se reenvía con `earlyImages: 'continue'` (archivo del negocio): al
     // dueño le llega una foto recién cuando Emma la pidió, con la información
     // correcta ya dada. Lo que cambia es que Emma sigue el paso sabiendo que
-    // llegó, en vez de dejar al cliente esperando en silencio (Tecmin,
-    // 2026-09-30: el DNI llegaba junto con el "sí" y nadie respondía).
+    // llegó, en vez de dejar al cliente esperando en silencio.
     // En un grupo, solo la última foto deja la marca y pide la respuesta.
-    if (fileConfigFor(businessId)?.earlyImages === 'continue') {
+    if (decision === 'continue_with_llm') {
       if (!lastOfBurst) return 'done'
       const marked = await messageService.append({
         businessId,
@@ -629,48 +626,26 @@ async function handleCustomerImage(params: {
   }
 
   // Pausa por paso: Emma se apaga en este chat con el mismo interruptor que usa
-  // el Inbox, así el dueño la ve apagada y la vuelve a prender desde ahí. Si el
-  // paso también pedía reenviar y el reenvío falló, NO se pausa: el dueño no se
-  // enteró de nada y el cliente quedaría hablándole a nadie.
+  // el Inbox, así el dueño la ve apagada y la vuelve a prender desde ahí, y el
+  // lead queda "Por validar" para que lo califique desde el panel.
   //
   // En un grupo de fotos se decide foto por foto pero se aplica UNA vez, al
   // final: pausar con la primera hacía que las siguientes chocaran con "¿Emma
   // apagada?" y nunca le llegaran al dueño.
-  const wantsPause = onImage?.pause === true && (!onImage.forward || forwarded)
+  const wantsPause = shouldPauseAfterImage(onImage, forwarded)
   if (burst && wantsPause && !burst.shared.shouldPause) {
     burst.shared.shouldPause = true
     burst.shared.pauseState = conversation?.state ?? null
   }
   const pauseNow = burst ? lastOfBurst && burst.shared.shouldPause : wantsPause
   if (pauseNow) {
-    const pausedIn = burst ? burst.shared.pauseState : (conversation?.state ?? null)
-    try {
-      await conversationRepo.setEmmaEnabled(businessId, conversationId, false)
-      await eventsRepo.create({
-        businessId,
-        conversationId,
-        type: 'emma_paused_on_image',
-        payload: { state: pausedIn, photos: burst?.total ?? 1 },
-      })
-      log.info(
-        { conversationId, state: pausedIn, photos: burst?.total ?? 1 },
-        'emma paused after customer image',
-      )
-
-      // El lead queda "Por validar" para que el dueño lo califique desde el
-      // panel (botones Pagó / No pagó en el chat). Solo si la pausa se aplicó, y
-      // sin poder costarla: si falla —por ejemplo, el negocio ya tiene 10
-      // etiquetas— solo se loguea.
-      const marked = await tagService.markPendingValidation(businessId, conversationId)
-      if (!marked.ok) {
-        log.warn(
-          { code: marked.error.code, conversationId },
-          'could not tag the conversation as pending validation',
-        )
-      }
-    } catch (err) {
-      log.error({ err, conversationId }, 'failed to pause emma after customer image')
-    }
+    await pauseOnImage({
+      businessId,
+      conversationId,
+      state: burst ? burst.shared.pauseState : (conversation?.state ?? null),
+      photos: burst?.total ?? 1,
+      log,
+    })
   }
 
   // THE SPLIT. With a deposit, the capture buys a review, not a booking: Emma
@@ -939,122 +914,6 @@ async function bookFromPaymentCapture(params: {
  * same bytes — the owner's relay and the S3 archive — and asking WhatsApp for
  * them twice would double the bandwidth for one message.
  */
-/**
- * El aviso al dueño para una foto que llegó en un paso con reenvío configurado.
- *
- * El resumen es la descripción del servicio elegido, sin pasar por el modelo. Si
- * leer el historial falla, el aviso sale igual, sin resumen: la foto le tiene
- * que llegar al dueño aunque falte ese dato.
- */
-async function buildStepImageNotice(params: {
-  business: Business
-  settings: BusinessSettings | null
-  customer: Customer
-  conversationId: string
-  state: string
-  caption: string | null
-  paused: boolean
-  /** Posición de la foto en el grupo que mandó el cliente junto, si vino en uno. */
-  photo?: { index: number; total: number }
-  log: HandlerLogger
-}): Promise<string> {
-  const { business, settings, customer, conversationId, state, log } = params
-
-  let assistantTexts: string[] = []
-  let offered: string[] = []
-  const history = await messageService.getRecentHistory(business.id, conversationId, 20)
-  if (history.ok) {
-    assistantTexts = history.data
-      .filter((m) => m.role === 'assistant' && m.content.trim() !== '')
-      .map((m) => m.content)
-      .reverse()
-    // El nombre exacto de lo que eligió vive en los send_fixed_message: en un
-    // flujo armado con mensajes fijos ningún texto de Emma lo nombra.
-    offered = mediaForwarder.fixedMessageServicesOf(history.data)
-  } else {
-    log.warn({ code: history.error.code }, 'could not read history for the image notice')
-  }
-
-  const chosen = settings
-    ? mediaForwarder.findChosenService(
-        activeServices(settings),
-        customerService.collectedDataOf(customer),
-        assistantTexts,
-        offered,
-      )
-    : null
-
-  // Sin número ni @usuario, el dueño necesita otra forma de encontrar el chat en
-  // su WhatsApp Business: la etiqueta de lo que eligió y una frase para la lupa.
-  const label = await labelRequirementChat({
-    business,
-    customer,
-    serviceId: chosen?.id,
-    // En un grupo de fotos, una sola vez: las demás no repiten la escritura.
-    first: (params.photo?.index ?? 0) === 0,
-    log,
-  })
-  const lastText = history.ok ? lastCustomerTextOf(history.data) : null
-
-  return mediaForwarder.buildStepImageCaption({
-    stepLabel: blueprintFor(state, settings?.flowType ?? 'appointments')?.label ?? state,
-    customer,
-    receivedAt: new Date(),
-    timezone: business.timezone,
-    // Sin descripción cargada, el nombre: sigue siendo lo que eligió, tal cual.
-    summary: chosen?.description ?? chosen?.name ?? null,
-    said: params.caption,
-    paused: params.paused,
-    ...(params.photo ? { photo: params.photo } : {}),
-    findHints: customerFindHints(customer, { label, lastText }),
-  })
-}
-
-/**
- * Le pone al chat la etiqueta del WhatsApp Business que corresponde a lo que el
- * cliente eligió (`whatsappLabels` del archivo del negocio). Solo si no hay
- * número ni @usuario: con esos el dueño ya lo encuentra (prioridad del dueño,
- * 2026-10-05). Devuelve el nombre de la etiqueta si quedó puesta, para que el
- * aviso lo diga; si falla, null y el aviso sale igual.
- */
-async function labelRequirementChat(params: {
-  business: Business
-  customer: Customer
-  serviceId: string | undefined
-  first: boolean
-  log: HandlerLogger
-}): Promise<string | null> {
-  const { business, customer, serviceId, log } = params
-  if (!params.first || !serviceId || !customer.waJid) return null
-  if (!isLidPhone(customer.phone, customer.waJid) || waUsernameOf(customer.metadata)) return null
-  const label = fileConfigFor(business.id)?.whatsappLabels?.[serviceId]
-  if (!label) return null
-  const client = clientRegistry.getClient(business.id)
-  if (!client) return null
-  try {
-    await client.labelChat(customer.waJid, label)
-    return label.name
-  } catch (err) {
-    log.warn({ err, labelId: label.id }, 'could not label the chat in WhatsApp Business')
-    return null
-  }
-}
-
-/**
- * Lo último que el cliente escribió en texto, para que el dueño lo busque con la
- * lupa. Salta las marcas internas de fotos y formatos ("[El cliente envió…]") y
- * le saca a un mensaje citado el "[Sobre: …]" que le agrega el handler.
- * `history` viene del más viejo al más nuevo (`getRecentHistory`).
- */
-function lastCustomerTextOf(history: Array<{ role: string; content: string }>): string | null {
-  for (const message of [...history].reverse()) {
-    if (message.role !== 'user') continue
-    const text = message.content.replace(/^\[Sobre: "[^"]*"\]\s*/, '').trim()
-    if (text !== '' && !text.startsWith('[')) return text
-  }
-  return null
-}
-
 async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
   try {
     return await downloadMediaMessage(raw, 'buffer', {})
@@ -1800,7 +1659,8 @@ async function processMessage(
 
 /**
  * Manda los mensajes fijos del turno, tal cual, cada uno seguido de su galería
- * de imágenes en orden (puede ser una sola, o ninguna).
+ * de imágenes en orden (puede ser una sola, o ninguna). Con `imagesFirst`, la
+ * galería va antes del texto.
  *
  * No tira nunca: la respuesta de Emma sale después igual. Una imagen que falta o
  * no se puede leer se registra y se saltea; el resto de la galería y el texto
@@ -1815,7 +1675,30 @@ async function sendFixedMessages(params: {
   log: HandlerLogger
 }): Promise<void> {
   const { businessId, jid, messages, send, log } = params
+
+  const sendGallery = async (keys: string[]): Promise<void> => {
+    for (const key of keys) {
+      const downloaded = await mediaService.downloadMedia(businessId, key)
+      if (!downloaded.ok) {
+        log.warn(
+          { code: downloaded.error.code, key },
+          'could not read fixed message media from storage, reply went out without it',
+        )
+        continue
+      }
+      try {
+        await sendImageToCustomer({ businessId, jid, image: downloaded.data })
+      } catch (err) {
+        log.error({ err, jid, key }, 'failed to send fixed message image')
+      }
+    }
+  }
+
   for (const message of messages) {
+    // Con la imagen adelante, una foto que no sale no frena el texto: sin la
+    // imagen la oferta se sigue entendiendo, sin el texto no.
+    if (message.imagesFirst) await sendGallery(message.images ?? [])
+
     // Un mensaje con bloques sale como varios mensajes de WhatsApp, en orden y
     // cada uno por la cola. Si un bloque falla, el resto del mensaje (y su
     // galería) no sale: la oferta a medias leería peor que ninguna.
@@ -1835,22 +1718,8 @@ async function sendFixedMessages(params: {
         break
       }
     }
-    if (failed) continue
-    for (const key of message.images ?? []) {
-      const downloaded = await mediaService.downloadMedia(businessId, key)
-      if (!downloaded.ok) {
-        log.warn(
-          { code: downloaded.error.code, key },
-          'could not read fixed message media from storage, reply went out without it',
-        )
-        continue
-      }
-      try {
-        await sendImageToCustomer({ businessId, jid, image: downloaded.data })
-      } catch (err) {
-        log.error({ err, jid, key }, 'failed to send fixed message image')
-      }
-    }
+    if (failed || message.imagesFirst) continue
+    await sendGallery(message.images ?? [])
   }
 }
 

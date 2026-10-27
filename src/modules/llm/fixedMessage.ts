@@ -29,6 +29,12 @@ export interface FixedMessage {
    * por diseño es solo texto.
    */
   images?: boolean
+  /**
+   * La galería sale ANTES del texto en vez de después. Para una oferta que abre
+   * con la imagen del producto y sigue con los requisitos y el precio (Tecmin,
+   * 2026-10-26): el cliente ve qué es antes de leer cuánto cuesta.
+   */
+  imagesFirst?: boolean
   /** Cuándo mandarlo, en palabras del negocio. Es lo que Emma lee en el paso. */
   when?: string
 }
@@ -44,6 +50,8 @@ export interface FixedOutbound {
   blocks?: string[]
   /** Las keys de S3 de la galería subida por panel, en orden. */
   images?: string[]
+  /** La galería va antes del texto (ver `FixedMessage.imagesFirst`). */
+  imagesFirst?: boolean
 }
 
 export type RenderResult =

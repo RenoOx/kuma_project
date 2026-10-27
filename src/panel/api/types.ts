@@ -690,6 +690,8 @@ export interface ConversationFixedMessage {
   id: string
   /** Cuándo lo manda Emma, en palabras del negocio. Nunca el texto: eso es de Vamvu. */
   when?: string
+  /** El nombre de la versión en prueba que lo trae; ausente si es del flujo actual. */
+  version?: string
 }
 
 export interface ConversationCatalog {
@@ -704,11 +706,18 @@ export interface ConversationCatalog {
 
 // ── Simulador ────────────────────────────────────────────────────────────────
 //
-// Espejo de lo que sirve simulator.routes.ts. El simulador solo existe si el
-// servidor corre con SIMULATOR_ENABLED=true (nunca en prod).
+// Espejo de lo que sirve simulator.routes.ts. La pestaña "Pruebas" existe con
+// SIMULATOR_ENABLED (dev) o si el negocio tiene una versión en prueba (prod).
+
+/** Una versión en prueba del flujo: WhatsApp no la corre, solo esta pestaña. */
+export interface SimulatorVersion {
+  id: string
+  label: string
+}
 
 export interface SimulatorStatus {
   enabled: boolean
+  versions: SimulatorVersion[]
 }
 
 export interface SimulatorToolCall {
@@ -738,7 +747,17 @@ export interface SimulatorFixedMessage {
   text: string
   /** La galería completa, en orden — puede ser vacía. */
   images: SimulatorFixedImage[]
+  /** La galería sale antes del texto, como en WhatsApp. */
+  imagesFirst: boolean
 }
+
+/** Qué pasó con las fotos que mandó el cliente de prueba (espejo de simulator.service). */
+export type SimulatorImageOutcome =
+  | { kind: 'emma_paused' }
+  | { kind: 'ignored' }
+  | { kind: 'continued' }
+  | { kind: 'handled'; forwardNotice: string | null; paused: boolean; tagged: boolean }
+  | { kind: 'not_simulated' }
 
 /** Un turno: lo que respondió Emma y todo lo que pasó para llegar ahí. */
 export interface SimulatorTurn {
@@ -748,9 +767,15 @@ export interface SimulatorTurn {
   stateBefore: string
   stateAfter: string
   tools: SimulatorToolCall[]
-  /** Lo que en WhatsApp se habría enviado después del texto. Acá solo se muestra. */
+  /** Lo que en WhatsApp se habría enviado con el texto. Acá solo se muestra. */
   attachments: SimulatorAttachment[]
+  /** Los adjuntos salen antes del texto de Emma (`mediaFirst` del paso). */
+  mediaFirst: boolean
   escalated: boolean
   maxIterationsHit: boolean
   tokens: { input: number; output: number }
+  /** Si Emma quedó apagada en este chat al terminar el turno. */
+  emmaPaused: boolean
+  /** Solo en un turno de fotos. */
+  image?: SimulatorImageOutcome
 }

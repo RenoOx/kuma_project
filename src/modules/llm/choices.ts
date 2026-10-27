@@ -18,7 +18,8 @@ function normalize(text: string): string {
 
 /**
  * La opción que el cliente eligió, si su mensaje es SOLO una elección: una
- * letra ("A", "la b", "opción C", "c.") o un tramo ("1 a 2", "de 3 a 4",
+ * letra ("A", "la b", "opción C", "c."), un número si las opciones se llaman
+ * por número ("2", "2️⃣", "la 2", "opción 3") o un tramo ("1 a 2", "de 3 a 4",
  * "5 o más", "5+"). Cualquier otra cosa —"no tengo experiencia, la A", "la A y
  * la B", una pregunta— devuelve null y la lee la IA, que entiende el contexto.
  */
@@ -29,10 +30,15 @@ export function parseChoice(
   const t = normalize(text)
   if (t === '') return null
 
-  const letter = t.match(/^(?:(?:la|el)\s+)?(?:opcion\s+)?([a-z])$/)
-  if (letter) {
-    const key = letter[1]?.toUpperCase()
-    return options.find((o) => o.key.toUpperCase() === key) ?? null
+  // "2️⃣" llega acá como "2": normalize borra el selector y el recuadro del emoji.
+  // "dos" también, con keyOf.
+  const single = t.match(/^(?:(?:la|el)\s+)?(?:(?:opcion|numero)\s+)?([a-z]+|\d{1,2})$/)
+  if (single?.[1]) {
+    const key = keyOf(single[1])
+    const found = options.find((o) => o.key.toUpperCase() === key)
+    // Un número que no es la key de ninguna opción no decide nada acá: en un
+    // negocio con letras, "2" solo sigue yendo a la IA, como antes.
+    if (found || !/\d/.test(key)) return found ?? null
   }
 
   // Un tramo se reconoce por su primer número, que es el inicio de un rango.
@@ -88,6 +94,16 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   veinte: 20,
   treinta: 30,
   cuarenta: 40,
+}
+
+/**
+ * La key que nombra un token: "dos" → "2", "b" → "B". Las opciones de Tecmin
+ * son números y los alumnos también los escriben en letras ("uno", "tres").
+ * "un" y "una" no: casi siempre son artículos ("una certificación").
+ */
+function keyOf(token: string): string {
+  const spelled = /^[a-z]{2,}$/.test(token) && !ARTICLES.has(token) ? numberOf(token) : null
+  return (spelled === null ? token : String(spelled)).toUpperCase()
 }
 
 function numberOf(token: string): number | null {
@@ -148,9 +164,11 @@ export function hasChoiceSignal(
     .filter((token) => token !== '')
   const keys = new Set(options.map((o) => o.key.toLowerCase()))
 
+  // Una key numérica pegada a un tiempo ("tengo 1 año") no nombra la opción 1.
   const namesLetter = tokens.some(
     (token, i) =>
       keys.has(token) &&
+      !DURATION_UNIT.test(tokens[i + 1] ?? '') &&
       (!LETTER_WORDS.has(token) || tokens.length === 1 || LETTER_MARKERS.has(tokens[i - 1] ?? '')),
   )
   if (namesLetter) return true
@@ -249,6 +267,8 @@ export function pickOption(
       : understood.cantidad
   const hasCounts = options.some((o) => o.count)
   if (counted !== undefined && hasCounts) return optionForCount(counted, options)
-  const key = understood.opcion?.trim().toUpperCase()
+  // La IA puede pasar la opción como la escribió el cliente ("dos").
+  const opcion = understood.opcion ? normalize(understood.opcion) : ''
+  const key = opcion ? keyOf(opcion) : ''
   return key ? (options.find((o) => o.key.toUpperCase() === key) ?? null) : null
 }
