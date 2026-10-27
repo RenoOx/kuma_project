@@ -136,7 +136,7 @@ npm run business:show:dev -- --all                      # resumen de todos: fuen
 npm run business:clone:dev -- <id>   # copia config de un negocio de prod (solo lectura) a dev, con números +999
 npm run qa:simulate -- --profiles G01,A01 --runs 1   # test masivo de leads por el handler real (solo dev, gasta OpenAI)
 npm run qa:evaluate -- qa/leads/out/<corrida>        # chequeos automáticos de una corrida (sin OpenAI)
-npm run qa:tecmin -- --runs 3   # prueba fija de Tecmin: chats escritos de punta a punta (solo dev, gasta OpenAI)
+npm run qa:tecmin -- --runs 3   # prueba fija de Tecmin, flujo de WhatsApp (solo dev, gasta OpenAI). No cubre la versión en prueba "3 opciones"
 npm run lint             # biome check --write
 npm run typecheck        # tsc --noEmit  +  tsc --noEmit -p src/panel/tsconfig.json
 npm run check            # lint + typecheck + test (ejecutar antes de commit)
@@ -379,6 +379,15 @@ por paso: `decideStepCallToAction` en `prompts.ts`). **`cta: false`** (solo desd
 archivo) = el paso no cierra con ninguna invitación, ni la fija ni la rotativa.
 Hacía falta: sin `cta`, la rotativa de venta (`SALES_CTA_VARIANTS`) le ORDENABA al
 modelo cerrar el mensaje de pago con "¿Te interesa alguno en particular?".
+**`ctaOnEnter: true`** (solo desde archivo, 2026-10-26): en el turno en que se
+entra al paso, el texto de Emma es exactamente el `cta`, sin pasar por la IA —
+la misma regla que ya tenía `catalogOnEnter`. Tecmin: la pregunta de 5 líneas con
+las 3 opciones sale tal cual después de la presentación y el video. Si al paso se
+entró con el mensaje del cliente, **ni se llama al modelo** (`scriptedEntry` en
+`llm.service.ts`): el turno es entero del código (`openWith`, material, `cta`), y
+lo único que el modelo podía hacer era dañino — con el formulario de una campaña
+("¿Quieres certificarte? Sí") mandaba las fichas de servicios encima del saludo.
+Un "quiero hablar con un asesor" en ese primer mensaje se deriva con el siguiente.
 
 Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
 
@@ -407,8 +416,7 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   `stepOwesFixedMessage` (`fixedMessage.ts`); un paso entrado en un turno
   anterior no debe nada.
 - **`openWith: ['id']`** — mensajes fijos que manda el CÓDIGO al entrar al paso,
-  sin que la IA los pida (Tecmin: la presentación en `greeting`, la intro de
-  cursos en `listado_servicios`). Existe porque "siempre se presenta" no se
+  sin que la IA los pida (Tecmin: la presentación en `greeting`). Existe porque "siempre se presenta" no se
   consigue pidiéndoselo al modelo. Sin servicio: `renderStaticMessage` se niega
   ante cualquier marcador. Cuándo salen (`llm.service`): si el paso es donde cae
   el turno por el mensaje del cliente, siempre, y se guardan en el historial
@@ -422,54 +430,63 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
 - **`catalogOnEnter: '<categoría>'`** — al entrar al paso (si el turno termina ahí),
   el CÓDIGO manda las fichas de esa categoría (`serviceCardsForCategory` en
   `toolExecutor.ts`) y el texto de Emma de ese turno es exactamente el `cta`.
-  Tecmin, `listado_servicios` con "Cursos": entrar ahí ES la decisión "es nuevo,
-  quiere un curso desde cero", y el alumno recibe intro → fichas → invitación.
-  Existe porque las fichas dependían de que la IA llamara `show_services` (a veces
+  Nació en Tecmin (`listado_servicios` con "Cursos", hasta el 2026-10-26: los
+  cursos salieron de su flujo; hoy ningún archivo lo usa). Existe porque las fichas dependían de que la IA llamara `show_services` (a veces
   no lo hacía y escribía el listado en texto). **No pasa por la ventana de
   repetición** de `sentServiceImages.ts`: entrar al paso es la decisión de
   informar, y en pruebas seguidas la ventana las bloqueaba. El anti-ban sigue
   siendo la cola de envío. En los turnos siguientes dentro del paso no se reenvía nada.
 - **`choices`** (2026-10-06) — las opciones de un paso las elige el **código**, no
   la IA: `{ route, options: [{ key: 'A', service: '<id>', send: ['msg'], count?: [1, 2] }] }`.
+  La `key` es una letra o un dígito (Tecmin, desde 2026-10-26: `'1'`, `'2'`, `'3'`).
+  `count` puede ir solo en algunas opciones (Tecmin: 1 máquina → `'1'`, 2 o más →
+  `'2'`, y el Título `'3'` sin rango); los rangos que hay tienen que ir seguidos
+  desde 1.
   Nació de pedirle a la IA "2 máquinas → opción A": con gpt-4o-mini y con
-  gpt-4.1-mini ofreció la de 5 o más (Tecmin). Una letra o un tramo solos ("B",
-  "la c", "1 a 2") se resuelven sin llamar al modelo (`parseChoice` en
+  gpt-4.1-mini ofreció la de 5 o más (Tecmin). Una letra, un número o un tramo
+  solos ("B", "la c", "2", "2️⃣", "dos", "opción tres", "1 a 2") se resuelven sin llamar al modelo (`parseChoice` en
   `llm/choices.ts`, inyectado como si el modelo hubiera llamado la herramienta).
+  Un número que no es la key de ninguna opción no se resuelve ahí: en un negocio
+  con letras, "2" solo sigue yendo a la IA.
   Con otras palabras, la IA llama `elegir_opcion` con lo que entendió —la letra,
   `cantidad` o la lista de `elementos`— y el código cuenta (`countDistinct`,
   `optionForCount`). Una letra sola de la IA se rechaza (`no_choice_in_message`)
   si el mensaje del cliente no trae ninguna señal de cuál —letra, número o una
-  palabra propia del nombre de una opción— (`hasChoiceSignal`): "¿cuánto me
+  palabra propia del nombre de una opción— (`hasChoiceSignal`; una key numérica
+  pegada a un tiempo, "tengo 1 año", no cuenta): "¿cuánto me
   costaría el certificado?" recibió la oferta de la A (Tecmin, 2026-10-10). Al elegir: sale por `route` y manda los mensajes de `send`
   con el servicio de la opción, guardados en el historial como
   `send_fixed_message` (el embudo y el resumen del aviso los leen de ahí).
   `advance_flow` por esa ruta se rechaza: sin la oferta, el paso siguiente queda
   vacío. **El mapeo letra → opción vive solo ahí**: no se repite en
   instrucciones ni en el `when` de los mensajes. Se valida al cargar el archivo
-  (`checkedChoices` en `define.ts`). Prueba fija: `npm run qa:tecmin`.
+  (`checkedChoices` en `define.ts`). **Las `choices` van en UN solo paso**: si dos
+  pasos mandan el mismo mensaje, `currentChoice` lo toma por compartido y no sabe
+  cuál se eligió. Por eso en Tecmin viven en `asesoria_perfil` y no en `greeting`,
+  cuya salida fija `customer_message` saca de ahí con cualquier mensaje.
   **La elección vigente** (`currentChoice` en `llm/choices.ts`) es la última
   opción elegida, leída del historial (`messageService.getFixedMessageCalls`): el
   último mensaje fijo que es de UNA sola opción (los compartidos, como
   "¿Realizamos tus certificados?", no dicen cuál fue). Sobre ella:
   - **`followUp` + `onAccept`**: al entrar al paso `followUp` (Tecmin: el pago),
-    el código manda el `onAccept` de la opción vigente (el pago del curso
-    elegido, o el pedido del DNI). Lo elegía la IA con una lista propia y una vez
+    el código manda el `onAccept` de la opción vigente (Tecmin hoy: la misma
+    reserva de S/ 50 para las tres). Lo elegía la IA con una lista propia y una vez
     cobró el descuento de otro curso. Sin elección vigente: `log.error` y se deriva.
     No se llama `then`: un objeto con `then` parece una promesa.
-  - **`rechoose: true`** en un paso (Tecmin: beneficios): se puede cambiar la
-    opción vigente ("mejor la B"), mismas opciones, sin cambiar de paso. Solo en
+  - **`rechoose: true`** en un paso (Tecmin: la oferta): se puede cambiar la
+    opción vigente ("mejor la 3"), mismas opciones, sin cambiar de paso. Solo en
     un turno que empezó en ese paso. Re-elegir la MISMA opción ("también cargador
-    frontal" sigue en 1 a 2) no reenvía la oferta: `same_option`, y la IA confirma
+    frontal" sigue en 2 o más) no reenvía la oferta: `same_option`, y la IA confirma
     en una línea. Una letra sola igual a la vigente no la resuelve el código (cerraría
     el turno sin texto): la contesta el modelo.
-  - Cada oferta de Tecmin empieza con `*{servicio}*`: el alumno ve qué entendió
-    Emma y lo corrige antes de pagar.
 
 La otra excepción que NO es texto es **`onImage`** (`ImageHandling`): qué hacer si
 el cliente manda una foto en ese paso — reenviarla al dueño, pausar a Emma en ese
 chat, y el mensaje al cliente. No toca el motor (tools, salidas, guards); decide
 el destino de una foto que el modelo igual nunca ve. Lo aplica
-`handleCustomerImage` en `handler.ts`:
+`handleCustomerImage` en `handler.ts`. La decisión (atender, seguir con la IA o
+ignorar), si pausar y la pausa en sí viven en `whatsapp/customerImage.ts`, sin
+Baileys, para que el simulador use exactamente las mismas:
 
 - Con `forward`, reenvía aunque el negocio no pida adelanto, con el aviso de
   `buildStepImageCaption`: paso, cliente, hora y **Resumen = descripción del
@@ -513,7 +530,7 @@ respuesta y lo que lee el modelo. El chat del dueño no cambia.
 | Sticker, video (y GIF), documento, ubicación, contacto (`IGNORED_CUSTOMER_FORMATS`) | silencio |
 | Audio / nota de voz | "solo puedo leer mensajes escritos…" (`AUDIO_REPLY_VARIANTS`, 1 vez cada 10 min), o el `audioReply` del archivo del negocio |
 | Foto en un paso con `onImage`, o con pago esperado / cita pendiente / adelanto | se atiende (reenvío, respuesta) |
-| Foto fuera de eso | silencio. Con `earlyImages: 'continue'` en el archivo del negocio (Tecmin): tampoco se reenvía, pero Emma sigue el paso con una marca de que llegó y la pide de nuevo cuando corresponde |
+| Foto fuera de eso | silencio. Con `earlyImages: 'continue'` en el archivo del negocio: tampoco se reenvía, pero Emma sigue el paso con una marca de que llegó y la pide de nuevo cuando corresponde |
 
 El corte va en `processMessage` justo después de guardar el mensaje y ANTES de
 los gates: un sticker durante la pausa del bot no escala ni avisa al dueño. Lo
@@ -568,6 +585,11 @@ negocio nunca dio.
   mensaje que lo declara puede llevar una galería; uno que no, es puro texto y
   ni se consulta contra el almacenamiento al mandarse — no tiene sentido
   preguntar por fotos de un mensaje que por diseño nunca las lleva.
+- **`imagesFirst: true`** (2026-10-26) — la galería sale ANTES del texto del
+  mensaje (por defecto, después del último bloque). Tecmin: en las ofertas de las
+  opciones 2 y 3 el alumno ve la imagen del certificado y debajo los requisitos.
+  Solo cambia el orden de `sendFixedMessages` en `handler.ts`; si la galería
+  falla, el texto sale igual.
 - **Las fotos las sube el dueño desde el panel, nunca el repo.** `send_fixed_message`
   resuelve la galería en el momento (`serviceMediaService.listForOwner(businessId,
   'fixedMessage', messageId)`, ya ordenada por `displayOrder`) y manda sus
@@ -1187,21 +1209,68 @@ agregar una línea en `index.ts` (lista explícita a propósito: así el typeche
 literal, así que el editor rechaza un nodo del otro tipo. Cambiar el flujo de un
 negocio con archivo es commit + deploy.
 
-### Simulador ("Probar Emma")
+**Versiones en prueba** (2026-10-26). Un archivo con bloque `test: { id, label,
+services? }` va en `TEST_CONFIGS` (no en `BUSINESS_CONFIGS`) y es una versión
+del flujo que **WhatsApp nunca corre**: solo la pestaña "Pruebas" cuando alguien
+la elige. Sirve para probar en prod un flujo nuevo mientras los clientes reales
+siguen con el de siempre (Tecmin: `instituto-tecmin.3-opciones.ts`, "Flujo 3
+opciones (26/10/26)"). Un negocio puede tener varias.
+- Cómo se elige: el simulador corre cada turno dentro de un contexto de prueba
+  (`simulator/simulationScope.ts`, `AsyncLocalStorage`), con el businessId y la
+  versión. `flowSource` es el único lugar que lee los archivos (`fileConfigFor`,
+  `withFileSettings`, `compositionFor`) y, dentro de ese contexto y para ESE
+  negocio, devuelve la versión en prueba. Fuera del contexto —todo WhatsApp—, la
+  de siempre.
+- `test.services`: dentro de la prueba, esos son los servicios activos aunque en
+  la base estén inactivos, y el resto no existe. Así los servicios nuevos se
+  crean **inactivos** en prod y WhatsApp no los ve hasta publicar.
+- Las fotos de sus mensajes fijos (`images: true`) se suben en prod antes de
+  publicar: la card "Fotos de tus mensajes automáticos" las lista marcadas "en
+  prueba" (`fixedMessagesWithImages`). El material por paso es por id de paso:
+  se comparte entre versiones.
+- Publicar = el archivo en prueba reemplaza al de siempre (sin el bloque `test`),
+  commit + deploy, y en el panel se prenden los servicios nuevos y se apagan los
+  viejos. No hay botón.
 
-Página `/probar` del panel para conversar con Emma como si fueras un cliente, sin
-WhatsApp. Entra por `llmService.generateReply` (capas 4-5), NO por el handler: el
+### Simulador (pestaña "Pruebas")
+
+Página `/probar` del panel ("Pruebas" en el menú) para conversar con Emma como si
+fueras un cliente, sin WhatsApp, con el flujo de siempre o con una versión en
+prueba (ver "Versiones en prueba"; la elegida va en `?version=` y cambiarla
+empieza otra conversación). Entra por `llmService.generateReply` (capas 4-5), NO por el handler: el
 handler es el que envía, así que ningún mensaje puede salir a un número real. Cada
 respuesta muestra el paso antes/después, las tools con sus argumentos y
 resultados, y los adjuntos (link firmado, no se envían).
 
-- Solo existe con `SIMULATOR_ENABLED=true` (default `false`). En prod queda
-  apagado: escribe cliente, conversación, mensajes y lo que hagan las tools (una
-  cita, datos capturados) en la base, y se vería en el Inbox.
+- Existe con `SIMULATOR_ENABLED=true` (default `false`; dev: todos los negocios)
+  o, sin esa variable, **para un negocio con una versión en prueba** (prod: solo
+  esos). Escribe cliente, conversación, mensajes y lo que hagan las tools en la
+  base de verdad.
+- **Nada sale por WhatsApp desde una prueba**: `notifyOwner` y `notifyCustomer`
+  no envían dentro del contexto de prueba (solo log). En prod el dueño tiene
+  número real y el socket está conectado: sin esto, una escalada de prueba le
+  escribía. Ojo con un negocio de AGENDA: una cita de prueba crearía el evento en
+  su Google Calendar (hoy ninguno de agenda tiene versión en prueba).
+- **Las conversaciones de prueba no aparecen** en Inbox, Contactos, Dashboard ni
+  el embudo (`panel/simulatorThreads.ts`, por el teléfono `+999` + 9 dígitos).
+  En dev eso también esconde las del test masivo de leads, que usan el mismo
+  formato.
 - El cliente de prueba usa teléfono `+999` + 9 dígitos (código no asignado) y se
   llama "Prueba (simulador)". "Nueva conversación" = otro cliente.
-- No prueba las capas 1-3: agrupado de mensajes, pausa, control humano, horario
-  de atención, ni fotos (capturas de pago).
+- **Fotos del lead** (2026-10-26): el botón "Imagen" elige una o varias (varias =
+  un grupo, como el DNI de frente y reverso). Se ven en la burbuja con una URL
+  local del navegador: **no se suben a ningún lado**. El servidor recibe solo
+  cuántas fueron y el texto que las acompañaba, y aplica las mismas decisiones
+  que `handleCustomerImage` (`customerImage.ts`): guarda el placeholder, y si el
+  paso tiene `onImage` muestra el aviso que recibiría el dueño (no lo reenvía),
+  pausa a Emma DE VERDAD en esa conversación y le pone "Por validar". Con Emma pausada, los textos se guardan sin respuesta, igual que el gate
+  del handler; "Reactivar Emma" la vuelve a prender. Un pago con adelanto
+  (`requiresDeposit` o expectativa de pago) no se simula: lo dice la pantalla.
+- Cada turno se muestra en el orden en que llegaría a WhatsApp: mensajes fijos
+  (con su galería antes o después según `imagesFirst`), adjuntos si `mediaFirst`,
+  texto de Emma, y el resto de los adjuntos.
+- No prueba: agrupado de mensajes de texto, control humano, horario de atención
+  ni la verificación de un adelanto.
 - Para correrlo en local: `WHATSAPP_BOOT_ENABLED=false` (default `true`) levanta el
   servidor sin ningún socket, así no gasta intentos de vinculación. Los workers
   siguen corriendo; sin socket, lo que intenten enviar falla en el log. Con el
@@ -1362,8 +1431,9 @@ Heredados de los planes ya cerrados:
   quita `images: true` o se borra el mensaje, sus fotos quedan en S3.
 - **Nodos custom**: el dueño compone desde un catálogo cerrado de 13. Crear un
   paso propio desde cero no existe.
-- **Borrador y Publicar**: guardar el flujo es publicarlo. No hay versionado de
-  la composición ni forma de preparar un cambio sin que salga en vivo.
+- **Borrador y Publicar desde el panel**: guardar el flujo desde el panel es
+  publicarlo. Para negocios con archivo existen las versiones en prueba (ver
+  "Config por negocio en archivos"), pero publicarlas es commit + deploy.
 - **Prod ya está al día** (verificado 2026-09-25, comparando
   `drizzle.__drizzle_migrations` de las dos bases: 21/21, mismos hashes). Ya no
   es un bloqueante para el próximo merge — pero **el orden sigue siendo el

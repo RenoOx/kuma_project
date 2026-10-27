@@ -5,7 +5,7 @@ import { compositionFor, withFileSettings } from '@/modules/conversation/flowSou
 import { presetFor, validateFlow } from '@/modules/conversation/stateMachine.js'
 import plantilla from './_plantilla.js'
 import { type BusinessConfig, defineBusinessConfig } from './define.js'
-import { BUSINESS_CONFIGS } from './index.js'
+import { BUSINESS_CONFIGS, TEST_CONFIGS } from './index.js'
 
 // A repo file wins over the database, so a broken one must never reach a merge:
 // these run in `npm run check` for every file listed in index.ts, plus the
@@ -35,12 +35,30 @@ function settingsFor(
   })
 }
 
-const ALL_FILES: ReadonlyArray<BusinessConfig> = [...BUSINESS_CONFIGS, plantilla]
+// Las versiones en prueba también: corren en prod desde la pestaña "Pruebas", y
+// una rota correría el preset sin que nadie lo note.
+const ALL_FILES: ReadonlyArray<BusinessConfig> = [...BUSINESS_CONFIGS, ...TEST_CONFIGS, plantilla]
 
 describe('business config files', () => {
   it('never register two files for the same business', () => {
     const ids = BUSINESS_CONFIGS.map((c) => c.businessId)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  // Una versión en prueba reemplaza a la de siempre dentro de una prueba: sin
+  // archivo de siempre, o con otro flowType, no hay nada que comparar ni publicar.
+  for (const config of TEST_CONFIGS) {
+    it(`${config.name} (${config.test?.id}) is a test version of a live file`, () => {
+      expect(config.test).toBeDefined()
+      const live = BUSINESS_CONFIGS.find((c) => c.businessId === config.businessId)
+      expect(live?.flowType).toBe(config.flowType)
+      expect(live?.test).toBeUndefined()
+    })
+  }
+
+  it('never repeats a test version id within a business', () => {
+    const keys = TEST_CONFIGS.map((c) => `${c.businessId}/${c.test?.id}`)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 
   for (const config of ALL_FILES) {
@@ -242,8 +260,8 @@ describe('choices in a business file', () => {
       { route: 'elige', options: [{ ...certs[0], count: [1, null] }, certs[1]] },
     ],
     [
-      'ranges on some options only',
-      { route: 'elige', options: [certs[0], { ...certs[1], count: undefined }] },
+      'a key of more than one character',
+      { route: 'elige', options: [{ ...certs[0], key: '10' }, certs[1]] },
     ],
     [
       'an option that sends nothing',
@@ -253,8 +271,27 @@ describe('choices in a business file', () => {
     expect(fileWith(choices)).toThrow()
   })
 
+  // Tecmin "3 opciones": las opciones 1 y 2 van por cantidad de máquinas y la 3
+  // (el Título) no es una cantidad. Hasta el 2026-10-26 era todas o ninguna.
+  it('compiles numbered options with a range on some of them only', () => {
+    const config = fileWith({
+      route: 'elige',
+      options: [
+        { key: '1', service: 's1', send: ['m1'], count: [1, 1] },
+        { key: '2', service: 's2', send: ['m2'], count: [2, null] },
+        { key: '3', service: 's3', send: ['m3'] },
+      ],
+    })()
+    const options = config.composition.overrides.greeting?.choices?.options
+    expect(options?.map((o) => [o.key, o.count])).toEqual([
+      ['1', [1, 1]],
+      ['2', [2, null]],
+      ['3', undefined],
+    ])
+  })
+
   it('gives every file choice a route and messages the file declares', () => {
-    for (const config of BUSINESS_CONFIGS) {
+    for (const config of [...BUSINESS_CONFIGS, ...TEST_CONFIGS]) {
       for (const [node, override] of Object.entries(config.composition.overrides)) {
         if (!override.choices) continue
         expect(

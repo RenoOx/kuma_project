@@ -19,6 +19,7 @@ import {
 import { QUALIFICATION_TAGS } from '@/modules/tag/tag.types.js'
 import { formatPersonName } from '@/shared/name.js'
 import { isLidPhone } from '@/shared/phone.js'
+import { outsideSimulator, REAL_CUSTOMER_THREAD } from './simulatorThreads.js'
 
 // El embudo de ventas del panel (Dashboard), para negocios de venta con `funnel`
 // en su archivo. Mismo contrato que panel.repo: TODA consulta filtra por
@@ -27,7 +28,8 @@ import { isLidPhone } from '@/shared/phone.js'
 // La cohorte son las conversaciones de clientes creadas en el período. Lo de
 // "para atender" es el estado ACTUAL (lo que hay que mirar hoy), no el del período.
 
-const CUSTOMER_THREAD = eq(conversations.type, 'customer')
+// Sin las conversaciones del simulador: una prueba no es un lead (simulatorThreads.ts).
+const CUSTOMER_THREAD = REAL_CUSTOMER_THREAD
 const ATTENTION_LIMIT = 50
 
 export interface FunnelPendingItem {
@@ -142,6 +144,7 @@ export async function getFunnel(
         and(
           eq(events.businessId, businessId),
           inArray(events.type, ['escalation', 'emma_unanswered', 'unsupported_media']),
+          outsideSimulator(events.conversationId),
           gte(events.createdAt, from),
           lt(events.createdAt, to),
         ),
@@ -156,6 +159,7 @@ export async function getFunnel(
           eq(messages.businessId, businessId),
           eq(messages.role, 'tool'),
           sql`${messages.content} like '%escalation_not_warranted%'`,
+          outsideSimulator(messages.conversationId),
           gte(messages.createdAt, from),
           lt(messages.createdAt, to),
         ),
@@ -242,6 +246,7 @@ async function getPendingValidation(
         eq(tagsTable.businessId, businessId),
         eq(conversations.businessId, businessId),
         eq(customers.businessId, businessId),
+        CUSTOMER_THREAD,
         eq(tagsTable.name, QUALIFICATION_TAGS.pending.name),
       ),
     )

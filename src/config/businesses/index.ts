@@ -1,5 +1,5 @@
 import type { BusinessConfig } from './define.js'
-
+import institutoTecmin3Opciones from './instituto-tecmin.3-opciones.js'
 // Every business whose conversation is managed from the repo, one line each.
 //
 // Listed by hand rather than discovered from the folder: an import here is what
@@ -12,3 +12,8 @@ import institutoTecmin from './instituto-tecmin.js'
 import institutoTestia from './instituto-testia.js'
 
 export const BUSINESS_CONFIGS: ReadonlyArray<BusinessConfig> = [institutoTestia, institutoTecmin]
+
+// Versiones en prueba (cada una con su bloque `test`): WhatsApp nunca las corre,
+// solo la pestaña "Pruebas" del panel cuando alguien la elige. Un negocio puede
+// tener varias; para publicar una, reemplaza al archivo de arriba.
+export const TEST_CONFIGS: ReadonlyArray<BusinessConfig> = [institutoTecmin3Opciones]

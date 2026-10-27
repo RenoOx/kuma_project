@@ -35,7 +35,11 @@ export function FixedMessageMedia({
           <MediaField
             key={message.id}
             owner={{ kind: 'fixedMessage', id: message.id }}
-            label={message.when ?? message.id}
+            label={
+              message.version
+                ? `${message.when ?? message.id} (en prueba: ${message.version})`
+                : (message.when ?? message.id)
+            }
             unsavedHint="Este mensaje todavía no está disponible."
             // Sin tope: un mensaje fijo manda su galería entera, no las
             // primeras dos — eso es de las fotos de un servicio.

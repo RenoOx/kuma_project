@@ -3,7 +3,11 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { ServiceMedia } from '@/db/schema/index.js'
 import { businessSettingsSchema } from '@/modules/business/business.settings.js'
-import { compositionFor, fileConfigFor } from '@/modules/conversation/flowSource.js'
+import {
+  compositionFor,
+  fileConfigFor,
+  fixedMessagesWithImages,
+} from '@/modules/conversation/flowSource.js'
 import { nodesForFlow, requirementMet } from '@/modules/conversation/nodeCatalog.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
 import * as mediaService from '@/modules/media/media.service.js'
@@ -264,10 +268,9 @@ panelSettingsRoutes.get('/api/panel/:businessId/settings/conversation/catalog', 
     // Solo los que declararon `images: true`: un mensaje de puro texto ni
     // aparece — no tiene sentido ofrecerle al dueño un cajón de fotos vacío
     // que nunca va a usar. Nunca el `text`: eso es redacción de Vamvu, no le
-    // hace falta al panel para subir una foto.
-    fixedMessages: Object.entries(fileConfigFor(business.id)?.fixedMessages ?? {})
-      .filter(([, message]) => message.images)
-      .map(([id, message]) => ({ id, when: message.when })),
+    // hace falta al panel para subir una foto. Incluye los de las versiones en
+    // prueba, marcados con su nombre.
+    fixedMessages: fixedMessagesWithImages(business.id),
   })
 })
 

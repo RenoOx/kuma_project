@@ -33,6 +33,7 @@ import { toPanelDisplay } from '@/modules/message/messageDisplay.js'
 import * as tagRepo from '@/modules/tag/tag.repo.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
 import { isLidPhone, waUsernameOf } from '@/shared/phone.js'
+import { REAL_CUSTOMER, REAL_CUSTOMER_THREAD } from './simulatorThreads.js'
 
 // Every query in this file filters on business_id, without exception — the
 // panel is the one surface where a tenant leak would be handing one business
@@ -41,8 +42,9 @@ import { isLidPhone, waUsernameOf } from '@/shared/phone.js'
 //
 // Owner threads are excluded from everything customer-facing: they are Emma
 // talking to the owner, and showing them in the owner's own inbox would be a
-// conversation with themselves.
-const CUSTOMER_THREAD = eq(conversations.type, 'customer')
+// conversation with themselves. Las del simulador (pestaña "Pruebas") tampoco:
+// no son clientes (simulatorThreads.ts).
+const CUSTOMER_THREAD = REAL_CUSTOMER_THREAD
 
 export interface Page<T> {
   data: T[]
@@ -650,7 +652,7 @@ export async function listCustomers(
   limit: number,
   exec: Executor = db,
 ): Promise<Page<CustomerListItem>> {
-  const clauses = [eq(customers.businessId, businessId)]
+  const clauses = [eq(customers.businessId, businessId), REAL_CUSTOMER]
   if (search) {
     const term = `%${search}%`
     const match = or(ilike(customers.phone, term), bookedUnderName(businessId, term, exec))

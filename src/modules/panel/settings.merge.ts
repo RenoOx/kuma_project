@@ -15,7 +15,7 @@ import {
 } from '@/modules/business/business.settings.js'
 import {
   compositionFor,
-  fileConfigFor,
+  fixedMessagesWithImages,
   withFileSettings,
 } from '@/modules/conversation/flowSource.js'
 import { presetFor } from '@/modules/conversation/stateMachine.js'
@@ -510,8 +510,8 @@ export function flowNodeExists(business: Business, nodeId: string): Result<void>
  * subida acá, no solo la oculta en el panel.
  */
 export function fixedMessageAcceptsMedia(business: Business, messageId: string): Result<void> {
-  const message = fileConfigFor(business.id)?.fixedMessages[messageId]
-  if (!message?.images) {
+  // También los de una versión en prueba: sus fotos se suben antes de publicarla.
+  if (!fixedMessagesWithImages(business.id).some((slot) => slot.id === messageId)) {
     return err(
       new NotFoundError({
         resource: 'fixed_message',

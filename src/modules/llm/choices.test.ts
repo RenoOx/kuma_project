@@ -263,3 +263,69 @@ describe('hasChoiceSignal', () => {
     expect(hasChoiceSignal('el multiple', courseNames)).toBe(true)
   })
 })
+
+// Tecmin "3 opciones" (2026-10-26): las opciones se llaman 1, 2 y 3, y los
+// alumnos también las escriben en letras ("dos", "la tres").
+describe('numbered options', () => {
+  const numbered: StepChoiceOption[] = [
+    { key: '1', serviceId: 'equipo', send: ['op1'], count: [1, 1] },
+    { key: '2', serviceId: 'multiple', send: ['op2'], count: [2, null] },
+    { key: '3', serviceId: 'titulo', send: ['op3'] },
+  ]
+
+  it.each([
+    ['2', '2'],
+    ['2️⃣', '2'],
+    ['la 3', '3'],
+    ['opción 1', '1'],
+    ['número 2', '2'],
+    ['dos', '2'],
+    ['Tres', '3'],
+    ['la uno', '1'],
+    ['opción dos', '2'],
+    ['el tres', '3'],
+    ['2 o más', '2'],
+  ])('resolves "%s" to option %s without the model', (text, key) => {
+    expect(parseChoice(text, numbered)?.key).toBe(key)
+  })
+
+  it.each([
+    'una',
+    '4',
+    'cuatro',
+    'hola',
+    'quiero la 2 pero tengo dudas',
+  ])('leaves "%s" to the model', (text) => {
+    expect(parseChoice(text, numbered)).toBeNull()
+  })
+
+  it('does not turn a spelled number into a choice where options are letters', () => {
+    expect(parseChoice('dos', courses)).toBeNull()
+    expect(parseChoice('2', courses)).toBeNull()
+    expect(parseChoice('la b', courses)?.key).toBe('B')
+  })
+
+  it('reads the option the model passed, spelled or not', () => {
+    expect(pickOption({ opcion: 'dos' }, numbered)?.key).toBe('2')
+    expect(pickOption({ opcion: '3' }, numbered)?.key).toBe('3')
+    expect(pickOption({ opcion: 'b' }, courses)?.key).toBe('B')
+  })
+
+  it('maps machines to options by count: 1 is option 1, 2 or more option 2', () => {
+    expect(pickOption({ elementos: ['excavadora'] }, numbered)?.key).toBe('1')
+    expect(pickOption({ cantidad: 3 }, numbered)?.key).toBe('2')
+    expect(pickOption({ elementos: ['excavadora', 'volquete'] }, numbered)?.key).toBe('2')
+  })
+
+  it('does not take a time as the number of an option', () => {
+    const names = [
+      { key: '1', name: 'Certificación en un equipo' },
+      { key: '2', name: 'Certificación de Operador Múltiple' },
+      { key: '3', name: 'Título Técnico de Operador - MINEDU' },
+    ]
+    expect(hasChoiceSignal('tengo 1 año operando', names)).toBe(false)
+    expect(hasChoiceSignal('la 2 por favor', names)).toBe(true)
+    expect(hasChoiceSignal('la dos', names)).toBe(true)
+    expect(hasChoiceSignal('quiero el título', names)).toBe(true)
+  })
+})

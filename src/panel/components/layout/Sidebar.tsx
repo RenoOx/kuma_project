@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
 ]
 
 // Solo aparece si el servidor tiene SIMULATOR_ENABLED: en prod no existe.
-const SIMULATOR_ITEM: NavItem = { to: '/probar', label: () => 'Probar Emma', icon: FlaskConical }
+const SIMULATOR_ITEM: NavItem = { to: '/probar', label: () => 'Pruebas', icon: FlaskConical }
 
 export function Sidebar({
   niche,
