@@ -5,6 +5,7 @@ import type {
   NodeOverride,
   StepChoices,
 } from '@/modules/conversation/stateMachine.js'
+import { normalizeChoiceText } from '@/modules/llm/choices.js'
 import type { EscalationGate } from '@/modules/llm/escalationGate.js'
 import type { FixedMessage } from '@/modules/llm/fixedMessage.js'
 
@@ -104,6 +105,13 @@ export interface BusinessStep<F extends FlowType, M extends string> {
       count?: [number, number | null]
       /** Lo que manda el código al entrar a `followUp` si esta es la opción elegida. */
       onAccept?: NoInfer<M>[]
+      /**
+       * Palabras o frases que nombran esta opción ("título", "operador múltiple").
+       * Si el mensaje del cliente nombra las de UNA sola opción, la elige el
+       * código sin preguntarle a la IA, igual que con el número. Sin tildes ni
+       * mayúsculas importan. Una palabra no puede estar en dos opciones.
+       */
+      words?: string[]
     }>
   }
   /**
@@ -386,6 +394,20 @@ function checkedChoices<F extends FlowType, M extends string>(
     }
     if (!option.service.trim()) throw new Error(`${where}.${key}: service is empty`)
   }
+  // Una palabra en dos opciones no elige ninguna: rompe acá, no en una conversación.
+  const wordOwner = new Map<string, string>()
+  for (const option of choices.options) {
+    if (option.words?.length === 0) throw new Error(`${where}.${option.key}: words is empty`)
+    for (const word of option.words ?? []) {
+      const normalized = normalizeChoiceText(word)
+      if (!normalized) throw new Error(`${where}.${option.key}: empty word`)
+      const owner = wordOwner.get(normalized)
+      if (owner && owner !== option.key) {
+        throw new Error(`${where}: word "${word}" is in options ${owner} and ${option.key}`)
+      }
+      wordOwner.set(normalized, option.key)
+    }
+  }
   // Rangos: desde 1, sin huecos ni cruces, solo el último sin tope. Una opción
   // puede no tener rango si no es una cantidad (Tecmin: el Título Técnico junto a
   // "1 equipo" y "2 o más"); a esa se llega por su key o su nombre, nunca contando.
@@ -411,6 +433,7 @@ function checkedChoices<F extends FlowType, M extends string>(
       send: [...option.send],
       ...(option.count ? { count: option.count } : {}),
       ...(option.onAccept ? { onAccept: [...option.onAccept] } : {}),
+      ...(option.words ? { words: [...new Set(option.words.map(normalizeChoiceText))] } : {}),
     })),
   }
 }

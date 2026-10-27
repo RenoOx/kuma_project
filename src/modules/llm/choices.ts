@@ -6,6 +6,10 @@ import type { StepChoiceOption, StepChoices } from '@/modules/conversation/state
 // cuentas; acá viven como funciones puras para poder probarlas.
 
 /** Minúsculas, sin tildes ni signos, espacios simples. */
+export function normalizeChoiceText(text: string): string {
+  return normalize(text)
+}
+
 function normalize(text: string): string {
   return text
     .toLowerCase()
@@ -53,6 +57,43 @@ export function parseChoice(
   }
 
   return null
+}
+
+// "no quiero el título" no elige el título: una negación justo antes de la
+// palabra clave (hasta 3 palabras) la anula.
+const NEGATIONS = new Set(['no', 'ni', 'tampoco', 'nunca'])
+const NEGATION_REACH = 3
+
+/** Dónde empieza `phrase` (tokens) dentro de `tokens`, todas las veces. */
+function phraseStarts(tokens: ReadonlyArray<string>, phrase: ReadonlyArray<string>): number[] {
+  const starts: number[] = []
+  for (let i = 0; i + phrase.length <= tokens.length; i++) {
+    if (phrase.every((word, j) => tokens[i + j] === word)) starts.push(i)
+  }
+  return starts
+}
+
+/**
+ * La opción cuyas palabras clave (`words`) nombra el mensaje, si nombra las de
+ * UNA sola. "Quiero obtener un título" → la opción del Título, sin la IA: con
+ * la IA eligiendo, una vez escribió su propia oferta con el Yape (Tecmin, prod,
+ * 2026-10-26). Dos opciones nombradas, o una negada ("no quiero el título"),
+ * no deciden nada acá: lo lee la IA.
+ */
+export function choiceByWords(
+  text: string,
+  options: ReadonlyArray<StepChoiceOption>,
+): StepChoiceOption | null {
+  const tokens = normalize(text).split(' ')
+  const named = options.filter((option) =>
+    (option.words ?? []).some((word) =>
+      phraseStarts(tokens, word.split(' ')).some(
+        (start) =>
+          !tokens.slice(Math.max(0, start - NEGATION_REACH), start).some((t) => NEGATIONS.has(t)),
+      ),
+    ),
+  )
+  return named.length === 1 ? (named[0] ?? null) : null
 }
 
 /** La opción cuyo rango de cantidad incluye `n`, o null si ninguna. */
@@ -156,7 +197,7 @@ function ownWords(name: string, others: ReadonlyArray<string>): string[] {
  */
 export function hasChoiceSignal(
   customerText: string,
-  options: ReadonlyArray<{ key: string; name: string }>,
+  options: ReadonlyArray<{ key: string; name: string; words?: ReadonlyArray<string> }>,
 ): boolean {
   const tokens = normalize(customerText)
     .replace(/(\d)([a-z])/g, '$1 $2')
@@ -180,6 +221,12 @@ export function hasChoiceSignal(
   if (namesNumber) return true
 
   const words = new Set(tokens)
+  // Las palabras clave de una opción (`words`) también dicen cuál.
+  const text = tokens.join(' ')
+  const namesKeyword = options.some((option) =>
+    (option.words ?? []).some((word) => ` ${text} `.includes(` ${word} `)),
+  )
+  if (namesKeyword) return true
   return options.some((option) =>
     ownWords(
       option.name,

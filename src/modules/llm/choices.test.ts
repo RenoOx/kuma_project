@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StepChoiceOption } from '@/modules/conversation/stateMachine.js'
 import {
+  choiceByWords,
   countDistinct,
   currentChoice,
   hasChoiceSignal,
@@ -327,5 +328,75 @@ describe('numbered options', () => {
     expect(hasChoiceSignal('la 2 por favor', names)).toBe(true)
     expect(hasChoiceSignal('la dos', names)).toBe(true)
     expect(hasChoiceSignal('quiero el título', names)).toBe(true)
+  })
+})
+
+// Tecmin "3 opciones" (2026-10-26): "quiero obtener un título" en prod, y la IA
+// armó su propia oferta y su propio cobro. Con `words`, esas frases las elige el
+// código. Las palabras ya vienen normalizadas, como las deja `define.ts`.
+describe('choiceByWords', () => {
+  const withWords: StepChoiceOption[] = [
+    {
+      key: '1',
+      serviceId: 'equipo',
+      send: ['op1'],
+      count: [1, 1],
+      words: ['un equipo', 'una maquina', 'una maquinaria'],
+    },
+    {
+      key: '2',
+      serviceId: 'multiple',
+      send: ['op2'],
+      count: [2, null],
+      words: ['multiple', 'varias maquinas', 'varias maquinarias', 'varios equipos'],
+    },
+    {
+      key: '3',
+      serviceId: 'titulo',
+      send: ['op3'],
+      words: ['titulo', 'titulos', 'titularse', 'titularme', 'titulado', 'tecnico'],
+    },
+  ]
+
+  it.each([
+    ['quiero obtener un titulo', '3'],
+    ['Quiero el TÍTULO técnico', '3'],
+    ['quiero titularme', '3'],
+    ['quiero ser operador múltiple', '2'],
+    ['opero varias máquinas', '2'],
+    ['solo manejo una máquina', '1'],
+  ])('chooses "%s" as option %s', (text, key) => {
+    expect(choiceByWords(text, withWords)?.key).toBe(key)
+  })
+
+  it.each([
+    // Dos opciones a la vez: que decida la IA.
+    'el título de operador múltiple',
+    // Una negación cerca descarta esa frase.
+    'no quiero el título',
+    'ni el título ni nada',
+    // Sin ninguna frase de una opción.
+    'tengo 1 año de exp',
+    'cuánto cuesta?',
+    '¿es del MINEDU?',
+    'Tienes exp en maquinaria pesada? Si Quieres certificarte? si',
+    // Una frase tiene que estar entera, no pegada a otra palabra.
+    'mis titulares',
+  ])('leaves "%s" to the model', (text) => {
+    expect(choiceByWords(text, withWords)).toBeNull()
+  })
+
+  it('takes a phrase further than 3 words from the negation', () => {
+    expect(choiceByWords('no sé bien qué hacer, quiero el título', withWords)?.key).toBe('3')
+  })
+
+  it('chooses nothing for options without words', () => {
+    expect(choiceByWords('el título', courses)).toBeNull()
+  })
+
+  it('counts a keyword as a signal for the model choice too', () => {
+    const names = withWords.map((o) => ({ key: o.key, name: 'Opción', words: o.words }))
+    expect(hasChoiceSignal('quiero titularme', names)).toBe(true)
+    expect(hasChoiceSignal('cuánto cuesta?', names)).toBe(false)
   })
 })
