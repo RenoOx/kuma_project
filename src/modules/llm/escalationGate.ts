@@ -23,6 +23,12 @@ export interface EscalationGate {
    * insiste, y eso sí es motivo.
    */
   insistAfter: string
+  /**
+   * Otras frases de Emma tras las que volver a escribir también es insistir.
+   * Tecmin: el cierre de la respuesta a "¿es estafa?", que se contesta la
+   * primera vez y se deriva si el alumno insiste.
+   */
+  insistAlsoAfter?: readonly string[]
 }
 
 export type EscalationDecision =
@@ -50,13 +56,14 @@ export function escalationAllowed(input: {
     if (found) return { allowed: true, reason: 'pattern', match: found[0] }
   }
 
-  const insistAfter = normalizeForGate(input.gate.insistAfter)
-  if (
-    insistAfter !== '' &&
-    input.previousAssistantText !== null &&
-    normalizeForGate(input.previousAssistantText).includes(insistAfter)
-  ) {
-    return { allowed: true, reason: 'insist', match: input.gate.insistAfter }
+  if (input.previousAssistantText !== null) {
+    const previous = normalizeForGate(input.previousAssistantText)
+    for (const phrase of [input.gate.insistAfter, ...(input.gate.insistAlsoAfter ?? [])]) {
+      const normalized = normalizeForGate(phrase)
+      if (normalized !== '' && previous.includes(normalized)) {
+        return { allowed: true, reason: 'insist', match: phrase }
+      }
+    }
   }
 
   return { allowed: false, reason: 'no_reason' }

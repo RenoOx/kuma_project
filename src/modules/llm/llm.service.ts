@@ -229,7 +229,8 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
 
   // El último texto de Emma antes de este turno (el mensaje del cliente ya está
   // en el historial, después). El portero de la escalada lo usa para saber si
-  // el cliente insiste con algo que ya se derivó al asesor.
+  // el cliente insiste con algo que ya se derivó al asesor, y elegir_opcion
+  // para saber qué opción acepta un "sí".
   const lastAssistantText =
     [...history].reverse().find((m) => m.role === 'assistant' && (m.content ?? '').trim() !== '')
       ?.content ?? null
@@ -467,12 +468,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
       // Lo que escribió el cliente, no lo que el modelo cree que dijo: lo usan el
       // portero de la escalada (escalationGate.ts) y elegir_opcion (isDurationCount).
       customerText: params.userMessage,
-      ...(fileConfig?.escalationGate
-        ? {
-            escalationGate: fileConfig.escalationGate,
-            previousAssistantText: lastAssistantText,
-          }
-        : {}),
+      // El último mensaje de Emma: lo usan el portero (¿insiste?) y
+      // elegir_opcion (¿el "sí" acepta la opción que ella ofreció?).
+      previousAssistantText: lastAssistantText,
+      ...(fileConfig?.escalationGate ? { escalationGate: fileConfig.escalationGate } : {}),
     }
     const basePrompt = buildSystemPrompt(
       business,

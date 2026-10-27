@@ -20,7 +20,7 @@ import { expectImage, expectImageKeepingPayment } from '@/modules/whatsapp/image
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { formatDateTimeForDisplay } from '@/shared/datetime.js'
 import { NotConfiguredError, ValidationError } from '@/shared/errors.js'
-import { hasChoiceSignal, isDurationCount, pickOption } from './choices.js'
+import { hasChoiceSignal, isDurationCount, offeredOption, pickOption } from './choices.js'
 import {
   type EscalationGate,
   escalationAllowed,
@@ -1383,7 +1383,14 @@ export async function executeTool(
           name: services.find((s) => s.id === o.serviceId)?.name ?? '',
           ...(o.words ? { words: o.words } : {}),
         }))
-        if (!hasChoiceSignal(context.customerText, named)) {
+        // Un "sí" no nombra nada, pero acepta lo que Emma acababa de ofrecer si
+        // ofrecía UNA opción y la IA eligió justo esa (ver offeredOption).
+        const offered = context.previousAssistantText
+          ? offeredOption(context.previousAssistantText, named)
+          : null
+        const acceptsOffered =
+          offered !== null && pickOption(parsed.data, choices.options)?.key === offered
+        if (!hasChoiceSignal(context.customerText, named) && !acceptsOffered) {
           return {
             result: JSON.stringify({
               error: 'no_choice_in_message',

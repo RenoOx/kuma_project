@@ -464,7 +464,10 @@ Dos opciones más, solo desde archivo, que deciden el ENVÍO y no el texto:
   si el mensaje del cliente no trae ninguna señal de cuál —letra, número o una
   palabra propia del nombre de una opción— (`hasChoiceSignal`; una key numérica
   pegada a un tiempo, "tengo 1 año", no cuenta): "¿cuánto me
-  costaría el certificado?" recibió la oferta de la A (Tecmin, 2026-10-10). Al elegir: sale por `route` y manda los mensajes de `send`
+  costaría el certificado?" recibió la oferta de la A (Tecmin, 2026-10-10). La
+  excepción es un "sí" a lo que Emma acaba de ofrecer: pasa si su mensaje anterior
+  nombraba UNA sola opción y la IA eligió justo esa (`offeredOption`, 2026-10-27:
+  "no tengo experiencia" → el Título → "sí"). Al elegir: sale por `route` y manda los mensajes de `send`
   con el servicio de la opción, guardados en el historial como
   `send_fixed_message` (el embudo y el resumen del aviso los leen de ahí).
   `advance_flow` por esa ruta se rechaza: sin la oferta, el paso siguiente queda
@@ -1181,7 +1184,9 @@ frase `insistAfter`; si no, `toolExecutor` la rechaza con
 `escalation_not_warranted` y el modelo sigue el turno. Nació de dos "sí claro,
 ¿dan boleta?" en prod escalados en vez de avanzar al pago: la instrucción sola no
 alcanzaba. Lógica pura en `llm/escalationGate.ts`; patrones sin tildes, se comparan
-contra el texto normalizado).
+contra el texto normalizado. `insistAlsoAfter` (2026-10-27, opcional): otras frases
+de Emma tras las que volver a escribir también es insistir — Tecmin "3 opciones":
+"¿es estafa?" se responde la primera vez y se deriva si insiste).
 
 Y cuatro más del 2026-10-01: **`ownerAssistant: false`** (Emma solo le NOTIFICA
 al dueño: sus mensajes al número del negocio se registran y no se contestan),
