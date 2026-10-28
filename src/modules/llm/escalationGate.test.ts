@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import tecminTest from '@/config/businesses/instituto-tecmin.3-opciones.js'
 import tecmin from '@/config/businesses/instituto-tecmin.js'
 import { type EscalationGate, escalationAllowed, normalizeForGate } from './escalationGate.js'
 
@@ -41,7 +40,6 @@ describe('escalationAllowed — Tecmin', () => {
     'somos una empresa con 6 operarios',
     'soy alumno del avanzado, a qué hora es mi práctica?',
     'si pago y no puedo, ¿me devuelven?',
-    'esto es una estafa',
   ])('permite con motivo real: %s', (text) => {
     expect(allowed(text)).toBe(true)
   })
@@ -57,16 +55,13 @@ describe('escalationAllowed — Tecmin', () => {
   })
 })
 
-// La versión en prueba "3 opciones" (2026-10-27): "¿es estafa?" se responde la
-// primera vez y se deriva si insiste; un pago ya hecho o un certificado ya
-// emitido van al asesor.
-describe('escalationAllowed — Tecmin 3 opciones', () => {
-  const testGate = tecminTest.escalationGate
-  if (!testGate) throw new Error('La versión en prueba tiene que declarar escalationGate')
+// Flujo 3 opciones (2026-10-27): "¿es estafa?" se responde la primera vez y se
+// deriva si insiste; un pago ya hecho o un certificado ya emitido van al asesor.
+describe('escalationAllowed — Tecmin, estafa y pagos hechos', () => {
   const ANTI_SCAM =
     '¡Imagínate! En Instituto Tecmin llevamos más de 15 años formando y certificando a operadores de todo el país 🏗️ … ¡Tu inversión y tu futuro están 100% seguros con nosotros! 🛡️✨'
   const allowedHere = (customerText: string, previousAssistantText: string | null = null) =>
-    escalationAllowed({ customerText, previousAssistantText, gate: testGate }).allowed
+    escalationAllowed({ customerText, previousAssistantText, gate }).allowed
 
   it('la primera vez que pregunta si es estafa no deja escalar', () => {
     expect(allowedHere('¿esto no es una estafa?')).toBe(false)
