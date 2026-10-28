@@ -136,7 +136,7 @@ npm run business:show:dev -- --all                      # resumen de todos: fuen
 npm run business:clone:dev -- <id>   # copia config de un negocio de prod (solo lectura) a dev, con números +999
 npm run qa:simulate -- --profiles G01,A01 --runs 1   # test masivo de leads por el handler real (solo dev, gasta OpenAI)
 npm run qa:evaluate -- qa/leads/out/<corrida>        # chequeos automáticos de una corrida (sin OpenAI)
-npm run qa:tecmin -- --runs 3   # prueba fija de Tecmin, flujo de WhatsApp (solo dev, gasta OpenAI). No cubre la versión en prueba "3 opciones"
+npm run qa:tecmin -- --runs 3   # prueba fija de Tecmin (solo dev, gasta OpenAI). DESACTUALIZADA: es del flujo de cursos, reemplazado el 2026-10-27 por el de 3 opciones
 npm run lint             # biome check --write
 npm run typecheck        # tsc --noEmit  +  tsc --noEmit -p src/panel/tsconfig.json
 npm run check            # lint + typecheck + test (ejecutar antes de commit)
@@ -1185,7 +1185,7 @@ frase `insistAfter`; si no, `toolExecutor` la rechaza con
 ¿dan boleta?" en prod escalados en vez de avanzar al pago: la instrucción sola no
 alcanzaba. Lógica pura en `llm/escalationGate.ts`; patrones sin tildes, se comparan
 contra el texto normalizado. `insistAlsoAfter` (2026-10-27, opcional): otras frases
-de Emma tras las que volver a escribir también es insistir — Tecmin "3 opciones":
+de Emma tras las que volver a escribir también es insistir — Tecmin:
 "¿es estafa?" se responde la primera vez y se deriva si insiste).
 
 Y cuatro más del 2026-10-01: **`ownerAssistant: false`** (Emma solo le NOTIFICA
@@ -1228,8 +1228,9 @@ negocio con archivo es commit + deploy.
 services? }` va en `TEST_CONFIGS` (no en `BUSINESS_CONFIGS`) y es una versión
 del flujo que **WhatsApp nunca corre**: solo la pestaña "Pruebas" cuando alguien
 la elige. Sirve para probar en prod un flujo nuevo mientras los clientes reales
-siguen con el de siempre (Tecmin: `instituto-tecmin.3-opciones.ts`, "Flujo 3
-opciones (26/10/26)"). Un negocio puede tener varias.
+siguen con el de siempre. Un negocio puede tener varias. Hoy no hay ninguna: la
+primera (Tecmin, "Flujo 3 opciones (26/10/26)") se publicó el 2026-10-27, y sin
+versión en prueba la pestaña "Pruebas" no aparece en el panel de prod de ese negocio.
 - Cómo se elige: el simulador corre cada turno dentro de un contexto de prueba
   (`simulator/simulationScope.ts`, `AsyncLocalStorage`), con el businessId y la
   versión. `flowSource` es el único lugar que lee los archivos (`fileConfigFor`,
@@ -1245,7 +1246,9 @@ opciones (26/10/26)"). Un negocio puede tener varias.
   se comparte entre versiones.
 - Publicar = el archivo en prueba reemplaza al de siempre (sin el bloque `test`),
   commit + deploy, y en el panel se prenden los servicios nuevos y se apagan los
-  viejos. No hay botón.
+  viejos. No hay botón. **Los servicios se cambian apenas termina el deploy, no
+  antes**: con los viejos apagados falla el flujo que corre; con los nuevos
+  apagados, `elegir_opcion` no encuentra el servicio y la oferta no sale.
 
 ### Simulador (pestaña "Pruebas")
 
