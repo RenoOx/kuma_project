@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import tecmin from '@/config/businesses/instituto-tecmin.js'
-import { type EscalationGate, escalationAllowed, normalizeForGate } from './escalationGate.js'
+import {
+  type EscalationGate,
+  escalationAllowed,
+  normalizeForGate,
+  ordersEscalation,
+} from './escalationGate.js'
 
 // Con los patrones REALES de Tecmin: lo que se prueba es la regla del negocio,
 // no un ejemplo inventado. Los mensajes de "rechaza" son los de producción que
@@ -82,6 +87,33 @@ describe('escalationAllowed — Tecmin, estafa y pagos hechos', () => {
 
   it('sigue dejando escalar después de la frase del asesor', () => {
     expect(allowedHere('pero dan factura o no?', ADVISOR)).toBe(true)
+  })
+})
+
+// Prod, 2026-10-27: "opero retroexcavadora" con el servicio de la opción apagado.
+// El sistema le ordenó a Emma derivar y el portero se lo frenó: el alumno leyó
+// "te atienden en vivo" y nadie se enteró.
+describe('escalationAllowed — derivación ordenada por el sistema', () => {
+  it('deja escalar si el sistema lo ordenó, aunque el cliente no lo pidiera', () => {
+    expect(
+      escalationAllowed({
+        customerText: 'opero retroexcavadora',
+        previousAssistantText: null,
+        gate,
+        systemOrdered: true,
+      }),
+    ).toEqual({ allowed: true, reason: 'system' })
+  })
+
+  it('sin la orden del sistema, el mismo mensaje sigue sin poder escalar', () => {
+    expect(allowed('opero retroexcavadora')).toBe(false)
+  })
+
+  it('solo la ordena el error de una oferta o un pago que no se pudo mandar', () => {
+    expect(ordersEscalation('fixed_message_unavailable')).toBe(true)
+    expect(ordersEscalation('escalation_not_warranted')).toBe(false)
+    expect(ordersEscalation('no_choice_in_message')).toBe(false)
+    expect(ordersEscalation(undefined)).toBe(false)
   })
 })
 

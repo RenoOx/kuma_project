@@ -1186,7 +1186,11 @@ frase `insistAfter`; si no, `toolExecutor` la rechaza con
 alcanzaba. Lógica pura en `llm/escalationGate.ts`; patrones sin tildes, se comparan
 contra el texto normalizado. `insistAlsoAfter` (2026-10-27, opcional): otras frases
 de Emma tras las que volver a escribir también es insistir — Tecmin:
-"¿es estafa?" se responde la primera vez y se deriva si insiste).
+"¿es estafa?" se responde la primera vez y se deriva si insiste. Y una derivación
+que ORDENÓ el sistema pasa siempre (`ordersEscalation`, 2026-10-27): si en el turno
+una herramienta devolvió `fixed_message_unavailable` —la oferta o el pago no se
+pudo mandar, ej. un servicio apagado—, el motivo no está en el mensaje del cliente
+y el portero la frenaba: el alumno leía "te atienden en vivo" y nadie se enteraba).
 
 Y cuatro más del 2026-10-01: **`ownerAssistant: false`** (Emma solo le NOTIFICA
 al dueño: sus mensajes al número del negocio se registran y no se contestan),

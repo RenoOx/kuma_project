@@ -63,6 +63,11 @@ export interface ToolContext {
   /** El último mensaje de Emma antes de este turno, para saber si el cliente insiste. */
   previousAssistantText?: string | null
   /**
+   * El sistema ya le ordenó derivar en este turno (no pudo mandar la oferta o el
+   * pago): el portero deja pasar la derivación aunque el cliente no la pidiera.
+   */
+  escalationOrdered?: boolean
+  /**
    * Las opciones del paso actual (`choices`), con el texto de los mensajes fijos
    * que manda cada una. Solo en un paso con `choices`; sin esto, elegir_opcion
    * se rechaza.
@@ -1105,6 +1110,7 @@ export async function executeTool(
           customerText: context.customerText,
           previousAssistantText: context.previousAssistantText ?? null,
           gate: context.escalationGate,
+          systemOrdered: context.escalationOrdered === true,
         })
         if (!decision.allowed) {
           return {
