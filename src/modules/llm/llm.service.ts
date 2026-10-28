@@ -36,6 +36,7 @@ import {
   parseChoice,
 } from './choices.js'
 import { hoursSinceLastActivity } from './conversationRestart.js'
+import { ordersEscalation } from './escalationGate.js'
 import {
   type FixedOutbound,
   renderStaticMessage,
@@ -598,6 +599,10 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
     log.info({ state: effectiveState }, 'scripted step entry (ctaOnEnter), no model call')
   }
 
+  // Si en este turno el sistema ya le ordenó derivar (no pudo mandar la oferta o
+  // el pago), el portero deja pasar la derivación: ver ordersEscalation.
+  let escalationOrdered = false
+
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
     let completion: ChatCompletion
     const fromCode = codeCompletions.shift()
@@ -891,7 +896,12 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
             }),
             error: 'fixed_message_pending',
           }
-        : await executeTool(call.function.name, parsedArgs, toolContext)
+        : await executeTool(
+            call.function.name,
+            parsedArgs,
+            escalationOrdered ? { ...toolContext, escalationOrdered: true } : toolContext,
+          )
+      if (ordersEscalation(toolResult.error)) escalationOrdered = true
 
       log.info(
         {
@@ -979,6 +989,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
               'followUp step entered without a current choice to follow',
             )
             chatMessages.push({ role: 'system', content: FOLLOW_UP_UNAVAILABLE_INSTRUCTION })
+            escalationOrdered = true
           }
         }
       }

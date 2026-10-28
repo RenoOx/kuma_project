@@ -33,7 +33,20 @@ export interface EscalationGate {
 
 export type EscalationDecision =
   | { allowed: true; reason: 'pattern' | 'insist'; match: string }
+  | { allowed: true; reason: 'system' }
   | { allowed: false; reason: 'no_reason' }
+
+// Los errores de herramienta cuya instrucción le ORDENA a Emma derivar: el
+// sistema no pudo mandar la oferta o el pago, y el alumno tiene que llegar a una
+// persona. El portero frenaba esas derivaciones porque el motivo no estaba en el
+// mensaje del cliente: en prod (Tecmin, 2026-10-27) "opero retroexcavadora" con
+// el servicio apagado terminó en "te atienden en vivo", sin derivar ni avisar.
+const ESCALATION_ORDERING_ERRORS: ReadonlySet<string> = new Set(['fixed_message_unavailable'])
+
+/** Si ese error de herramienta le ordena a Emma derivar (ver arriba). */
+export function ordersEscalation(error: string | undefined): boolean {
+  return error !== undefined && ESCALATION_ORDERING_ERRORS.has(error)
+}
 
 /** Sin tildes, en minúsculas y con los espacios colapsados: "Llámame" y "llamame" son lo mismo. */
 export function normalizeForGate(text: string): string {
@@ -49,7 +62,11 @@ export function escalationAllowed(input: {
   customerText: string
   previousAssistantText: string | null
   gate: EscalationGate
+  /** El propio sistema ordenó derivar en este turno (ver ordersEscalation). */
+  systemOrdered?: boolean
 }): EscalationDecision {
+  if (input.systemOrdered) return { allowed: true, reason: 'system' }
+
   const customer = normalizeForGate(input.customerText)
   for (const pattern of input.gate.patterns) {
     const found = customer.match(pattern)
