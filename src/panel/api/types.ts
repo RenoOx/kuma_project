@@ -102,6 +102,13 @@ export interface PanelMessage {
   createdAt: string
   /** Solo en un aviso: qué se le avisó al dueño, o por qué Emma se pausó. */
   notice?: ChatNoticeKind
+  /** Lo que viajó con el mensaje (fotos, videos, PDF), con link firmado por una hora. */
+  attachments?: ChatAttachment[]
+}
+
+export interface ChatAttachment {
+  url: string
+  type: 'image' | 'pdf' | 'audio' | 'video'
 }
 
 export interface MessagePage extends Paged<PanelMessage> {

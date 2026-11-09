@@ -21,6 +21,7 @@ import {
 import * as customerService from '@/modules/customer/customer.service.js'
 import * as knowledgeBaseSearch from '@/modules/knowledgeBase/knowledgeBaseSearch.service.js'
 import * as serviceMediaService from '@/modules/media/serviceMedia.service.js'
+import { galleryAttachments } from '@/modules/message/attachments.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { canSendServiceMedia } from '@/modules/whatsapp/sentServiceImages.js'
 import { AppError, NotConfiguredError, NotFoundError, ValidationError } from '@/shared/errors.js'
@@ -319,6 +320,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         conversationId: params.conversationId,
         role: 'assistant',
         content: opening.text,
+        attachments: galleryAttachments(opening.images),
       })
       if (!persisted.ok) return persisted
       openingOut.push(opening)
@@ -702,6 +704,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
             conversationId: params.conversationId,
             role: 'assistant',
             content: closing.text,
+            attachments: galleryAttachments(closing.images),
           })
           if (!persisted.ok) return persisted
           closingOut.push(closing)
@@ -792,16 +795,6 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         )
       }
 
-      if (finalContent) {
-        const persistResult = await messageService.append({
-          businessId: params.businessId,
-          conversationId: params.conversationId,
-          role: 'assistant',
-          content: finalContent,
-        })
-        if (!persistResult.ok) return persistResult
-      }
-
       log.info(
         {
           iteration,
@@ -831,6 +824,21 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
           }),
           attachmentBudget,
         )
+      }
+
+      // Con los adjuntos del turno, para que el chat del panel muestre lo que
+      // recibió el cliente. Sin texto pero con adjuntos (un paso fixedOnly con
+      // material) queda una fila vacía con sus archivos: el historial del modelo
+      // salta las filas de assistant vacías (chatHistory.ts), así que no lo ve.
+      if (finalContent || attachments.length > 0) {
+        const persistResult = await messageService.append({
+          businessId: params.businessId,
+          conversationId: params.conversationId,
+          role: 'assistant',
+          content: finalContent,
+          attachments: attachments.map((a) => ({ s3Key: a.s3Key, type: a.type })),
+        })
+        if (!persistResult.ok) return persistResult
       }
 
       return ok({
@@ -1074,6 +1082,7 @@ export async function generateReply(params: GenerateReplyParams): Promise<Result
         conversationId: params.conversationId,
         role: 'assistant',
         content: fixed.text,
+        attachments: galleryAttachments(fixed.images),
       })
       if (!persistFixed.ok) return persistFixed
     }

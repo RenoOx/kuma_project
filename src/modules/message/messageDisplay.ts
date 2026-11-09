@@ -76,9 +76,10 @@ export function buildOwnerPhoneMarker(what: string, caption: string | null): str
 /**
  * The panel form. Addressed to the owner.
  *
- * V1 does not render the media itself — it is never persisted, only forwarded
- * over WhatsApp — so the inbox says what arrived and keeps the caption, which
- * is the part that carries information the owner cannot get anywhere else.
+ * Desde el 2026-11-09 la foto en sí va aparte, en `messages.attachments`, y el
+ * chat la dibuja arriba de esta etiqueta. La etiqueta sigue diciendo qué llegó
+ * y conserva el texto que la acompañaba; si la foto no se pudo guardar, es lo
+ * único que queda.
  *
  * Anything that is not a marker passes through untouched, so a customer's own
  * words are never replaced by a label.

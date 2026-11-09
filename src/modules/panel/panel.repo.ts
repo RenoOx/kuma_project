@@ -25,6 +25,7 @@ import {
   conversationTags,
   customers,
   events,
+  type MessageAttachment,
   messages,
   type Tag,
   tags as tagsTable,
@@ -300,6 +301,24 @@ export interface PanelMessage {
    * se pausó): no es un mensaje, y el panel lo dibuja aparte. Ver chatNotices.ts.
    */
   notice?: ChatNoticeKind
+  /** Las keys de lo que viajó con el mensaje. La ruta las cambia por links firmados. */
+  attachments?: MessageAttachment[]
+}
+
+/**
+ * Qué filas son el chat que ve el dueño: las del cliente y las de Emma o el
+ * dueño, con texto o con archivos. Una de assistant que solo llevaba tool_calls
+ * no tiene ni lo uno ni lo otro y dibujaría una burbuja en blanco. Compartido
+ * por la página y por el borde de los avisos (noticesForPage): si no coinciden,
+ * un aviso cae en la página equivocada.
+ */
+function visibleChatRows(businessId: string, conversationId: string) {
+  return and(
+    eq(messages.businessId, businessId),
+    eq(messages.conversationId, conversationId),
+    inArray(messages.role, ['user', 'assistant']),
+    or(sql`length(trim(${messages.content})) > 0`, isNotNull(messages.attachments)),
+  )
 }
 
 /**
@@ -325,15 +344,8 @@ export async function listMessages(
   exec: Executor = db,
 ): Promise<Page<PanelMessage>> {
   // Tool calls and system turns are Emma's internals. The owner wants the
-  // conversation, not the transcript of how it was produced. An assistant turn
-  // that only carried tool_calls has empty content and would render as a blank
-  // bubble, so it is filtered out by length rather than by role.
-  const where = and(
-    eq(messages.businessId, businessId),
-    eq(messages.conversationId, conversationId),
-    inArray(messages.role, ['user', 'assistant']),
-    sql`length(trim(${messages.content})) > 0`,
-  )
+  // conversation, not the transcript of how it was produced.
+  const where = visibleChatRows(businessId, conversationId)
 
   const [rows, [totalRow]] = await Promise.all([
     exec
@@ -341,6 +353,7 @@ export async function listMessages(
         id: messages.id,
         senderType: messages.senderType,
         content: messages.content,
+        attachments: messages.attachments,
         createdAt: messages.createdAt,
       })
       .from(messages)
@@ -385,6 +398,9 @@ export async function listMessages(
             senderType: item.senderType,
             content: toPanelDisplay(item.content),
             createdAt: item.createdAt.toISOString(),
+            ...(item.attachments && item.attachments.length > 0
+              ? { attachments: item.attachments }
+              : {}),
           },
     ),
     total,
@@ -421,14 +437,7 @@ async function noticesForPage(params: {
     const [boundary] = await exec
       .select({ createdAt: messages.createdAt })
       .from(messages)
-      .where(
-        and(
-          eq(messages.businessId, businessId),
-          eq(messages.conversationId, conversationId),
-          inArray(messages.role, ['user', 'assistant']),
-          sql`length(trim(${messages.content})) > 0`,
-        ),
-      )
+      .where(visibleChatRows(businessId, conversationId))
       .orderBy(desc(messages.createdAt))
       .limit(1)
       .offset((page - 1) * limit - 1)

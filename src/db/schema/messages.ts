@@ -19,6 +19,17 @@ export type MessageRole = (typeof messageRoles)[number]
 export const messageSenderTypes = ['customer', 'bot', 'human'] as const
 export type MessageSenderType = (typeof messageSenderTypes)[number]
 
+/**
+ * Un archivo que viajó con este mensaje: la foto que mandó el cliente o lo que
+ * mandó Emma (galería de un mensaje fijo, material de un paso, ficha de un
+ * servicio). Solo la key: el bucket es privado y el panel firma el link al leer.
+ * Existe para que el chat del panel muestre lo mismo que el celular (2026-11-09).
+ */
+export interface MessageAttachment {
+  s3Key: string
+  type: 'image' | 'pdf' | 'audio' | 'video'
+}
+
 export const messages = pgTable(
   'messages',
   {
@@ -36,6 +47,8 @@ export const messages = pgTable(
     content: text('content').notNull(),
     toolCalls: jsonb('tool_calls'),
     toolCallId: text('tool_call_id'),
+    // Null en todo lo anterior al 2026-11-09 y en lo que no lleva archivos.
+    attachments: jsonb('attachments').$type<MessageAttachment[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

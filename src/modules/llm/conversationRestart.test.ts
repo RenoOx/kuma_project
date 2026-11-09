@@ -17,6 +17,7 @@ function message(role: 'user' | 'assistant', hoursAgo: number): Message {
     content: 'hola',
     toolCalls: null,
     toolCallId: null,
+    attachments: null,
     createdAt: new Date(NOW.getTime() - hoursAgo * 60 * 60 * 1000),
   }
 }

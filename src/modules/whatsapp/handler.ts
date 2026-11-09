@@ -5,9 +5,10 @@ import {
   type WAMessage,
   type WAMessageKey,
 } from '@whiskeysockets/baileys'
+import { nanoid } from 'nanoid'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
-import type { Appointment, Business, Customer } from '@/db/schema/index.js'
+import type { Appointment, Business, Customer, MessageAttachment } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
@@ -463,6 +464,8 @@ async function handleCustomerImage(params: {
   log: HandlerLogger
   /** Si la foto vino en un grupo: la pausa y la respuesta se dejan para la última. */
   burst?: ImageBurst
+  /** Los bytes que ya bajó processMessage; null si la descarga falló. */
+  downloaded?: Buffer | null
 }): Promise<'done' | 'reply_with_llm'> {
   const { raw, business, customer, conversationId, caption, jid, send, log, burst } = params
   const lastOfBurst = !burst || burst.index === burst.total - 1
@@ -579,7 +582,8 @@ async function handleCustomerImage(params: {
     (onImage?.forward === true || (forwardImages && wanted)) &&
     Boolean(business.ownerWhatsappNumber)
   const needsArchive = intent !== null && requiresDeposit
-  const image = needsRelay || needsArchive ? await downloadImage(raw, log) : null
+  const image =
+    needsRelay || needsArchive ? (params.downloaded ?? (await downloadImage(raw, log))) : null
 
   // Archived before the verification row is opened, so the row can point at it.
   // Best-effort, exactly like the Google Calendar event in bookAppointment: a
@@ -926,6 +930,31 @@ async function bookFromPaymentCapture(params: {
  * same bytes — the owner's relay and the S3 archive — and asking WhatsApp for
  * them twice would double the bandwidth for one message.
  */
+/**
+ * Guarda la foto del cliente en S3 para que el chat del panel la muestre igual
+ * que el celular (2026-11-09). Best-effort: si el bucket falla o la foto no pasa
+ * la validación, el mensaje queda como antes, solo con su texto.
+ */
+async function storeCustomerImage(
+  businessId: string,
+  conversationId: string,
+  bytes: Buffer,
+  log: HandlerLogger,
+): Promise<MessageAttachment | null> {
+  const stored = await mediaService.uploadMedia(
+    { kind: 'customer_image', businessId, conversationId, mediaId: nanoid() },
+    bytes,
+  )
+  if (!stored.ok) {
+    log.warn(
+      { code: stored.error.code, context: stored.error.logContext, conversationId },
+      'could not store the customer image for the panel',
+    )
+    return null
+  }
+  return { s3Key: stored.data.key, type: stored.data.type }
+}
+
 async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
   try {
     return await downloadMediaMessage(raw, 'buffer', {})
@@ -1330,12 +1359,20 @@ async function processMessage(
   }
   const conversation = conversationResult.data
 
+  // La foto se baja UNA vez: se guarda para el chat del panel y los mismos bytes
+  // van al reenvío al dueño, si toca (handleCustomerImage).
+  const imageBytes = payload.kind === 'image' ? await downloadImage(raw, log) : null
+  const imageAttachment = imageBytes
+    ? await storeCustomerImage(businessId, conversation.id, imageBytes, log)
+    : null
+
   const userMsgResult = await messageService.append({
     businessId,
     conversationId: conversation.id,
     role: 'user',
     content: text,
     senderType: 'customer',
+    ...(imageAttachment ? { attachments: [imageAttachment] } : {}),
   })
   if (!userMsgResult.ok) {
     log.error(
@@ -1520,6 +1557,7 @@ async function processMessage(
       jid,
       send,
       log,
+      downloaded: imageBytes,
       ...(payload.burst ? { burst: payload.burst } : {}),
     })
     // Una foto que llegó antes de tiempo en un negocio con `earlyImages`: no se

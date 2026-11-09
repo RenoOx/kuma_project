@@ -859,7 +859,20 @@ Tablas core (cada una con `business_id` excepto `businesses`):
 - `messages` — historial. `sender_type` (`customer`/`bot`/`human`)
   **complementa** `role`: `role` es el vocabulario de OpenAI y es lo que se le
   replica al modelo; `sender_type` dice si ese turno de assistant lo escribió
-  Emma o lo tipeó el dueño desde el panel
+  Emma o lo tipeó el dueño (desde el panel o desde su celular). `attachments`
+  (jsonb, migración 0021, 2026-11-09) guarda `{ s3Key, type }` de lo que viajó
+  con el mensaje, para que el chat del panel muestre lo mismo que el celular:
+  - la foto del cliente, que `processMessage` baja una vez y sube como
+    `customer_image` (`{businessId}/chats/{conversationId}/…`), y los mismos
+    bytes van al reenvío al dueño;
+  - la galería de un mensaje fijo, en su fila;
+  - el material del paso y las fichas o archivos de un servicio, en la fila de
+    la respuesta final. Si no hay texto, queda una fila vacía con sus archivos,
+    que el historial del modelo salta.
+
+  El panel firma los links al leer (`withSignedAttachments`). **Incluye fotos de
+  DNI**: el bucket es privado y no hay barrido ni vencimiento de esos objetos
+  (deuda, ver Pendientes).
 - `appointments` — citas. `customer_name` congela el nombre al momento de
   reservar; `customers.name` cambia y haría que una cita vieja mute de nombre
 - `payment_verifications` — adelantos esperando aprobación del dueño
@@ -1493,6 +1506,10 @@ Heredados de los planes ya cerrados:
 - **Material de nodos huérfano en negocios con archivo**: el barrido
   `purgeOrphans(…, 'node', …)` solo corre al guardar el flujo desde el panel, que
   para ellos está bloqueado. Si el archivo quita un paso, su material queda en S3.
+- **Fotos de clientes sin vencimiento** (`customer_image`, desde 2026-11-09):
+  quedan en S3 para siempre, DNI incluidos. Si hace falta una política de
+  retención, va como regla de ciclo de vida del bucket sobre el prefijo
+  `*/chats/`.
 - **Sin barrido de huérfanos para mensajes fijos.** El de servicio y nodo se
   dispara al guardar esa lista desde el panel; un mensaje fijo no tiene ese
   evento — su id vive en un archivo que solo cambia con un deploy. Si se le

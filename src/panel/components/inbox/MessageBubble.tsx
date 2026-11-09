@@ -1,5 +1,5 @@
-import { AlertCircle, Bell, Clock, PauseCircle } from 'lucide-react'
-import type { ChatMessage, ChatNoticeKind } from '../../api/types.js'
+import { AlertCircle, Bell, Clock, FileText, PauseCircle } from 'lucide-react'
+import type { ChatAttachment, ChatMessage, ChatNoticeKind } from '../../api/types.js'
 import { isPending } from '../../api/types.js'
 import { cn, formatTime } from '../../lib/utils.js'
 import { Button } from '../ui/button.js'
@@ -58,6 +58,9 @@ export function MessageBubble({
           failed && 'bg-destructive/15 text-emma-text border-destructive/50 rounded-br-sm border',
         )}
       >
+        {message.attachments && message.attachments.length > 0 && (
+          <Attachments items={message.attachments} hasText={message.content.trim() !== ''} />
+        )}
         {message.content}
       </div>
 
@@ -129,6 +132,68 @@ function NoticeBubble({
         </div>
         <p className="whitespace-pre-wrap">{text}</p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Lo que viajó con el mensaje, como lo ve el cliente en su celular. Cada foto
+ * abre el original en otra pestaña; video y audio se reproducen ahí mismo. Los
+ * links vencen en una hora: el chat los pide de nuevo al refrescarse.
+ */
+function Attachments({
+  items,
+  hasText,
+}: {
+  items: ChatAttachment[]
+  hasText: boolean
+}): React.JSX.Element {
+  return (
+    <div className={cn('-mx-1.5 flex flex-wrap gap-1.5', hasText && 'mb-2')}>
+      {items.map((item) => {
+        if (item.type === 'image') {
+          return (
+            <a key={item.url} href={item.url} target="_blank" rel="noreferrer" className="block">
+              <img
+                src={item.url}
+                alt="Imagen del chat"
+                loading="lazy"
+                className="max-h-56 max-w-full rounded-lg object-cover"
+              />
+            </a>
+          )
+        }
+        if (item.type === 'video') {
+          return (
+            // biome-ignore lint/a11y/useMediaCaption: es el video que mandó el negocio, sin subtítulos que mostrar.
+            <video
+              key={item.url}
+              src={item.url}
+              controls
+              preload="metadata"
+              className="max-h-56 max-w-full rounded-lg"
+            />
+          )
+        }
+        if (item.type === 'audio') {
+          return (
+            // biome-ignore lint/a11y/useMediaCaption: un audio del negocio no trae subtítulos.
+            <audio key={item.url} src={item.url} controls preload="none" className="max-w-full" />
+          )
+        }
+        return (
+          <a
+            key={item.url}
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            className="bg-emma-bg-secondary text-emma-text border-emma-border flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
+          >
+            <FileText size={14} aria-hidden />
+            Abrir PDF
+          </a>
+        )
+      })}
     </div>
   )
 }

@@ -100,6 +100,24 @@ export function buildFixedMessageMediaKey(
   return ok(`${businessId}/fixed-messages/${messageId}/${mediaId}.${ext}`)
 }
 
+/**
+ * `{businessId}/chats/{conversationId}/{mediaId}.{ext}`
+ *
+ * Una carpeta por conversación: borrar lo de un chat es un prefijo, y nada de
+ * acá puede caer en la carpeta de un servicio, un paso o un comprobante.
+ */
+export function buildCustomerImageKey(
+  businessId: string,
+  conversationId: string,
+  mediaId: string,
+  ext: string,
+): Result<string> {
+  if (!isSafeId(businessId)) return err(rejectId('businessId', businessId))
+  if (!isSafeId(conversationId)) return err(rejectId('conversationId', conversationId))
+  if (!isSafeId(mediaId)) return err(rejectId('mediaId', mediaId))
+  return ok(`${businessId}/chats/${conversationId}/${mediaId}.${ext}`)
+}
+
 /** `{businessId}/payments/{conversationId}_{timestamp}.{ext}` */
 export function buildPaymentProofKey(
   businessId: string,
@@ -121,6 +139,9 @@ export function buildKey(target: MediaTarget, ext: string): Result<string> {
   }
   if (target.kind === 'fixed_message_media') {
     return buildFixedMessageMediaKey(target.businessId, target.messageId, target.mediaId, ext)
+  }
+  if (target.kind === 'customer_image') {
+    return buildCustomerImageKey(target.businessId, target.conversationId, target.mediaId, ext)
   }
   return buildPaymentProofKey(
     target.businessId,
