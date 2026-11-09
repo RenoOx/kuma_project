@@ -71,7 +71,10 @@ import {
   sendWithPresence,
 } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
+import {
+  recordOwnerNoticeInChat,
+  recordOwnerNotification,
+} from '@/modules/whatsapp/ownerThreadLog.js'
 import {
   PLACEHOLDER_WAIT_MS,
   settle as settlePlaceholder,
@@ -112,11 +115,17 @@ function notifyOwnerUnanswered(params: {
     `Cliente: ${who} (${params.phone})`,
     ...(params.findHints ?? []),
     `Motivo: ${params.reason}`,
-    'Su mensaje está en el Inbox: respóndele desde el panel.',
+    'Respóndele por WhatsApp.',
   ].join('\n')
-  ownerNotifier.notifyOwner(params.businessId, text).catch((err) => {
-    params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
-  })
+  ownerNotifier
+    .notifyOwner(
+      params.businessId,
+      text,
+      params.conversationId ? { conversationId: params.conversationId } : {},
+    )
+    .catch((err) => {
+      params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
+    })
   // Sin esto, "Emma no pudo responder" solo existía en el WhatsApp del dueño: el
   // panel no tenía cómo contarlo.
   if (params.conversationId) {
@@ -618,6 +627,7 @@ async function handleCustomerImage(params: {
       payment: intent,
       awaitsVerification: needsArchive,
       ...(stepCaption ? { stepCaption } : {}),
+      conversationId,
       log,
     })
   } else {
@@ -941,6 +951,8 @@ async function relayImage(params: {
   awaitsVerification: boolean
   /** El aviso por paso ya armado; si viene, reemplaza al de siempre. */
   stepCaption?: string
+  /** El chat del cliente, donde queda la copia del aviso. */
+  conversationId: string
   log: HandlerLogger
 }): Promise<boolean> {
   const { image, business, customer, caption, pendingAppointment, purpose, payment, log } = params
@@ -976,6 +988,9 @@ async function relayImage(params: {
   // reaches the assistant with the phone already in context instead of making
   // it ask the owner for a number Emma herself sent seconds earlier.
   await recordOwnerNotification(business.id, sent.data.caption)
+  // Y en el chat del cliente, para que el panel muestre qué le llegó al dueño.
+  // El texto es el pie de la foto; la foto en sí la muestra el chat.
+  await recordOwnerNoticeInChat(business.id, params.conversationId, sent.data.caption)
 
   return true
 }
@@ -1334,6 +1349,7 @@ async function processMessage(
       findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       reason: 'no se pudo guardar su mensaje en la base',
       log,
+      conversationId: conversation.id,
     })
     return
   }
@@ -1477,9 +1493,11 @@ async function processMessage(
       ...customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       'Conversación marcada como escalada.',
     ].join('\n')
-    ownerNotifier.notifyOwner(businessId, pausedText).catch((err) => {
-      log.warn({ err }, 'notifyOwner during paused flow rejected unexpectedly')
-    })
+    ownerNotifier
+      .notifyOwner(businessId, pausedText, { conversationId: conversation.id })
+      .catch((err) => {
+        log.warn({ err }, 'notifyOwner during paused flow rejected unexpectedly')
+      })
 
     try {
       await sendWithPresence({ businessId, jid, text: PAUSED_REPLY, send, readKey: raw.key })

@@ -791,7 +791,16 @@ se ve afectado. Si `until_iso` ya pasó, auto-resume.
   Fire-and-forget: la respuesta al cliente no se bloquea por el push.
 - **Cuando el dueño pide el reporte** con `send_daily_report_now`. No hay cron.
 
-Helper: `notifyOwner(businessId, text)` en `whatsapp/ownerNotifier`. Al cliente:
+Helper: `notifyOwner(businessId, text, { conversationId? })` en `whatsapp/ownerNotifier`.
+Con `conversationId`, el aviso, con su texto exacto, queda también como evento
+`owner_notified` en el chat del cliente (`recordOwnerNoticeInChat`). El panel lo
+intercala en ese chat como burbuja gris "Aviso a … por WhatsApp" (`panel/chatNotices.ts`,
+`noticesForPage` en `panel.repo.ts`; desde 2026-11-09, porque el dueño de Tecmin
+no usa el panel y desde ahí no se veía qué le llegaba). Lo mismo para el pie de una
+foto reenviada y para las pausas de Emma (`emma_paused_by_owner_reply`,
+`emma_paused_on_image`). Son eventos, no mensajes: no entran al historial que lee
+Emma. Hoy lo pasan la escalada, "Emma no pudo responder", el aviso de pausa y el
+reenvío de foto. La solicitud de cita y la confirmación todavía no. Al cliente:
 `notifyCustomer` (solo envía) o `messagePatient` (envía **y** deja el mensaje en
 el transcript — preferí este cuando el cliente pueda responderlo).
 

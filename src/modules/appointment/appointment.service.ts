@@ -1119,7 +1119,9 @@ async function notifyOwnerOfEscalation(params: EscalateParams): Promise<void> {
     'Revisá la conversación cuando puedas.',
   ].join('\n')
 
-  const sent = await ownerNotifier.notifyOwner(params.businessId, text)
+  const sent = await ownerNotifier.notifyOwner(params.businessId, text, {
+    conversationId: params.conversationId,
+  })
   if (!sent.ok) {
     logger.warn(
       {

@@ -1,5 +1,5 @@
-import { AlertCircle, Clock } from 'lucide-react'
-import type { ChatMessage } from '../../api/types.js'
+import { AlertCircle, Bell, Clock, PauseCircle } from 'lucide-react'
+import type { ChatMessage, ChatNoticeKind } from '../../api/types.js'
 import { isPending } from '../../api/types.js'
 import { cn, formatTime } from '../../lib/utils.js'
 import { Button } from '../ui/button.js'
@@ -15,6 +15,17 @@ export function MessageBubble({
   onRetry: (localId: string) => void
   onDismiss: (localId: string) => void
 }): React.JSX.Element {
+  if (message.notice) {
+    return (
+      <NoticeBubble
+        kind={message.notice}
+        content={message.content}
+        createdAt={message.createdAt}
+        ownerName={ownerName}
+      />
+    )
+  }
+
   // The customer is the only side that sits on the left. Emma and the owner
   // both speak FOR the business, so they share the right — the label is what
   // separates them, and it is the whole reason sender_type exists.
@@ -81,6 +92,43 @@ export function MessageBubble({
           formatTime(message.createdAt)
         )}
       </span>
+    </div>
+  )
+}
+
+/**
+ * Lo que pasó en el chat sin ser un mensaje: el aviso que recibió el dueño por
+ * WhatsApp, tal cual, o por qué Emma se pausó. Centrado y apagado, para que no
+ * se lea como algo que vio el cliente.
+ */
+function NoticeBubble({
+  kind,
+  content,
+  createdAt,
+  ownerName,
+}: {
+  kind: ChatNoticeKind
+  content: string
+  createdAt: string
+  ownerName: string | null
+}): React.JSX.Element {
+  const Icon = kind === 'owner_notified' ? Bell : PauseCircle
+  const title =
+    kind === 'owner_notified' ? `Aviso a ${ownerName ?? 'el dueño'} por WhatsApp` : 'Emma pausada'
+  // El aviso va con el formato de WhatsApp (*negrita*): acá no se ve como tal.
+  const text = content.replace(/\*([^*\n]+)\*/g, '$1')
+
+  return (
+    <div className="flex justify-center">
+      <div className="bg-emma-elevated text-emma-text-muted border-emma-border max-w-[90%] rounded-xl border px-3 py-2 text-xs md:max-w-[75%]">
+        <div className="mb-1 flex items-center gap-1.5 font-medium">
+          <Icon size={12} aria-hidden />
+          <span>{title}</span>
+          <span aria-hidden>·</span>
+          <span>{formatTime(createdAt)}</span>
+        </div>
+        <p className="whitespace-pre-wrap">{text}</p>
+      </div>
     </div>
   )
 }
