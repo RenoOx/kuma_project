@@ -28,6 +28,7 @@ import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
 import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
+import type { UpsertType } from '@/modules/whatsapp/baileys.client.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import {
   buildStepImageNotice,
@@ -36,6 +37,7 @@ import {
   pauseOnImage,
   shouldPauseAfterImage,
 } from '@/modules/whatsapp/customerImage.js'
+import { isTooOldToAnswer, messageAgeMs } from '@/modules/whatsapp/delivery.js'
 import { bufferImage, flushImagesNow, hasPendingImages } from '@/modules/whatsapp/imageBuffer.js'
 import {
   consumeImageExpectation,
@@ -1146,6 +1148,15 @@ async function processMessage(
       log.info('owner placeholder never filled: ignored')
       return
     }
+    // Una orden del dueño de hace medio día ("pausa el bot") que llegó al
+    // reconectar ya no es una orden: no se ejecuta.
+    if (isTooOldToAnswer(raw, Date.now())) {
+      log.warn(
+        { ageMs: messageAgeMs(raw, Date.now()) },
+        'offline message too old, owner message ignored',
+      )
+      return
+    }
     // Un negocio cuyo archivo apaga el asistente del dueño: Emma solo le
     // notifica, nunca le contesta (Tecmin, 2026-10-01: el dueño reenvía los
     // avisos, y una respuesta de la IA en ese hilo solo confunde).
@@ -1393,6 +1404,29 @@ async function processMessage(
       { conversationId: conversation.id, phone, kind: payload.kind },
       'human takeover active; message stored, LLM skipped',
     )
+    return
+  }
+
+  // DEMASIADO VIEJO — WhatsApp lo entregó al reconectar, horas después de que
+  // el cliente lo escribió. Ya quedó guardado arriba; contestarlo ahora sería
+  // seguir una conversación que el cliente dejó hace medio día. Lo ve el dueño.
+  // Las fotos siguen su camino: una captura de pago tardía igual le tiene que
+  // llegar al dueño, y la respuesta ("Recibido ✅") sigue siendo cierta.
+  if (payload.kind !== 'image' && isTooOldToAnswer(raw, Date.now())) {
+    const ageMs = messageAgeMs(raw, Date.now()) ?? 0
+    log.warn(
+      { conversationId: conversation.id, phone, kind: payload.kind, ageMs },
+      'offline message too old, stored only',
+    )
+    notifyOwnerUnanswered({
+      businessId,
+      customerName: customer.name,
+      phone: customerContactLabel(customer),
+      findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
+      reason: `su mensaje llegó ${Math.round(ageMs / 3_600_000)} h tarde (WhatsApp estuvo desconectado)`,
+      log,
+      conversationId: conversation.id,
+    })
     return
   }
 
@@ -1799,11 +1833,16 @@ export function handleIncomingMessage(
   raw: WAMessage,
   businessId: string,
   send: SendFn,
+  /** `append` = WhatsApp lo entregó al reconectar, o es el eco de un envío del bot. */
+  upsertType: UpsertType = 'notify',
 ): Promise<void> {
   const log = logger.child({ component: 'whatsapp.handler', businessId })
 
   if (raw.key.fromMe) {
-    log.info({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
+    // Con `append` es casi siempre el eco de lo que acaba de mandar el bot: uno
+    // por cada envío, así que en debug para no duplicar las líneas del log.
+    if (upsertType === 'append') log.debug({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
+    else log.info({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
     return Promise.resolve()
   }
   const jid = raw.key.remoteJid
@@ -1883,6 +1922,15 @@ export function handleIncomingMessage(
   // number. Placed after every filter so protocol noise and duplicates do not
   // keep a quiet number looking online all day.
   presence.markActive(businessId)
+
+  // Lo que el cliente escribió mientras el socket estaba caído. Hasta el
+  // 2026-11-09 esto no llegaba nunca acá (ver baileys.client.ts).
+  if (upsertType === 'append') {
+    log.info(
+      { jid, phone, messageId, ageMs: messageAgeMs(raw, Date.now()) },
+      'offline message accepted',
+    )
+  }
 
   log.info(
     incoming.kind === 'text'

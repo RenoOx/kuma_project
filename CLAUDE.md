@@ -194,6 +194,19 @@ rango 50–400). Las pausas entre mensajes y el tope por minuto (25) no cambiaro
 Se sube desde Railway de a poco (300, después 400) y se baja sin deploy si
 WhatsApp avisa algo.
 
+Segunda excepción, pedida por Renzo (2026-11-09): el filtro de `messages.upsert`
+en `baileys.client.ts` deja pasar `append` además de `notify`, y el cliente
+expone `wasSentByBot(id)`. Baileys 7 entrega como `append` lo que un cliente
+escribió mientras el socket estaba caído (`node.attrs.offline`). Con solo
+`notify` esos mensajes se tiraban sin guardarse ni avisar: un alumno de Tecmin
+eligió su opción durante una reconexión y nunca tuvo respuesta. `append` también
+trae el eco de cada envío del bot (`emitOwnEvents`), que el handler descarta por
+`fromMe`. Un mensaje de cliente entregado tarde se contesta normal hasta 12 h
+(`OFFLINE_REPLY_MAX_AGE_MS` en `whatsapp/delivery.ts`). Más viejo, se guarda sin
+responder y el dueño recibe "Emma no pudo responder". Las fotos siguen su camino
+igual. Logs: `offline message accepted` / `offline message too old, stored only`.
+Sesiones, cola de envío, anti-ban y presencia no cambiaron.
+
 ## Arquitectura del flujo de mensajes (6 capas)
 
 Todo mensaje de WhatsApp pasa por estas 6 capas en orden:

@@ -104,6 +104,7 @@ export function createFakeWhatsappClient(opts: FakeClientOptions): WhatsappClien
     onCall: () => {},
     onContact: () => {},
     usernameFor: () => null,
+    wasSentByBot: () => false,
     rejectCall: async () => {},
     requestPairingCode: async () => {
       throw new Error('fake whatsapp client: pairing is not available in tests')
