@@ -26,7 +26,7 @@ import * as llmService from '@/modules/llm/llm.service.js'
 import type { ToolAttachment } from '@/modules/llm/toolExecutor.js'
 import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
+import { buildImagePlaceholder, buildOwnerPhoneMarker } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
 import type { UpsertType } from '@/modules/whatsapp/baileys.client.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
@@ -176,7 +176,7 @@ export type SendFn = (jid: string, text: string) => Promise<void>
 
 // Structural subset of the Pino logger, so helpers accept a child logger
 // without fighting Pino's generics over custom-level type parameters.
-type HandlerLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
+type HandlerLogger = Pick<typeof logger, 'debug' | 'info' | 'warn' | 'error'>
 
 // ── Anti-ban layer ───────────────────────────────
 // Este número pertenece al cliente. Un baneo de
@@ -1838,13 +1838,6 @@ export function handleIncomingMessage(
 ): Promise<void> {
   const log = logger.child({ component: 'whatsapp.handler', businessId })
 
-  if (raw.key.fromMe) {
-    // Con `append` es casi siempre el eco de lo que acaba de mandar el bot: uno
-    // por cada envío, así que en debug para no duplicar las líneas del log.
-    if (upsertType === 'append') log.debug({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
-    else log.info({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
-    return Promise.resolve()
-  }
   const jid = raw.key.remoteJid
   if (!jid) {
     log.info('handler skip: no remoteJid')
@@ -1854,6 +1847,10 @@ export function handleIncomingMessage(
     log.info({ jid }, 'handler skip: group or status')
     return Promise.resolve()
   }
+
+  // Salió de este número: o lo mandó el bot (el eco de cada envío), o lo
+  // escribió el dueño en su celular. Lo segundo se guarda y pausa a Emma.
+  if (raw.key.fromMe) return handleOwnPhoneMessage(raw, businessId, jid, log)
 
   const messageId = raw.key.id
   const watchKey = messageId ? `${businessId}:${messageId}` : null
@@ -1987,6 +1984,162 @@ export function handleIncomingMessage(
   const quoted = quotedSummaryOf(raw)
   const text = quoted ? `[Sobre: "${quoted}"] ${incoming.text}` : incoming.text
   return dispatchText(raw, businessId, send, jid, phone, text, log)
+}
+
+/**
+ * Cuánto esperar antes de preguntarle al cliente de WhatsApp si un `fromMe` lo
+ * mandó el bot. Baileys emite el eco en un `process.nextTick` justo después de
+ * mandarlo, y `rememberSentMessage` anota el id recién cuando vuelve
+ * `sendMessage`: sin la espera, el eco puede llegar antes que la anotación, y
+ * cada envío de Emma la pausaría a ella misma. El eco llega en milisegundos;
+ * dos segundos sobran.
+ */
+const OWN_ECHO_SETTLE_MS = 2_000
+
+/**
+ * Un mensaje que salió del número del negocio. Si no lo mandó el bot, lo
+ * escribió el dueño en su celular (o en su WhatsApp Web): se guarda en el chat
+ * del cliente como respuesta humana —el panel la muestra y Emma la ve en su
+ * historial— y Emma se pausa en ese chat (pedido de Renzo, 2026-11-09: el dueño
+ * que contesta está atendiendo él). La pausa es la misma de la foto y del
+ * Inbox: dura hasta que alguien la reactive.
+ *
+ * Supone que el negocio no tiene respuestas automáticas de WhatsApp Business
+ * (bienvenida, ausencia): salen del celular igual y pausarían a Emma con cada
+ * cliente nuevo. Tecmin no tiene (2026-11-09). El log lleva el texto para
+ * detectarlo si un negocio las prende.
+ */
+async function handleOwnPhoneMessage(
+  raw: WAMessage,
+  businessId: string,
+  jid: string,
+  log: HandlerLogger,
+): Promise<void> {
+  const messageId = raw.key.id
+  const incoming = classifyIncoming(raw)
+  // Ediciones, borrados, reacciones y el ruido de protocolo que el celular
+  // sincroniza: nada que mostrar.
+  if (!messageId || incoming.kind === 'ignorable') {
+    log.debug({ jid }, 'handler skip: fromMe without payload')
+    return
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, OWN_ECHO_SETTLE_MS))
+  const client = clientRegistry.getClient(businessId)
+  if (!client) {
+    // Sin el cliente no hay cómo saber si fue el bot: ante la duda no se pausa.
+    log.warn({ jid, messageId }, 'handler skip: fromMe with no client to tell bot sends apart')
+    return
+  }
+  if (client.wasSentByBot(messageId)) {
+    log.debug({ jid, messageId }, 'handler skip: fromMe sent by the bot')
+    return
+  }
+  if (!claimMessageId(`${businessId}:${messageId}`)) return
+
+  const key = raw.key as { remoteJidAlt?: string }
+  const lidPhone =
+    jidToPhone(jid) ??
+    jidToPhone(key.remoteJidAlt) ??
+    (/^\d+@lid$/.test(jid) ? `+${jid.slice(0, jid.indexOf('@'))}` : null)
+  if (!lidPhone) {
+    log.warn({ jid, keyShape: Object.keys(raw.key) }, 'owner phone message: no phone in chat jid')
+    return
+  }
+
+  const content =
+    incoming.kind === 'text'
+      ? incoming.text
+      : incoming.kind === 'image'
+        ? buildOwnerPhoneMarker('una imagen', incoming.caption)
+        : buildOwnerPhoneMarker(describeFormat(incoming.format), null)
+  if (content.trim() === '') return
+
+  // El mismo candado que los mensajes del cliente: el orden del chat queda
+  // como pasó, y no se crean dos conversaciones si los dos escriben a la vez.
+  return withSenderLock(`${businessId}:${lidPhone}`, () =>
+    recordOwnerPhoneMessage({ raw, businessId, jid, lidPhone, content, log }),
+  )
+}
+
+async function recordOwnerPhoneMessage(params: {
+  raw: WAMessage
+  businessId: string
+  jid: string
+  lidPhone: string
+  content: string
+  log: HandlerLogger
+}): Promise<void> {
+  const { raw, businessId, jid, lidPhone, content, log } = params
+  const businessResult = await businessService.getById(businessId)
+  if (!businessResult.ok) {
+    log.error({ code: businessResult.error.code }, 'business not found for owner phone message')
+    return
+  }
+  const business = businessResult.data
+  const phone = (await resolveLidPhone(businessId, jid, business.ownerWhatsappNumber)) ?? lidPhone
+
+  // El chat con el número personal del dueño (donde le llegan los avisos) y el
+  // "mensaje a mí mismo" no son chats de clientes.
+  if (samePhone(business.ownerWhatsappNumber, phone) || samePhone(business.whatsappNumber, phone)) {
+    log.debug({ jid }, 'owner phone message in the owner or self chat: ignored')
+    return
+  }
+
+  // Sin pushName: en un `fromMe` es el nombre del propio negocio, no del cliente.
+  const customerResult = await customerService.getOrCreate(businessId, phone, undefined, jid)
+  if (!customerResult.ok) {
+    log.error(
+      { code: customerResult.error.code },
+      'owner phone message: getOrCreate customer failed',
+    )
+    return
+  }
+  const conversationResult = await conversationService.getOrCreateOpen(
+    businessId,
+    customerResult.data.id,
+  )
+  if (!conversationResult.ok) {
+    log.error(
+      { code: conversationResult.error.code },
+      'owner phone message: getOrCreateOpen conversation failed',
+    )
+    return
+  }
+  const conversation = conversationResult.data
+
+  // `assistant` + `human`: el mismo formato que una respuesta desde el panel.
+  const appended = await messageService.append({
+    businessId,
+    conversationId: conversation.id,
+    role: 'assistant',
+    content,
+    senderType: 'human',
+  })
+  if (!appended.ok) {
+    log.error({ code: appended.error.code }, 'owner phone message: append failed')
+    return
+  }
+
+  if (!conversation.emmaEnabled) {
+    log.info({ conversationId: conversation.id }, 'owner reply from phone recorded')
+    return
+  }
+  try {
+    await conversationRepo.setEmmaEnabled(businessId, conversation.id, false)
+    await eventsRepo.create({
+      businessId,
+      conversationId: conversation.id,
+      type: 'emma_paused_by_owner_reply',
+      payload: { messageId: raw.key.id ?? null, state: conversation.state },
+    })
+    log.info(
+      { conversationId: conversation.id, textPreview: preview(content) },
+      'emma paused: owner replied from phone',
+    )
+  } catch (err) {
+    log.error({ err, conversationId: conversation.id }, 'owner phone message: pause failed')
+  }
 }
 
 /**

@@ -24,7 +24,7 @@
  * THE CONVENTION IS LORE: a new marker that does not open this way will reach
  * the owner's inbox with its instruction text intact. Keep the prefix.
  */
-const MARKER_PATTERN = /^\[El (?:paciente|cliente) .*\]$/s
+const MARKER_PATTERN = /^\[El (?:paciente|cliente|dueño) .*\]$/s
 
 interface MarkerRendering {
   /** Matched against the marker's text, first hit wins. */
@@ -35,6 +35,10 @@ interface MarkerRendering {
 // Ordered: payment captures are also images, so they have to be recognised
 // before the plain-image rule.
 const MARKER_RENDERINGS: MarkerRendering[] = [
+  // Lo que el dueño mandó desde su celular (buildOwnerPhoneMarker). Primero: la
+  // regla de imagen de abajo también lo agarraría como "Imagen recibida".
+  { test: /^\[El dueño envió una imagen/, label: '📷 Imagen enviada desde el celular' },
+  { test: /^\[El dueño envió/, label: '📎 Archivo enviado desde el celular' },
   // La marca de una foto que llegó antes de que Emma la pidiera (earlyImages en
   // el archivo del negocio). Va primero: menciona el pago y el DNI, y sin esto
   // caía en el genérico y el Inbox mostraba un segundo adjunto que no existió.
@@ -56,6 +60,17 @@ const IMAGE_PLACEHOLDER_PREFIX = '[El cliente envió una imagen'
 export function buildImagePlaceholder(caption: string | null): string {
   const said = caption?.trim() ? ` con el texto: "${caption.trim()}"` : ''
   return `${IMAGE_PLACEHOLDER_PREFIX}${said}. No puedo verla]`
+}
+
+/**
+ * Una foto o un archivo que el dueño mandó desde su celular al chat de un
+ * cliente. Lo lee el modelo en el historial (como turno del asistente) y el
+ * panel lo traduce con `toPanelDisplay`. `what` es la frase del formato: "una
+ * imagen", o la de `describeFormat`.
+ */
+export function buildOwnerPhoneMarker(what: string, caption: string | null): string {
+  const said = caption?.trim() ? ` con el texto: "${caption.trim()}"` : ''
+  return `[El dueño envió ${what} desde su celular${said}]`
 }
 
 /**

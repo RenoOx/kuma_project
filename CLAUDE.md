@@ -979,7 +979,7 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 | `status`            | ¿abierta, cerrada, escalada? | `conversation.service`     |
 | `state`             | ¿en qué paso del flujo?      | SOLO vía `stateMachine.ts` |
 | etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel; el handler pone "Por validar" al pausar por foto |
-| `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) |
+| `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) y cuando el dueño contesta desde su celular |
 | `human_takeover_at` | ¿el dueño tomó el control?   | `panel.service` / worker   |
 
 **`qualification` está muerto.** La columna sigue en el schema marcada
@@ -1014,6 +1014,30 @@ El gate vive en `handler.ts`, después de persistir el mensaje del cliente y
 antes del gate de pausa. Guarda en BD, no llama al LLM, no envía nada, early
 return. El dueño recupera el control manualmente o por timeout de 30 min
 (worker `takeoverTimeout.ts`).
+
+### El dueño contesta desde su celular (desde 2026-11-09)
+
+Lo que el dueño escribe en el WhatsApp del negocio (celular o WhatsApp Web) llega
+como `fromMe`, igual que el eco de cada envío del bot. `handleOwnPhoneMessage`
+(`handler.ts`) espera `OWN_ECHO_SETTLE_MS` (2 s: el eco puede llegar antes de que
+`rememberSentMessage` anote el id) y pregunta `wasSentByBot`. Si no lo mandó el
+bot, lo escribió el dueño. Ahí pasan tres cosas:
+
+- Se guarda en el chat del cliente como `role: 'assistant'`, `senderType: 'human'`:
+  el panel lo muestra y Emma lo ve en su historial. Una foto o un archivo queda
+  como `buildOwnerPhoneMarker`, que el panel muestra como "📷 Imagen enviada desde
+  el celular".
+- **Emma se pausa en ese chat** (`setEmmaEnabled(false)` + evento
+  `emma_paused_by_owner_reply`). Es la misma pausa del Inbox y de la foto, no el
+  takeover de 30 min: dura hasta que alguien la reactive. Pedido de Renzo: el
+  dueño que contesta está atendiendo él.
+- El chat con el número personal del dueño y el "mensaje a mí mismo" se ignoran.
+
+**Supone que el negocio no tiene respuestas automáticas de WhatsApp Business**
+(bienvenida, ausencia). Esas también salen del celular y pausarían a Emma con
+cada cliente nuevo. Tecmin no tiene ninguna (2026-11-09). El log
+`emma paused: owner replied from phone` lleva el texto, para detectarlo si un
+negocio las prende.
 
 ### Embudo de ventas (desde 2026-10-01)
 
