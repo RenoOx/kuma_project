@@ -34,6 +34,39 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
+// Negocio suspendido por Vamvu (cliente que no paga): el token es bueno, pero
+// todo responde 403 `business_suspended`. Misma idea que el 401 — una pantalla
+// para todo el panel — y se distingue por el código, no por el status, porque
+// `managed_by_vamvu` también es 403 y ese solo bloquea una sección.
+let suspended = false
+
+export function isSuspendedError(error: unknown): boolean {
+  return (
+    error instanceof PanelApiError && error.status === 403 && error.code === 'business_suspended'
+  )
+}
+
+/** Respuestas que significan "no hay panel": no vale la pena reintentarlas. */
+export function isPanelBlocked(error: unknown): boolean {
+  return isUnauthorized(error) || isSuspendedError(error)
+}
+
+/** Handler global de React Query: anota el 401 o la suspensión, lo que haya. */
+export function markPanelBlocked(error: unknown): void {
+  markUnauthorized(error)
+  if (suspended || !isSuspendedError(error)) return
+  suspended = true
+  for (const listener of listeners) listener()
+}
+
+export function useSuspended(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => suspended,
+    () => false,
+  )
+}
+
 export function useUnauthorized(): boolean {
   return useSyncExternalStore(
     subscribe,

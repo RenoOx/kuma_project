@@ -29,6 +29,11 @@ export const businesses = pgTable(
     // column update, and the link stops working everywhere at once.
     // Nullable because rows created before the panel have none until backfilled.
     panelToken: varchar('panel_token', { length: 64 }),
+    // Servicio suspendido (cliente que no paga). Null = activo. Con fecha, Emma
+    // no procesa nada de ese número y el panel se bloquea, pero WhatsApp sigue
+    // vinculado: reactivar es limpiar esto, sin QR.
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+    suspensionReason: text('suspension_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

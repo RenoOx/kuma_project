@@ -1,8 +1,10 @@
 import { rm } from 'node:fs/promises'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
+import { z } from 'zod'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
+import type { Business } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
 import * as businessService from '@/modules/business/business.service.js'
@@ -141,15 +143,12 @@ function waActions(
   const bid = esc(businessId)
   const qrUrl = `/admin/whatsapp/qr?secret=${se}&businessId=${bid}`
   const connectUrl = `/admin/dashboard/${bid}/connect?secret=${se}`
-  const disconnectUrl = `/admin/dashboard/${bid}/disconnect?secret=${se}`
 
+  // Sin "Desconectar" acá: ese botón desvinculaba de verdad (QR nuevo para
+  // volver). Para un cliente que no paga está "Suspender"; desvincular quedó
+  // solo en la Zona de peligro de Conexión.
   if (status === 'connected') {
-    return `
-      <form method="post" action="${disconnectUrl}" style="display:inline"
-        onsubmit="return confirm('¿Desconectar WhatsApp de este negocio? El bot dejará de responder.')">
-        <button type="submit" class="btn btn-danger btn-sm">Desconectar</button>
-      </form>
-      <a href="${qrUrl}" class="btn btn-ghost btn-sm">Estado WA</a>`
+    return `<a href="${qrUrl}" class="btn btn-ghost btn-sm">Estado WA</a>`
   }
   if (status === 'qr_pending') {
     return `<a href="${qrUrl}" class="btn btn-primary btn-sm">Ver QR / Vincular</a>`
@@ -168,6 +167,38 @@ function waActions(
   return `<form method="post" action="${connectUrl}" style="display:inline"
     onsubmit="return confirm('${warn}')">
     <button type="submit" class="btn btn-warning btn-sm">${label}</button>
+  </form>`
+}
+
+// ── Suspensión (cliente que no paga) ──────────────────────────────────────────
+
+function suspendedBadge(business: Business): string {
+  return business.suspendedAt
+    ? '<span class="badge badge-red"><span class="dot dot-red"></span>Suspendido</span>'
+    : ''
+}
+
+/**
+ * Suspender / Reactivar. El motivo se pide con prompt(): cancelar no suspende,
+ * así que hace también de confirmación. `from` decide a dónde volver.
+ */
+function suspensionAction(business: Business, secret: string, from: 'list' | 'detail'): string {
+  const se = encodeURIComponent(secret)
+  const bid = esc(business.id)
+  // El nombre va dentro de un string JS en un atributo: sin comillas ni saltos.
+  const name = esc(business.name.replace(/['"\\\n\r]/g, ' '))
+  if (business.suspendedAt) {
+    return `<form method="post" action="/admin/dashboard/${bid}/reactivate?secret=${se}" style="display:inline"
+      onsubmit="return confirm('¿Reactivar a Emma en ${name}?\\n\\nVuelve a responder y el panel se desbloquea. No hace falta QR.')">
+      <input type="hidden" name="from" value="${from}">
+      <button type="submit" class="btn btn-primary btn-sm">Reactivar</button>
+    </form>`
+  }
+  return `<form method="post" action="/admin/dashboard/${bid}/suspend?secret=${se}" style="display:inline"
+    onsubmit="var r=prompt('Suspender ${name}\\n\\nEmma deja de responder (clientes, dueño, llamadas y recordatorios) y el panel se bloquea. WhatsApp sigue vinculado: reactivar no pide QR.\\n\\nMotivo (opcional):','Falta de pago');if(r===null)return false;this.reason.value=r;return true">
+    <input type="hidden" name="from" value="${from}">
+    <input type="hidden" name="reason" value="">
+    <button type="submit" class="btn btn-warning btn-sm">Suspender</button>
   </form>`
 }
 
@@ -571,13 +602,14 @@ dashboardRoutes.get('/admin/dashboard', async (c) => {
           <a href="/admin/dashboard/${esc(b.id)}?secret=${se}" class="biz-link">${esc(b.name)}</a>
         </td>
         <td><span class="mono muted">${esc(b.whatsappNumber)}</span></td>
-        <td>${statusBadge(status)}</td>
+        <td>${statusBadge(status)} ${suspendedBadge(b)}</td>
         <td style="text-align:right">${stats.customerCount}</td>
         <td style="text-align:right">${stats.conversationCount}</td>
         <td style="text-align:right">${stats.appointmentCount}</td>
         <td class="muted">${fmtDatetime(stats.lastMessageAt)}</td>
         <td>
           <div class="actions">
+            ${suspensionAction(b, secret, 'list')}
             ${waActions(b.id, status, secret, b.whatsappNumber)}
             <a href="/admin/dashboard/${esc(b.id)}?secret=${se}" class="btn btn-ghost btn-sm">Detalle</a>
             <a href="/admin/dashboard/${esc(b.id)}/configure?secret=${se}" class="btn btn-ghost btn-sm">Conexión</a>
@@ -917,7 +949,7 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
       </div>
       <div class="stat-card">
         <div class="stat-label">Bot</div>
-        <div class="stat-value" style="font-size:14px;margin-top:.4rem">${botPaused ? '<span class="badge badge-red">Pausado</span>' : '<span class="badge badge-green">Activo</span>'}</div>
+        <div class="stat-value" style="font-size:14px;margin-top:.4rem">${business.suspendedAt ? '<span class="badge badge-red">Suspendido</span>' : botPaused ? '<span class="badge badge-red">Pausado</span>' : '<span class="badge badge-green">Activo</span>'}</div>
       </div>
     </div>
 
@@ -942,7 +974,14 @@ dashboardRoutes.get('/admin/dashboard/:id', async (c) => {
           ${statusBadge(status)}
         </div>
         <div class="card-body">
+          ${
+            business.suspendedAt
+              ? `<div class="info-row"><span class="info-label">Suspendido desde</span><span class="info-value">${fmtDatetime(business.suspendedAt)}</span></div>
+                 <div class="info-row" style="margin-bottom:1rem"><span class="info-label">Motivo</span><span class="info-value">${business.suspensionReason ? esc(business.suspensionReason) : '<span class="muted">Sin motivo</span>'}</span></div>`
+              : ''
+          }
           <div class="actions">
+            ${suspensionAction(business, secret, 'detail')}
             ${waActions(businessId, status, secret, business.whatsappNumber)}
             <a href="/admin/whatsapp/qr?secret=${se}&businessId=${bid}" class="btn btn-ghost btn-sm">Ver estado completo</a>
           </div>
@@ -1292,6 +1331,10 @@ dashboardRoutes.get('/admin/dashboard/:id/configure', async (c) => {
           Cierra la sesión contra WhatsApp, quita el dispositivo de la lista del teléfono del cliente
           y borra las credenciales guardadas. Para volver a usar este número hay que escanear un QR nuevo.
         </p>
+        <p class="section-desc" style="margin-bottom:20px">
+          ¿El cliente no pagó? Usá <strong>Suspender</strong> en el detalle del negocio: Emma se calla
+          y el panel se bloquea, pero WhatsApp sigue vinculado y reactivar no pide QR.
+        </p>
         <form method="post" action="/admin/dashboard/${bid}/disconnect?secret=${se}" style="display:inline"
           onsubmit="return confirm('¿Desvincular WhatsApp de ${esc(business.whatsappNumber)}?\\n\\nEmma deja de responder ya mismo y el dispositivo se quita del teléfono del cliente.\\n\\nEsto NO se puede deshacer: para volver hay que escanear un QR nuevo.')">
           <input type="hidden" name="from" value="configure">
@@ -1533,6 +1576,76 @@ dashboardRoutes.post('/admin/dashboard/:id/session/clear-guard', async (c) => {
     `/admin/dashboard/${encodeURIComponent(businessId)}?secret=${encodeURIComponent(secret)}`,
     302,
   )
+})
+
+// ── POST /:id/suspend y /:id/reactivate — cliente que no paga ─────────────────
+//
+// No toca WhatsApp: el socket sigue vivo para que la sesión no caduque y
+// reactivar no gaste un QR. El corte lo hacen los que leen `suspendedAt`
+// (handler, llamadas, recordatorios y panelAuth).
+
+const suspensionFormSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
+  from: z.enum(['list', 'detail']).optional(),
+})
+
+async function readSuspensionForm(c: Context) {
+  const form = await c.req.formData().catch(() => null)
+  return suspensionFormSchema.safeParse(form ? Object.fromEntries(form.entries()) : {})
+}
+
+function afterSuspensionRedirect(businessId: string, from: string | undefined, secret: string) {
+  const path =
+    from === 'list' ? '/admin/dashboard' : `/admin/dashboard/${encodeURIComponent(businessId)}`
+  return `${path}?secret=${encodeURIComponent(secret)}`
+}
+
+dashboardRoutes.post('/admin/dashboard/:id/suspend', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404 — Not found</h1>', 404) as Response
+
+  const parsed = await readSuspensionForm(c)
+  if (!parsed.success) {
+    return c.html('<h1>400 — Motivo inválido (máximo 200 caracteres)</h1>', 400) as Response
+  }
+
+  // Suspender dos veces no mueve la fecha: "desde cuándo" es lo que importa.
+  if (!business.suspendedAt) {
+    const reason = parsed.data.reason ? parsed.data.reason : null
+    await businessRepo.setSuspension(businessId, { reason })
+    logger.warn(
+      { businessId, name: business.name, reason },
+      'dashboard: business suspended by admin',
+    )
+  }
+
+  return c.redirect(afterSuspensionRedirect(businessId, parsed.data.from, secret), 302)
+})
+
+dashboardRoutes.post('/admin/dashboard/:id/reactivate', async (c) => {
+  const secret = getSecret(c)
+  if (!secret) return unauthorized(c)
+
+  const businessId = c.req.param('id')
+  const business = await businessRepo.findById(businessId)
+  if (!business) return c.html('<h1>404 — Not found</h1>', 404) as Response
+
+  const parsed = await readSuspensionForm(c)
+  const from = parsed.success ? parsed.data.from : undefined
+
+  if (business.suspendedAt) {
+    await businessRepo.setSuspension(businessId, null)
+    logger.warn(
+      { businessId, name: business.name, suspendedSince: business.suspendedAt },
+      'dashboard: business reactivated by admin',
+    )
+  }
+
+  return c.redirect(afterSuspensionRedirect(businessId, from, secret), 302)
 })
 
 // ── POST /:id/disconnect — Emma se va del número del cliente ──────────────────

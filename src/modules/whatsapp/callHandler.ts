@@ -54,6 +54,19 @@ export async function handleIncomingCall(
     return
   }
 
+  // Una lectura antes de colgar: un negocio suspendido no toca la llamada, que
+  // sigue sonando en el celular del dueño como si Emma no existiera.
+  const businessResult = await businessService.getById(businessId)
+  if (!businessResult.ok) {
+    log.error({ code: businessResult.error.code }, 'business not found for incoming call')
+    return
+  }
+  const business = businessResult.data
+  if (businessService.isSuspended(business)) {
+    log.info({ callId: call.id }, 'call ignored: business suspended')
+    return
+  }
+
   // Hang up first — the caller is waiting while we do everything else.
   try {
     await deps.rejectCall(call.id, call.from)
@@ -67,13 +80,6 @@ export async function handleIncomingCall(
     log.warn({ from: call.from }, 'call from unsupported JID shape, no follow-up sent')
     return
   }
-
-  const businessResult = await businessService.getById(businessId)
-  if (!businessResult.ok) {
-    log.error({ code: businessResult.error.code }, 'business not found for incoming call')
-    return
-  }
-  const business = businessResult.data
 
   // The owner calling their own bot doesn't need a sales line back.
   // samePhone, not `===`: same format mismatch that broke the message routing.

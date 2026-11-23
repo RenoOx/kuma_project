@@ -131,6 +131,12 @@ async function dispatchReminder(appt: Appointment, kind: '24h' | '2h'): Promise<
     return 'disabled'
   }
 
+  // Suspendido por Vamvu: mismo trato que el switch apagado.
+  if (businessService.isSuspended(business)) {
+    log.info('reminder skipped: business suspended')
+    return 'disabled'
+  }
+
   const customer = await customerRepo.findById(appt.businessId, appt.customerId)
   if (!customer) {
     log.warn('reminder skipped: customer not found')

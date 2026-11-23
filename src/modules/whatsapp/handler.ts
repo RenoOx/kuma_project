@@ -1134,6 +1134,14 @@ async function processMessage(
   }
   const business = businessResult.data
 
+  // Suspendido por Vamvu: ni se guarda ni se contesta, sea cliente o dueño. Va
+  // antes de rutear y de persistir para que no gaste OpenAI ni acumule datos de
+  // un negocio que no paga. El dueño lo ve igual en su celular.
+  if (businessService.isSuspended(business)) {
+    log.info({ jid }, 'message ignored: business suspended')
+    return
+  }
+
   // WhatsApp puede esconder el número detrás de un LID. Si Baileys sabe el real,
   // o es el del dueño, se usa para rutear y registrar: sin esto el dueño de
   // Tecmin entró como cliente "+243795362852927" (2026-10-05).
@@ -2133,6 +2141,10 @@ async function recordOwnerPhoneMessage(params: {
     return
   }
   const business = businessResult.data
+  if (businessService.isSuspended(business)) {
+    log.info({ jid }, 'owner phone message ignored: business suspended')
+    return
+  }
   const phone = (await resolveLidPhone(businessId, jid, business.ownerWhatsappNumber)) ?? lidPhone
 
   // El chat con el número personal del dueño (donde le llegan los avisos) y el

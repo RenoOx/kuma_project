@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { PageLayout } from './components/layout/PageLayout.js'
-import { useUnauthorized } from './lib/authGate.js'
+import { useSuspended, useUnauthorized } from './lib/authGate.js'
 import { PanelNotice, PanelSessionProvider } from './lib/session.js'
 import { InboxPage } from './pages/InboxPage.js'
 
@@ -52,6 +52,7 @@ export function App(): React.JSX.Element {
 }
 
 function PanelShell(): React.JSX.Element {
+  const suspended = useSuspended()
   // The URL parsed fine but the server rejected the token — a link that was
   // revoked, rotated, or copied from another business. Replacing the whole
   // panel says that once, instead of every screen failing on its own.
@@ -60,6 +61,15 @@ function PanelShell(): React.JSX.Element {
       <PanelNotice
         title="El link dejó de funcionar"
         body="Tu token de acceso ya no es válido. Puede que lo hayan renovado — pedile a Vamvu Labs el link actualizado."
+      />
+    )
+  }
+
+  if (suspended) {
+    return (
+      <PanelNotice
+        title="Tu servicio de Emma está suspendido"
+        body="Emma no está respondiendo en tu WhatsApp. Escríbele a Vamvu Labs para reactivarlo."
       />
     )
   }

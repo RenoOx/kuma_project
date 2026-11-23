@@ -29,6 +29,21 @@ export async function create(data: NewBusiness, exec: Executor = db): Promise<Bu
   return row
 }
 
+/** `reason` string = suspende ahora con ese motivo; `null` = reactiva. */
+export async function setSuspension(
+  id: string,
+  suspension: { reason: string | null } | null,
+  exec: Executor = db,
+): Promise<Business> {
+  return update(
+    id,
+    suspension
+      ? { suspendedAt: new Date(), suspensionReason: suspension.reason }
+      : { suspendedAt: null, suspensionReason: null },
+    exec,
+  )
+}
+
 export async function update(
   id: string,
   data: Partial<NewBusiness>,

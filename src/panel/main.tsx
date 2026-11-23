@@ -3,15 +3,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App.js'
-import { isUnauthorized, markUnauthorized } from './lib/authGate.js'
+import { isPanelBlocked, markPanelBlocked } from './lib/authGate.js'
 import './styles/globals.css'
 
 // Every rejected query and mutation passes through here on its way to the
 // component that asked for it, which makes this the one place that can notice a
 // revoked token no matter which screen was polling when it happened.
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: markUnauthorized }),
-  mutationCache: new MutationCache({ onError: markUnauthorized }),
+  queryCache: new QueryCache({ onError: markPanelBlocked }),
+  mutationCache: new MutationCache({ onError: markPanelBlocked }),
   defaultOptions: {
     queries: {
       // The panel polls on its own schedule (see POLL_MS), so refetching on
@@ -20,7 +20,8 @@ const queryClient = new QueryClient({
       // A 401 means the link is wrong; retrying it three times just delays the
       // error screen the owner needs to see. Matched on the error's status
       // rather than its message, so a customer named "401" cannot trip it.
-      retry: (failureCount, error) => (isUnauthorized(error) ? false : failureCount < 2),
+      // Lo mismo con un negocio suspendido.
+      retry: (failureCount, error) => (isPanelBlocked(error) ? false : failureCount < 2),
     },
   },
 })
