@@ -24,7 +24,7 @@
  * THE CONVENTION IS LORE: a new marker that does not open this way will reach
  * the owner's inbox with its instruction text intact. Keep the prefix.
  */
-const MARKER_PATTERN = /^\[El (?:paciente|cliente) .*\]$/s
+const MARKER_PATTERN = /^\[El (?:paciente|cliente|dueño) .*\]$/s
 
 interface MarkerRendering {
   /** Matched against the marker's text, first hit wins. */
@@ -35,6 +35,10 @@ interface MarkerRendering {
 // Ordered: payment captures are also images, so they have to be recognised
 // before the plain-image rule.
 const MARKER_RENDERINGS: MarkerRendering[] = [
+  // Lo que el dueño mandó desde su celular (buildOwnerPhoneMarker). Primero: la
+  // regla de imagen de abajo también lo agarraría como "Imagen recibida".
+  { test: /^\[El dueño envió una imagen/, label: '📷 Imagen enviada desde el celular' },
+  { test: /^\[El dueño envió/, label: '📎 Archivo enviado desde el celular' },
   // La marca de una foto que llegó antes de que Emma la pidiera (earlyImages en
   // el archivo del negocio). Va primero: menciona el pago y el DNI, y sin esto
   // caía en el genérico y el Inbox mostraba un segundo adjunto que no existió.
@@ -59,11 +63,23 @@ export function buildImagePlaceholder(caption: string | null): string {
 }
 
 /**
+ * Una foto o un archivo que el dueño mandó desde su celular al chat de un
+ * cliente. Lo lee el modelo en el historial (como turno del asistente) y el
+ * panel lo traduce con `toPanelDisplay`. `what` es la frase del formato: "una
+ * imagen", o la de `describeFormat`.
+ */
+export function buildOwnerPhoneMarker(what: string, caption: string | null): string {
+  const said = caption?.trim() ? ` con el texto: "${caption.trim()}"` : ''
+  return `[El dueño envió ${what} desde su celular${said}]`
+}
+
+/**
  * The panel form. Addressed to the owner.
  *
- * V1 does not render the media itself — it is never persisted, only forwarded
- * over WhatsApp — so the inbox says what arrived and keeps the caption, which
- * is the part that carries information the owner cannot get anywhere else.
+ * Desde el 2026-11-09 la foto en sí va aparte, en `messages.attachments`, y el
+ * chat la dibuja arriba de esta etiqueta. La etiqueta sigue diciendo qué llegó
+ * y conserva el texto que la acompañaba; si la foto no se pudo guardar, es lo
+ * único que queda.
  *
  * Anything that is not a marker passes through untouched, so a customer's own
  * words are never replaced by a label.

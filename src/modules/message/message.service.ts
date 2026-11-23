@@ -1,5 +1,10 @@
 import { db } from '@/db/client.js'
-import type { Message, MessageRole, MessageSenderType } from '@/db/schema/index.js'
+import type {
+  Message,
+  MessageAttachment,
+  MessageRole,
+  MessageSenderType,
+} from '@/db/schema/index.js'
 import * as conversationRepo from '@/modules/conversation/conversation.repo.js'
 import { AppError, NotFoundError } from '@/shared/errors.js'
 import { err, ok, type Result } from '@/shared/result.js'
@@ -18,6 +23,8 @@ export interface AppendParams {
   // inbound side. See messages.senderType for why this is not derivable from
   // `role`.
   senderType?: MessageSenderType
+  /** Los archivos que viajaron con el mensaje, para el chat del panel. */
+  attachments?: MessageAttachment[]
 }
 
 export async function append(params: AppendParams): Promise<Result<Message>> {
@@ -32,6 +39,8 @@ export async function append(params: AppendParams): Promise<Result<Message>> {
           toolCalls: params.toolCalls ?? null,
           toolCallId: params.toolCallId ?? null,
           senderType: params.senderType ?? 'bot',
+          attachments:
+            params.attachments && params.attachments.length > 0 ? params.attachments : null,
         },
         tx,
       )

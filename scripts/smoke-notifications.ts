@@ -70,6 +70,9 @@ function makeFakeClient(): { client: WhatsappClient; sent: FakeSend[] } {
     usernameFor() {
       return null
     },
+    wasSentByBot() {
+      return false
+    },
     async rejectCall() {
       // noop
     },

@@ -163,6 +163,7 @@ panelRoutes.get('/api/panel/:businessId/conversations/:conversationId/messages',
   // used to ride along as a qualification. The timestamp is the fact itself.
   return c.json({
     ...page,
+    data: await panelService.withSignedAttachments(businessId, page.data),
     humanTakeoverAt: conversation.humanTakeoverAt?.toISOString() ?? null,
     emmaEnabled: conversation.emmaEnabled,
   })

@@ -124,9 +124,9 @@ async function startWhatsappFor(businessId: string, whatsappNumber: string): Pro
     })
   })
 
-  client.onMessage((raw) => {
+  client.onMessage((raw, upsertType) => {
     touchActivity(businessId)
-    return handleIncomingMessage(raw, businessId, client.sendMessage)
+    return handleIncomingMessage(raw, businessId, client.sendMessage, upsertType)
   })
 
   client.onCall((call) => {

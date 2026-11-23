@@ -1,5 +1,6 @@
 import { logger } from '@/config/logger.js'
 import * as conversationService from '@/modules/conversation/conversation.service.js'
+import * as eventsRepo from '@/modules/events/events.repo.js'
 import * as messageService from '@/modules/message/message.service.js'
 
 /**
@@ -18,6 +19,40 @@ import * as messageService from '@/modules/message/message.service.js'
  * time this runs, so a lost transcript row must not turn a delivered
  * notification into a caller-visible error.
  */
+/** El tipo de evento que el panel muestra dentro del chat del cliente. */
+export const OWNER_NOTIFIED_EVENT = 'owner_notified'
+
+/**
+ * Deja en el chat del CLIENTE la copia exacta de lo que se le avisó al dueño.
+ *
+ * El hilo del dueño (`recordOwnerNotification`) es para el asistente del dueño,
+ * y el Inbox no lo lista. Sin esto, desde el panel no había forma de saber qué
+ * le llegó al dueño sobre un cliente, ni cuándo (pedido de Renzo, 2026-11-09).
+ * Va como evento y no como mensaje: un mensaje entraría al historial que lee
+ * Emma, y el aviso no es algo que se le dijo al cliente.
+ *
+ * Nunca falla hacia afuera, por la misma razón que `recordOwnerNotification`.
+ */
+export async function recordOwnerNoticeInChat(
+  businessId: string,
+  conversationId: string,
+  text: string,
+): Promise<void> {
+  try {
+    await eventsRepo.create({
+      businessId,
+      conversationId,
+      type: OWNER_NOTIFIED_EVENT,
+      payload: { text },
+    })
+  } catch (err) {
+    logger.warn(
+      { err, businessId, conversationId },
+      'owner notice sent but not recorded in the chat',
+    )
+  }
+}
+
 export async function recordOwnerNotification(businessId: string, text: string): Promise<void> {
   const thread = await conversationService.findOrCreateOwnerThread(businessId)
   if (!thread.ok) {

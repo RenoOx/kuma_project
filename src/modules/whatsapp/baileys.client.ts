@@ -18,7 +18,14 @@ import { logger as rootLogger } from '@/config/logger.js'
 import { withTimeout } from '@/shared/withTimeout.js'
 import { classifyDisconnect, type DisconnectKind, disconnectReasonName } from './sessionPolicy.js'
 
-export type MessageHandler = (raw: WAMessage) => Promise<void> | void
+/**
+ * Cómo entregó Baileys el mensaje. `notify`: llegó en vivo. `append`: WhatsApp
+ * lo tenía guardado mientras el socket estaba caído y lo entrega al reconectar
+ * (`node.attrs.offline` en Baileys 7), o es el eco de un mensaje que mandó el
+ * propio bot (`emitOwnEvents`).
+ */
+export type UpsertType = 'notify' | 'append'
+export type MessageHandler = (raw: WAMessage, upsertType: UpsertType) => Promise<void> | void
 export interface DisconnectInfo {
   kind: DisconnectKind
   statusCode: number | undefined
@@ -106,6 +113,13 @@ export interface WhatsappClient {
    * (atributo `username`, que Baileys no mapea), o null.
    */
   usernameFor(lid: string): string | null
+  /**
+   * Si este socket mandó el mensaje con ese id (lo anotó `rememberSentMessage`).
+   * Separa un `fromMe` del bot de uno que el dueño escribió en su celular. El
+   * eco del bot puede llegar antes de que el id quede anotado: quien pregunta
+   * tiene que esperar un momento (ver `OWN_ECHO_SETTLE_MS` en handler.ts).
+   */
+  wasSentByBot(messageId: string): boolean
   /** Hangs up an incoming call so the caller isn't left ringing. */
   rejectCall(callId: string, callFrom: string): Promise<void>
   requestPairingCode(phoneNumber: string): Promise<string>
@@ -282,7 +296,13 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
 
   sock.ev.on('messages.upsert', ({ messages, type }) => {
     log.info({ type, count: messages.length }, 'messages.upsert received')
-    if (type !== 'notify') return
+    // `append` también pasa (2026-11-09): es como llega lo que un cliente
+    // escribió mientras el socket estaba caído (un deploy, un reinicio, una
+    // reconexión). Con solo `notify`, esos mensajes se tiraban sin guardarse ni
+    // avisar a nadie: un alumno de Tecmin eligió su opción y nunca tuvo
+    // respuesta. Los ecos de lo que manda el bot también vienen como `append`;
+    // el handler los reconoce por `fromMe` + `wasSentByBot`.
+    if (type !== 'notify' && type !== 'append') return
     for (const m of messages) {
       // debug, not info: the batch line above already records that traffic
       // arrived and how much. This per-message shape dump is a development aid,
@@ -310,7 +330,7 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
         // processes at once. Dedup is unaffected — claimMessageId runs in the
         // handler's synchronous prologue, before any await.
         try {
-          void Promise.resolve(handler(m)).catch((err) => {
+          void Promise.resolve(handler(m, type)).catch((err) => {
             log.error({ err }, 'message handler rejected')
           })
         } catch (err) {
@@ -513,6 +533,9 @@ export async function makeWhatsappClient(opts: WhatsappClientOptions): Promise<W
     },
     usernameFor(lid) {
       return usernameByLid.get(lid) ?? null
+    },
+    wasSentByBot(messageId) {
+      return sentMessages.has(messageId)
     },
     onCall(handler) {
       callHandlers.push(handler)

@@ -178,6 +178,7 @@ describe('la invitación de cierre de un paso', () => {
       content,
       toolCalls: null,
       toolCallId: null,
+      attachments: null,
       createdAt: new Date('2026-09-23T12:00:00Z'),
     }
   }

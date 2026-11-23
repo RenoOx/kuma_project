@@ -1,5 +1,5 @@
 import { logger } from '@/config/logger.js'
-import type { Business, PaymentVerificationStatus } from '@/db/schema/index.js'
+import type { Business, MessageAttachment, PaymentVerificationStatus } from '@/db/schema/index.js'
 import * as paymentVerificationRepo from '@/modules/appointment/paymentVerification.repo.js'
 import type { OperatingHours } from '@/modules/business/business.settings.js'
 import { parseBusinessSettings } from '@/modules/business/business.settings.js'
@@ -297,4 +297,41 @@ export function nicheOf(business: Business): string {
 export function operatingHoursOf(business: Business): OperatingHours | null {
   const settings = parseBusinessSettings(business.id, business.settings)
   return settings.ok ? settings.data.operatingHours : null
+}
+
+/** Un archivo del chat como lo recibe el panel: link firmado por una hora. */
+export interface ChatAttachmentView {
+  url: string
+  type: MessageAttachment['type']
+}
+
+/**
+ * Cambia las keys de los adjuntos de una página del chat por links firmados.
+ * Firmar es una cuenta local (no va a S3), así que alcanza con hacerlo al leer.
+ * Un adjunto que no se pudo firmar se omite con un warn: la burbuja conserva su
+ * texto.
+ */
+export async function withSignedAttachments(
+  businessId: string,
+  messages: panelRepo.PanelMessage[],
+): Promise<
+  Array<Omit<panelRepo.PanelMessage, 'attachments'> & { attachments?: ChatAttachmentView[] }>
+> {
+  return Promise.all(
+    messages.map(async ({ attachments, ...message }) => {
+      if (!attachments || attachments.length === 0) return message
+      const signed: ChatAttachmentView[] = []
+      for (const attachment of attachments) {
+        const url = await getPresignedUrl(businessId, attachment.s3Key)
+        if (url.ok) signed.push({ url: url.data, type: attachment.type })
+        else {
+          logger.warn(
+            { businessId, messageId: message.id, code: url.error.code },
+            'could not sign a chat attachment for the panel',
+          )
+        }
+      }
+      return signed.length > 0 ? { ...message, attachments: signed } : message
+    }),
+  )
 }

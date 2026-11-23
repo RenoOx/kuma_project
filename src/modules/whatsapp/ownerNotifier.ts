@@ -5,7 +5,7 @@ import { AppError } from '@/shared/errors.js'
 import { preview } from '@/shared/logRedact.js'
 import { err, ok, type Result } from '@/shared/result.js'
 import * as clientRegistry from './clientRegistry.js'
-import { recordOwnerNotification } from './ownerThreadLog.js'
+import { recordOwnerNoticeInChat, recordOwnerNotification } from './ownerThreadLog.js'
 import { enqueueSend } from './sendQueue.js'
 
 // Builds the Baileys JID for a phone number stored in E.164 (+51999...).
@@ -26,6 +26,12 @@ export interface NotifyOwnerOptions {
    * reaches the transcript through the tool result anyway.
    */
   recordInOwnerThread?: boolean
+  /**
+   * El chat del cliente del que trata el aviso. Con él, el aviso queda también
+   * en ese chat del panel (`recordOwnerNoticeInChat`). Sin él (un reporte, una
+   * cita sin conversación), solo en el hilo del dueño.
+   */
+  conversationId?: string
 }
 
 // Sends a proactive message to the business owner via WhatsApp.
@@ -89,6 +95,9 @@ export async function notifyOwner(
   // model would read the reply before the notification that prompted it.
   if (opts.recordInOwnerThread !== false) {
     await recordOwnerNotification(businessId, text)
+  }
+  if (opts.conversationId) {
+    await recordOwnerNoticeInChat(businessId, opts.conversationId, text)
   }
 
   return ok(undefined)

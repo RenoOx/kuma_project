@@ -29,6 +29,7 @@ function row(
         }))
       : null,
     toolCallId: extra.toolCallId ?? null,
+    attachments: null,
     createdAt: new Date(2026, 8, 30, 18, 0, seq),
   }
 }

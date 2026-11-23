@@ -92,11 +92,23 @@ export interface PanelTag {
 
 export type SenderType = 'customer' | 'bot' | 'human'
 
+/** Un aviso del chat que no es un mensaje (ver chatNotices.ts del backend). */
+export type ChatNoticeKind = 'owner_notified' | 'emma_paused'
+
 export interface PanelMessage {
   id: string
   senderType: SenderType
   content: string
   createdAt: string
+  /** Solo en un aviso: qué se le avisó al dueño, o por qué Emma se pausó. */
+  notice?: ChatNoticeKind
+  /** Lo que viajó con el mensaje (fotos, videos, PDF), con link firmado por una hora. */
+  attachments?: ChatAttachment[]
+}
+
+export interface ChatAttachment {
+  url: string
+  type: 'image' | 'pdf' | 'audio' | 'video'
 }
 
 export interface MessagePage extends Paged<PanelMessage> {

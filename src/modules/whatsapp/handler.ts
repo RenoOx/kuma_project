@@ -5,9 +5,10 @@ import {
   type WAMessage,
   type WAMessageKey,
 } from '@whiskeysockets/baileys'
+import { nanoid } from 'nanoid'
 import { env } from '@/config/env.js'
 import { logger } from '@/config/logger.js'
-import type { Appointment, Business, Customer } from '@/db/schema/index.js'
+import type { Appointment, Business, Customer, MessageAttachment } from '@/db/schema/index.js'
 import * as appointmentRepo from '@/modules/appointment/appointment.repo.js'
 import * as appointmentService from '@/modules/appointment/appointment.service.js'
 import * as paymentVerificationService from '@/modules/appointment/paymentVerification.service.js'
@@ -26,8 +27,9 @@ import * as llmService from '@/modules/llm/llm.service.js'
 import type { ToolAttachment } from '@/modules/llm/toolExecutor.js'
 import * as mediaService from '@/modules/media/media.service.js'
 import * as messageService from '@/modules/message/message.service.js'
-import { buildImagePlaceholder } from '@/modules/message/messageDisplay.js'
+import { buildImagePlaceholder, buildOwnerPhoneMarker } from '@/modules/message/messageDisplay.js'
 import * as ownerAssistantService from '@/modules/ownerAssistant/ownerAssistant.service.js'
+import type { UpsertType } from '@/modules/whatsapp/baileys.client.js'
 import * as clientRegistry from '@/modules/whatsapp/clientRegistry.js'
 import {
   buildStepImageNotice,
@@ -36,6 +38,7 @@ import {
   pauseOnImage,
   shouldPauseAfterImage,
 } from '@/modules/whatsapp/customerImage.js'
+import { isTooOldToAnswer, messageAgeMs } from '@/modules/whatsapp/delivery.js'
 import { bufferImage, flushImagesNow, hasPendingImages } from '@/modules/whatsapp/imageBuffer.js'
 import {
   consumeImageExpectation,
@@ -69,7 +72,10 @@ import {
   sendWithPresence,
 } from '@/modules/whatsapp/outbound.js'
 import * as ownerNotifier from '@/modules/whatsapp/ownerNotifier.js'
-import { recordOwnerNotification } from '@/modules/whatsapp/ownerThreadLog.js'
+import {
+  recordOwnerNoticeInChat,
+  recordOwnerNotification,
+} from '@/modules/whatsapp/ownerThreadLog.js'
 import {
   PLACEHOLDER_WAIT_MS,
   settle as settlePlaceholder,
@@ -110,11 +116,17 @@ function notifyOwnerUnanswered(params: {
     `Cliente: ${who} (${params.phone})`,
     ...(params.findHints ?? []),
     `Motivo: ${params.reason}`,
-    'Su mensaje está en el Inbox: respóndele desde el panel.',
+    'Respóndele por WhatsApp.',
   ].join('\n')
-  ownerNotifier.notifyOwner(params.businessId, text).catch((err) => {
-    params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
-  })
+  ownerNotifier
+    .notifyOwner(
+      params.businessId,
+      text,
+      params.conversationId ? { conversationId: params.conversationId } : {},
+    )
+    .catch((err) => {
+      params.log.warn({ err }, 'notifyOwner for an unanswered message rejected unexpectedly')
+    })
   // Sin esto, "Emma no pudo responder" solo existía en el WhatsApp del dueño: el
   // panel no tenía cómo contarlo.
   if (params.conversationId) {
@@ -174,7 +186,7 @@ export type SendFn = (jid: string, text: string) => Promise<void>
 
 // Structural subset of the Pino logger, so helpers accept a child logger
 // without fighting Pino's generics over custom-level type parameters.
-type HandlerLogger = Pick<typeof logger, 'info' | 'warn' | 'error'>
+type HandlerLogger = Pick<typeof logger, 'debug' | 'info' | 'warn' | 'error'>
 
 // ── Anti-ban layer ───────────────────────────────
 // Este número pertenece al cliente. Un baneo de
@@ -452,6 +464,8 @@ async function handleCustomerImage(params: {
   log: HandlerLogger
   /** Si la foto vino en un grupo: la pausa y la respuesta se dejan para la última. */
   burst?: ImageBurst
+  /** Los bytes que ya bajó processMessage; null si la descarga falló. */
+  downloaded?: Buffer | null
 }): Promise<'done' | 'reply_with_llm'> {
   const { raw, business, customer, conversationId, caption, jid, send, log, burst } = params
   const lastOfBurst = !burst || burst.index === burst.total - 1
@@ -568,7 +582,8 @@ async function handleCustomerImage(params: {
     (onImage?.forward === true || (forwardImages && wanted)) &&
     Boolean(business.ownerWhatsappNumber)
   const needsArchive = intent !== null && requiresDeposit
-  const image = needsRelay || needsArchive ? await downloadImage(raw, log) : null
+  const image =
+    needsRelay || needsArchive ? (params.downloaded ?? (await downloadImage(raw, log))) : null
 
   // Archived before the verification row is opened, so the row can point at it.
   // Best-effort, exactly like the Google Calendar event in bookAppointment: a
@@ -616,6 +631,7 @@ async function handleCustomerImage(params: {
       payment: intent,
       awaitsVerification: needsArchive,
       ...(stepCaption ? { stepCaption } : {}),
+      conversationId,
       log,
     })
   } else {
@@ -914,6 +930,31 @@ async function bookFromPaymentCapture(params: {
  * same bytes — the owner's relay and the S3 archive — and asking WhatsApp for
  * them twice would double the bandwidth for one message.
  */
+/**
+ * Guarda la foto del cliente en S3 para que el chat del panel la muestre igual
+ * que el celular (2026-11-09). Best-effort: si el bucket falla o la foto no pasa
+ * la validación, el mensaje queda como antes, solo con su texto.
+ */
+async function storeCustomerImage(
+  businessId: string,
+  conversationId: string,
+  bytes: Buffer,
+  log: HandlerLogger,
+): Promise<MessageAttachment | null> {
+  const stored = await mediaService.uploadMedia(
+    { kind: 'customer_image', businessId, conversationId, mediaId: nanoid() },
+    bytes,
+  )
+  if (!stored.ok) {
+    log.warn(
+      { code: stored.error.code, context: stored.error.logContext, conversationId },
+      'could not store the customer image for the panel',
+    )
+    return null
+  }
+  return { s3Key: stored.data.key, type: stored.data.type }
+}
+
 async function downloadImage(raw: WAMessage, log: HandlerLogger): Promise<Buffer | null> {
   try {
     return await downloadMediaMessage(raw, 'buffer', {})
@@ -939,6 +980,8 @@ async function relayImage(params: {
   awaitsVerification: boolean
   /** El aviso por paso ya armado; si viene, reemplaza al de siempre. */
   stepCaption?: string
+  /** El chat del cliente, donde queda la copia del aviso. */
+  conversationId: string
   log: HandlerLogger
 }): Promise<boolean> {
   const { image, business, customer, caption, pendingAppointment, purpose, payment, log } = params
@@ -974,6 +1017,9 @@ async function relayImage(params: {
   // reaches the assistant with the phone already in context instead of making
   // it ask the owner for a number Emma herself sent seconds earlier.
   await recordOwnerNotification(business.id, sent.data.caption)
+  // Y en el chat del cliente, para que el panel muestre qué le llegó al dueño.
+  // El texto es el pie de la foto; la foto en sí la muestra el chat.
+  await recordOwnerNoticeInChat(business.id, params.conversationId, sent.data.caption)
 
   return true
 }
@@ -1146,6 +1192,15 @@ async function processMessage(
       log.info('owner placeholder never filled: ignored')
       return
     }
+    // Una orden del dueño de hace medio día ("pausa el bot") que llegó al
+    // reconectar ya no es una orden: no se ejecuta.
+    if (isTooOldToAnswer(raw, Date.now())) {
+      log.warn(
+        { ageMs: messageAgeMs(raw, Date.now()) },
+        'offline message too old, owner message ignored',
+      )
+      return
+    }
     // Un negocio cuyo archivo apaga el asistente del dueño: Emma solo le
     // notifica, nunca le contesta (Tecmin, 2026-10-01: el dueño reenvía los
     // avisos, y una respuesta de la IA en ese hilo solo confunde).
@@ -1304,12 +1359,20 @@ async function processMessage(
   }
   const conversation = conversationResult.data
 
+  // La foto se baja UNA vez: se guarda para el chat del panel y los mismos bytes
+  // van al reenvío al dueño, si toca (handleCustomerImage).
+  const imageBytes = payload.kind === 'image' ? await downloadImage(raw, log) : null
+  const imageAttachment = imageBytes
+    ? await storeCustomerImage(businessId, conversation.id, imageBytes, log)
+    : null
+
   const userMsgResult = await messageService.append({
     businessId,
     conversationId: conversation.id,
     role: 'user',
     content: text,
     senderType: 'customer',
+    ...(imageAttachment ? { attachments: [imageAttachment] } : {}),
   })
   if (!userMsgResult.ok) {
     log.error(
@@ -1323,6 +1386,7 @@ async function processMessage(
       findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       reason: 'no se pudo guardar su mensaje en la base',
       log,
+      conversationId: conversation.id,
     })
     return
   }
@@ -1396,6 +1460,29 @@ async function processMessage(
     return
   }
 
+  // DEMASIADO VIEJO — WhatsApp lo entregó al reconectar, horas después de que
+  // el cliente lo escribió. Ya quedó guardado arriba; contestarlo ahora sería
+  // seguir una conversación que el cliente dejó hace medio día. Lo ve el dueño.
+  // Las fotos siguen su camino: una captura de pago tardía igual le tiene que
+  // llegar al dueño, y la respuesta ("Recibido ✅") sigue siendo cierta.
+  if (payload.kind !== 'image' && isTooOldToAnswer(raw, Date.now())) {
+    const ageMs = messageAgeMs(raw, Date.now()) ?? 0
+    log.warn(
+      { conversationId: conversation.id, phone, kind: payload.kind, ageMs },
+      'offline message too old, stored only',
+    )
+    notifyOwnerUnanswered({
+      businessId,
+      customerName: customer.name,
+      phone: customerContactLabel(customer),
+      findHints: customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
+      reason: `su mensaje llegó ${Math.round(ageMs / 3_600_000)} h tarde (WhatsApp estuvo desconectado)`,
+      log,
+      conversationId: conversation.id,
+    })
+    return
+  }
+
   // BOT PAUSED — keep the customer record + the message, but skip LLM and
   // escalate so a human notices.
   const paused = await businessService.isBotPaused(businessId)
@@ -1443,9 +1530,11 @@ async function processMessage(
       ...customerFindHints(customer, { lastText: payload.kind === 'text' ? text : null }),
       'Conversación marcada como escalada.',
     ].join('\n')
-    ownerNotifier.notifyOwner(businessId, pausedText).catch((err) => {
-      log.warn({ err }, 'notifyOwner during paused flow rejected unexpectedly')
-    })
+    ownerNotifier
+      .notifyOwner(businessId, pausedText, { conversationId: conversation.id })
+      .catch((err) => {
+        log.warn({ err }, 'notifyOwner during paused flow rejected unexpectedly')
+      })
 
     try {
       await sendWithPresence({ businessId, jid, text: PAUSED_REPLY, send, readKey: raw.key })
@@ -1468,6 +1557,7 @@ async function processMessage(
       jid,
       send,
       log,
+      downloaded: imageBytes,
       ...(payload.burst ? { burst: payload.burst } : {}),
     })
     // Una foto que llegó antes de tiempo en un negocio con `earlyImages`: no se
@@ -1799,13 +1889,11 @@ export function handleIncomingMessage(
   raw: WAMessage,
   businessId: string,
   send: SendFn,
+  /** `append` = WhatsApp lo entregó al reconectar, o es el eco de un envío del bot. */
+  upsertType: UpsertType = 'notify',
 ): Promise<void> {
   const log = logger.child({ component: 'whatsapp.handler', businessId })
 
-  if (raw.key.fromMe) {
-    log.info({ jid: raw.key.remoteJid }, 'handler skip: fromMe')
-    return Promise.resolve()
-  }
   const jid = raw.key.remoteJid
   if (!jid) {
     log.info('handler skip: no remoteJid')
@@ -1815,6 +1903,10 @@ export function handleIncomingMessage(
     log.info({ jid }, 'handler skip: group or status')
     return Promise.resolve()
   }
+
+  // Salió de este número: o lo mandó el bot (el eco de cada envío), o lo
+  // escribió el dueño en su celular. Lo segundo se guarda y pausa a Emma.
+  if (raw.key.fromMe) return handleOwnPhoneMessage(raw, businessId, jid, log)
 
   const messageId = raw.key.id
   const watchKey = messageId ? `${businessId}:${messageId}` : null
@@ -1884,6 +1976,15 @@ export function handleIncomingMessage(
   // keep a quiet number looking online all day.
   presence.markActive(businessId)
 
+  // Lo que el cliente escribió mientras el socket estaba caído. Hasta el
+  // 2026-11-09 esto no llegaba nunca acá (ver baileys.client.ts).
+  if (upsertType === 'append') {
+    log.info(
+      { jid, phone, messageId, ageMs: messageAgeMs(raw, Date.now()) },
+      'offline message accepted',
+    )
+  }
+
   log.info(
     incoming.kind === 'text'
       ? { phone, textLen: incoming.text.length, textPreview: preview(incoming.text) }
@@ -1939,6 +2040,162 @@ export function handleIncomingMessage(
   const quoted = quotedSummaryOf(raw)
   const text = quoted ? `[Sobre: "${quoted}"] ${incoming.text}` : incoming.text
   return dispatchText(raw, businessId, send, jid, phone, text, log)
+}
+
+/**
+ * Cuánto esperar antes de preguntarle al cliente de WhatsApp si un `fromMe` lo
+ * mandó el bot. Baileys emite el eco en un `process.nextTick` justo después de
+ * mandarlo, y `rememberSentMessage` anota el id recién cuando vuelve
+ * `sendMessage`: sin la espera, el eco puede llegar antes que la anotación, y
+ * cada envío de Emma la pausaría a ella misma. El eco llega en milisegundos;
+ * dos segundos sobran.
+ */
+const OWN_ECHO_SETTLE_MS = 2_000
+
+/**
+ * Un mensaje que salió del número del negocio. Si no lo mandó el bot, lo
+ * escribió el dueño en su celular (o en su WhatsApp Web): se guarda en el chat
+ * del cliente como respuesta humana —el panel la muestra y Emma la ve en su
+ * historial— y Emma se pausa en ese chat (pedido de Renzo, 2026-11-09: el dueño
+ * que contesta está atendiendo él). La pausa es la misma de la foto y del
+ * Inbox: dura hasta que alguien la reactive.
+ *
+ * Supone que el negocio no tiene respuestas automáticas de WhatsApp Business
+ * (bienvenida, ausencia): salen del celular igual y pausarían a Emma con cada
+ * cliente nuevo. Tecmin no tiene (2026-11-09). El log lleva el texto para
+ * detectarlo si un negocio las prende.
+ */
+async function handleOwnPhoneMessage(
+  raw: WAMessage,
+  businessId: string,
+  jid: string,
+  log: HandlerLogger,
+): Promise<void> {
+  const messageId = raw.key.id
+  const incoming = classifyIncoming(raw)
+  // Ediciones, borrados, reacciones y el ruido de protocolo que el celular
+  // sincroniza: nada que mostrar.
+  if (!messageId || incoming.kind === 'ignorable') {
+    log.debug({ jid }, 'handler skip: fromMe without payload')
+    return
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, OWN_ECHO_SETTLE_MS))
+  const client = clientRegistry.getClient(businessId)
+  if (!client) {
+    // Sin el cliente no hay cómo saber si fue el bot: ante la duda no se pausa.
+    log.warn({ jid, messageId }, 'handler skip: fromMe with no client to tell bot sends apart')
+    return
+  }
+  if (client.wasSentByBot(messageId)) {
+    log.debug({ jid, messageId }, 'handler skip: fromMe sent by the bot')
+    return
+  }
+  if (!claimMessageId(`${businessId}:${messageId}`)) return
+
+  const key = raw.key as { remoteJidAlt?: string }
+  const lidPhone =
+    jidToPhone(jid) ??
+    jidToPhone(key.remoteJidAlt) ??
+    (/^\d+@lid$/.test(jid) ? `+${jid.slice(0, jid.indexOf('@'))}` : null)
+  if (!lidPhone) {
+    log.warn({ jid, keyShape: Object.keys(raw.key) }, 'owner phone message: no phone in chat jid')
+    return
+  }
+
+  const content =
+    incoming.kind === 'text'
+      ? incoming.text
+      : incoming.kind === 'image'
+        ? buildOwnerPhoneMarker('una imagen', incoming.caption)
+        : buildOwnerPhoneMarker(describeFormat(incoming.format), null)
+  if (content.trim() === '') return
+
+  // El mismo candado que los mensajes del cliente: el orden del chat queda
+  // como pasó, y no se crean dos conversaciones si los dos escriben a la vez.
+  return withSenderLock(`${businessId}:${lidPhone}`, () =>
+    recordOwnerPhoneMessage({ raw, businessId, jid, lidPhone, content, log }),
+  )
+}
+
+async function recordOwnerPhoneMessage(params: {
+  raw: WAMessage
+  businessId: string
+  jid: string
+  lidPhone: string
+  content: string
+  log: HandlerLogger
+}): Promise<void> {
+  const { raw, businessId, jid, lidPhone, content, log } = params
+  const businessResult = await businessService.getById(businessId)
+  if (!businessResult.ok) {
+    log.error({ code: businessResult.error.code }, 'business not found for owner phone message')
+    return
+  }
+  const business = businessResult.data
+  const phone = (await resolveLidPhone(businessId, jid, business.ownerWhatsappNumber)) ?? lidPhone
+
+  // El chat con el número personal del dueño (donde le llegan los avisos) y el
+  // "mensaje a mí mismo" no son chats de clientes.
+  if (samePhone(business.ownerWhatsappNumber, phone) || samePhone(business.whatsappNumber, phone)) {
+    log.debug({ jid }, 'owner phone message in the owner or self chat: ignored')
+    return
+  }
+
+  // Sin pushName: en un `fromMe` es el nombre del propio negocio, no del cliente.
+  const customerResult = await customerService.getOrCreate(businessId, phone, undefined, jid)
+  if (!customerResult.ok) {
+    log.error(
+      { code: customerResult.error.code },
+      'owner phone message: getOrCreate customer failed',
+    )
+    return
+  }
+  const conversationResult = await conversationService.getOrCreateOpen(
+    businessId,
+    customerResult.data.id,
+  )
+  if (!conversationResult.ok) {
+    log.error(
+      { code: conversationResult.error.code },
+      'owner phone message: getOrCreateOpen conversation failed',
+    )
+    return
+  }
+  const conversation = conversationResult.data
+
+  // `assistant` + `human`: el mismo formato que una respuesta desde el panel.
+  const appended = await messageService.append({
+    businessId,
+    conversationId: conversation.id,
+    role: 'assistant',
+    content,
+    senderType: 'human',
+  })
+  if (!appended.ok) {
+    log.error({ code: appended.error.code }, 'owner phone message: append failed')
+    return
+  }
+
+  if (!conversation.emmaEnabled) {
+    log.info({ conversationId: conversation.id }, 'owner reply from phone recorded')
+    return
+  }
+  try {
+    await conversationRepo.setEmmaEnabled(businessId, conversation.id, false)
+    await eventsRepo.create({
+      businessId,
+      conversationId: conversation.id,
+      type: 'emma_paused_by_owner_reply',
+      payload: { messageId: raw.key.id ?? null, state: conversation.state },
+    })
+    log.info(
+      { conversationId: conversation.id, textPreview: preview(content) },
+      'emma paused: owner replied from phone',
+    )
+  } catch (err) {
+    log.error({ err, conversationId: conversation.id }, 'owner phone message: pause failed')
+  }
 }
 
 /**

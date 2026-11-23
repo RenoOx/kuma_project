@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   exists,
+  gt,
   gte,
   ilike,
   inArray,
@@ -23,6 +24,8 @@ import {
   conversations,
   conversationTags,
   customers,
+  events,
+  type MessageAttachment,
   messages,
   type Tag,
   tags as tagsTable,
@@ -33,6 +36,12 @@ import { toPanelDisplay } from '@/modules/message/messageDisplay.js'
 import * as tagRepo from '@/modules/tag/tag.repo.js'
 import { appointmentName, formatPersonName } from '@/shared/name.js'
 import { isLidPhone, waUsernameOf } from '@/shared/phone.js'
+import {
+  CHAT_NOTICE_EVENT_TYPES,
+  type ChatNoticeKind,
+  interleaveNotices,
+  noticeFromEvent,
+} from './chatNotices.js'
 import { REAL_CUSTOMER, REAL_CUSTOMER_THREAD } from './simulatorThreads.js'
 
 // Every query in this file filters on business_id, without exception — the
@@ -287,6 +296,29 @@ export interface PanelMessage {
   senderType: string
   content: string
   createdAt: string
+  /**
+   * Presente solo en un aviso del chat (qué se le avisó al dueño, por qué Emma
+   * se pausó): no es un mensaje, y el panel lo dibuja aparte. Ver chatNotices.ts.
+   */
+  notice?: ChatNoticeKind
+  /** Las keys de lo que viajó con el mensaje. La ruta las cambia por links firmados. */
+  attachments?: MessageAttachment[]
+}
+
+/**
+ * Qué filas son el chat que ve el dueño: las del cliente y las de Emma o el
+ * dueño, con texto o con archivos. Una de assistant que solo llevaba tool_calls
+ * no tiene ni lo uno ni lo otro y dibujaría una burbuja en blanco. Compartido
+ * por la página y por el borde de los avisos (noticesForPage): si no coinciden,
+ * un aviso cae en la página equivocada.
+ */
+function visibleChatRows(businessId: string, conversationId: string) {
+  return and(
+    eq(messages.businessId, businessId),
+    eq(messages.conversationId, conversationId),
+    inArray(messages.role, ['user', 'assistant']),
+    or(sql`length(trim(${messages.content})) > 0`, isNotNull(messages.attachments)),
+  )
 }
 
 /**
@@ -312,15 +344,8 @@ export async function listMessages(
   exec: Executor = db,
 ): Promise<Page<PanelMessage>> {
   // Tool calls and system turns are Emma's internals. The owner wants the
-  // conversation, not the transcript of how it was produced. An assistant turn
-  // that only carried tool_calls has empty content and would render as a blank
-  // bubble, so it is filtered out by length rather than by role.
-  const where = and(
-    eq(messages.businessId, businessId),
-    eq(messages.conversationId, conversationId),
-    inArray(messages.role, ['user', 'assistant']),
-    sql`length(trim(${messages.content})) > 0`,
-  )
+  // conversation, not the transcript of how it was produced.
+  const where = visibleChatRows(businessId, conversationId)
 
   const [rows, [totalRow]] = await Promise.all([
     exec
@@ -328,6 +353,7 @@ export async function listMessages(
         id: messages.id,
         senderType: messages.senderType,
         content: messages.content,
+        attachments: messages.attachments,
         createdAt: messages.createdAt,
       })
       .from(messages)
@@ -341,17 +367,106 @@ export async function listMessages(
   // Same DESC + LIMIT + reverse pattern messageRepo.findRecentByConversation
   // uses: the index does the work, the reversal is free at this size.
   const chronological = order === 'desc' ? [...rows].reverse() : rows
+  const total = Number(totalRow?.n ?? 0)
+
+  // Solo en 'desc', que es como lee el chat del panel. 'asc' sigue sin avisos.
+  const notices =
+    order === 'desc'
+      ? await noticesForPage({
+          businessId,
+          conversationId,
+          page,
+          limit,
+          total,
+          chronological,
+          exec,
+        })
+      : []
 
   return {
-    data: chronological.map((r) => ({
-      id: r.id,
-      senderType: r.senderType,
-      content: toPanelDisplay(r.content),
-      createdAt: r.createdAt.toISOString(),
-    })),
-    total: Number(totalRow?.n ?? 0),
+    data: interleaveNotices(chronological, notices).map((item) =>
+      'notice' in item
+        ? {
+            id: item.id,
+            senderType: 'bot',
+            content: item.content,
+            createdAt: item.createdAt.toISOString(),
+            notice: item.notice,
+          }
+        : {
+            id: item.id,
+            senderType: item.senderType,
+            content: toPanelDisplay(item.content),
+            createdAt: item.createdAt.toISOString(),
+            ...(item.attachments && item.attachments.length > 0
+              ? { attachments: item.attachments }
+              : {}),
+          },
+    ),
+    total,
     page,
   }
+}
+
+/**
+ * Los avisos que caen en esta página del chat.
+ *
+ * Cada página se queda con los avisos posteriores a su mensaje más viejo y
+ * hasta el más viejo de la página más nueva (la anterior en número): así cada
+ * aviso sale en una sola página, aunque haya caído entre dos. La página más
+ * vieja no tiene piso, y la 1 no tiene techo.
+ */
+async function noticesForPage(params: {
+  businessId: string
+  conversationId: string
+  page: number
+  limit: number
+  total: number
+  chronological: Array<{ createdAt: Date }>
+  exec: Executor
+}) {
+  const { businessId, conversationId, page, limit, total, chronological, exec } = params
+  const oldest = chronological[0]
+  if (!oldest) return []
+  const isOldestPage = (page - 1) * limit + chronological.length >= total
+
+  // El más viejo de la página 1 a esta: el mensaje justo antes de esta página
+  // en orden descendente.
+  let ceiling: Date | null = null
+  if (page > 1) {
+    const [boundary] = await exec
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(visibleChatRows(businessId, conversationId))
+      .orderBy(desc(messages.createdAt))
+      .limit(1)
+      .offset((page - 1) * limit - 1)
+    ceiling = boundary?.createdAt ?? null
+  }
+
+  const rows = await exec
+    .select({
+      id: events.id,
+      type: events.type,
+      payload: events.payload,
+      createdAt: events.createdAt,
+    })
+    .from(events)
+    .where(
+      and(
+        eq(events.businessId, businessId),
+        eq(events.conversationId, conversationId),
+        inArray(events.type, [...CHAT_NOTICE_EVENT_TYPES]),
+        ...(isOldestPage ? [] : [gt(events.createdAt, oldest.createdAt)]),
+        ...(ceiling ? [lte(events.createdAt, ceiling)] : []),
+      ),
+    )
+    .orderBy(asc(events.createdAt))
+
+  return rows.flatMap((row) => {
+    const notice = noticeFromEvent(row)
+    return notice ? [notice] : []
+  })
 }
 
 /** Tenant-scoped lookup. Returns null for another business's conversation. */

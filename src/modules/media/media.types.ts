@@ -1,7 +1,12 @@
 import type { MediaType } from './media.validate.js'
 
 /** What a stored object is, which decides the key layout under the tenant prefix. */
-export type MediaKind = 'service_media' | 'node_media' | 'fixed_message_media' | 'payment_proof'
+export type MediaKind =
+  | 'service_media'
+  | 'node_media'
+  | 'fixed_message_media'
+  | 'payment_proof'
+  | 'customer_image'
 
 /** Which of the three owners a `service_media` row hangs from. */
 export type MediaOwnerKind = 'service' | 'node' | 'fixedMessage'
@@ -52,6 +57,18 @@ export type MediaTarget =
       businessId: string
       messageId: string
       /** Mismo patrón que en los otros dos: minteado antes de subir. */
+      mediaId: string
+    }
+  | {
+      /**
+       * Una foto que mandó un cliente, guardada para que el chat del panel la
+       * muestre (2026-11-09). Puede ser un DNI: el bucket es privado y el link
+       * se firma por una hora al leer.
+       */
+      kind: 'customer_image'
+      businessId: string
+      conversationId: string
+      /** El nombre del objeto, minteado antes de subir. */
       mediaId: string
     }
   | {

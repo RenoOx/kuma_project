@@ -194,6 +194,19 @@ rango 50–400). Las pausas entre mensajes y el tope por minuto (25) no cambiaro
 Se sube desde Railway de a poco (300, después 400) y se baja sin deploy si
 WhatsApp avisa algo.
 
+Segunda excepción, pedida por Renzo (2026-11-09): el filtro de `messages.upsert`
+en `baileys.client.ts` deja pasar `append` además de `notify`, y el cliente
+expone `wasSentByBot(id)`. Baileys 7 entrega como `append` lo que un cliente
+escribió mientras el socket estaba caído (`node.attrs.offline`). Con solo
+`notify` esos mensajes se tiraban sin guardarse ni avisar: un alumno de Tecmin
+eligió su opción durante una reconexión y nunca tuvo respuesta. `append` también
+trae el eco de cada envío del bot (`emitOwnEvents`), que el handler descarta por
+`fromMe`. Un mensaje de cliente entregado tarde se contesta normal hasta 12 h
+(`OFFLINE_REPLY_MAX_AGE_MS` en `whatsapp/delivery.ts`). Más viejo, se guarda sin
+responder y el dueño recibe "Emma no pudo responder". Las fotos siguen su camino
+igual. Logs: `offline message accepted` / `offline message too old, stored only`.
+Sesiones, cola de envío, anti-ban y presencia no cambiaron.
+
 ## Arquitectura del flujo de mensajes (6 capas)
 
 Todo mensaje de WhatsApp pasa por estas 6 capas en orden:
@@ -778,7 +791,16 @@ se ve afectado. Si `until_iso` ya pasó, auto-resume.
   Fire-and-forget: la respuesta al cliente no se bloquea por el push.
 - **Cuando el dueño pide el reporte** con `send_daily_report_now`. No hay cron.
 
-Helper: `notifyOwner(businessId, text)` en `whatsapp/ownerNotifier`. Al cliente:
+Helper: `notifyOwner(businessId, text, { conversationId? })` en `whatsapp/ownerNotifier`.
+Con `conversationId`, el aviso, con su texto exacto, queda también como evento
+`owner_notified` en el chat del cliente (`recordOwnerNoticeInChat`). El panel lo
+intercala en ese chat como burbuja gris "Aviso a … por WhatsApp" (`panel/chatNotices.ts`,
+`noticesForPage` en `panel.repo.ts`; desde 2026-11-09, porque el dueño de Tecmin
+no usa el panel y desde ahí no se veía qué le llegaba). Lo mismo para el pie de una
+foto reenviada y para las pausas de Emma (`emma_paused_by_owner_reply`,
+`emma_paused_on_image`). Son eventos, no mensajes: no entran al historial que lee
+Emma. Hoy lo pasan la escalada, "Emma no pudo responder", el aviso de pausa y el
+reenvío de foto. La solicitud de cita y la confirmación todavía no. Al cliente:
 `notifyCustomer` (solo envía) o `messagePatient` (envía **y** deja el mensaje en
 el transcript — preferí este cuando el cliente pueda responderlo).
 
@@ -837,7 +859,20 @@ Tablas core (cada una con `business_id` excepto `businesses`):
 - `messages` — historial. `sender_type` (`customer`/`bot`/`human`)
   **complementa** `role`: `role` es el vocabulario de OpenAI y es lo que se le
   replica al modelo; `sender_type` dice si ese turno de assistant lo escribió
-  Emma o lo tipeó el dueño desde el panel
+  Emma o lo tipeó el dueño (desde el panel o desde su celular). `attachments`
+  (jsonb, migración 0021, 2026-11-09) guarda `{ s3Key, type }` de lo que viajó
+  con el mensaje, para que el chat del panel muestre lo mismo que el celular:
+  - la foto del cliente, que `processMessage` baja una vez y sube como
+    `customer_image` (`{businessId}/chats/{conversationId}/…`), y los mismos
+    bytes van al reenvío al dueño;
+  - la galería de un mensaje fijo, en su fila;
+  - el material del paso y las fichas o archivos de un servicio, en la fila de
+    la respuesta final. Si no hay texto, queda una fila vacía con sus archivos,
+    que el historial del modelo salta.
+
+  El panel firma los links al leer (`withSignedAttachments`). **Incluye fotos de
+  DNI**: el bucket es privado y no hay barrido ni vencimiento de esos objetos
+  (deuda, ver Pendientes).
 - `appointments` — citas. `customer_name` congela el nombre al momento de
   reservar; `customers.name` cambia y haría que una cita vieja mute de nombre
 - `payment_verifications` — adelantos esperando aprobación del dueño
@@ -966,7 +1001,7 @@ No colapsar uno en otro — cada uno responde una pregunta distinta:
 | `status`            | ¿abierta, cerrada, escalada? | `conversation.service`     |
 | `state`             | ¿en qué paso del flujo?      | SOLO vía `stateMachine.ts` |
 | etiquetas (`tags`)  | ¿cómo lo clasifica el dueño? | el dueño, desde el panel; el handler pone "Por validar" al pausar por foto |
-| `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) |
+| `emma_enabled`      | ¿Emma responde en este chat? | el dueño desde el panel; el handler al pausar por foto (`onImage.pause`) y cuando el dueño contesta desde su celular |
 | `human_takeover_at` | ¿el dueño tomó el control?   | `panel.service` / worker   |
 
 **`qualification` está muerto.** La columna sigue en el schema marcada
@@ -1001,6 +1036,30 @@ El gate vive en `handler.ts`, después de persistir el mensaje del cliente y
 antes del gate de pausa. Guarda en BD, no llama al LLM, no envía nada, early
 return. El dueño recupera el control manualmente o por timeout de 30 min
 (worker `takeoverTimeout.ts`).
+
+### El dueño contesta desde su celular (desde 2026-11-09)
+
+Lo que el dueño escribe en el WhatsApp del negocio (celular o WhatsApp Web) llega
+como `fromMe`, igual que el eco de cada envío del bot. `handleOwnPhoneMessage`
+(`handler.ts`) espera `OWN_ECHO_SETTLE_MS` (2 s: el eco puede llegar antes de que
+`rememberSentMessage` anote el id) y pregunta `wasSentByBot`. Si no lo mandó el
+bot, lo escribió el dueño. Ahí pasan tres cosas:
+
+- Se guarda en el chat del cliente como `role: 'assistant'`, `senderType: 'human'`:
+  el panel lo muestra y Emma lo ve en su historial. Una foto o un archivo queda
+  como `buildOwnerPhoneMarker`, que el panel muestra como "📷 Imagen enviada desde
+  el celular".
+- **Emma se pausa en ese chat** (`setEmmaEnabled(false)` + evento
+  `emma_paused_by_owner_reply`). Es la misma pausa del Inbox y de la foto, no el
+  takeover de 30 min: dura hasta que alguien la reactive. Pedido de Renzo: el
+  dueño que contesta está atendiendo él.
+- El chat con el número personal del dueño y el "mensaje a mí mismo" se ignoran.
+
+**Supone que el negocio no tiene respuestas automáticas de WhatsApp Business**
+(bienvenida, ausencia). Esas también salen del celular y pausarían a Emma con
+cada cliente nuevo. Tecmin no tiene ninguna (2026-11-09). El log
+`emma paused: owner replied from phone` lleva el texto, para detectarlo si un
+negocio las prende.
 
 ### Embudo de ventas (desde 2026-10-01)
 
@@ -1447,6 +1506,10 @@ Heredados de los planes ya cerrados:
 - **Material de nodos huérfano en negocios con archivo**: el barrido
   `purgeOrphans(…, 'node', …)` solo corre al guardar el flujo desde el panel, que
   para ellos está bloqueado. Si el archivo quita un paso, su material queda en S3.
+- **Fotos de clientes sin vencimiento** (`customer_image`, desde 2026-11-09):
+  quedan en S3 para siempre, DNI incluidos. Si hace falta una política de
+  retención, va como regla de ciclo de vida del bucket sobre el prefijo
+  `*/chats/`.
 - **Sin barrido de huérfanos para mensajes fijos.** El de servicio y nodo se
   dispara al guardar esa lista desde el panel; un mensaje fijo no tiene ese
   evento — su id vive en un archivo que solo cambia con un deploy. Si se le
