@@ -27,6 +27,8 @@ const business: Business = {
   address: 'Av. Siempre Viva 123',
   googleMapsUrl: null,
   panelToken: null,
+  suspendedAt: null,
+  suspensionReason: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   updatedAt: new Date('2026-01-01T00:00:00Z'),
 }

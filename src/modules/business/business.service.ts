@@ -15,6 +15,15 @@ import {
 // inserted the same whatsapp_number between our pre-check and the insert.
 const PG_UNIQUE_VIOLATION = '23505'
 
+/**
+ * Negocio suspendido por Vamvu (cliente que no paga): Emma no procesa nada de
+ * ese número y el panel se bloquea. No confundir con `botPaused`, que es del
+ * dueño y él mismo lo prende y apaga.
+ */
+export function isSuspended(business: Pick<Business, 'suspendedAt'>): boolean {
+  return business.suspendedAt !== null
+}
+
 export async function getById(id: string): Promise<Result<Business>> {
   try {
     const found = await businessRepo.findById(id)

@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from 'hono'
 import { logger } from '@/config/logger.js'
 import type { Business } from '@/db/schema/index.js'
 import * as businessRepo from '@/modules/business/business.repo.js'
+import { isSuspended } from '@/modules/business/business.service.js'
 import { panelTokenMatches } from './panelToken.js'
 
 // Typed context slot, so downstream handlers read the business off the context
@@ -38,6 +39,13 @@ export const panelAuth: MiddlewareHandler = async (c, next) => {
     // Railway's log drain, and the token is the whole credential.
     logger.warn({ businessId, path: c.req.path }, 'panel auth rejected')
     return c.json(UNAUTHORIZED, 401)
+  }
+
+  // Después del token a propósito: así un 403 solo lo ve quien tiene el link, y
+  // no sirve para averiguar qué negocios existen o están suspendidos.
+  if (isSuspended(business)) {
+    logger.info({ businessId, path: c.req.path }, 'panel blocked: business suspended')
+    return c.json({ error: 'business_suspended' }, 403)
   }
 
   c.set('panelBusiness', business)

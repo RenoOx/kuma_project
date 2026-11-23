@@ -230,6 +230,8 @@ describe('readSettings', () => {
       address: null,
       googleMapsUrl: null,
       panelToken: null,
+      suspendedAt: null,
+      suspensionReason: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     }) as Business

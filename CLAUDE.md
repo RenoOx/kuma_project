@@ -1200,11 +1200,33 @@ Hay tres del lado del dueño y una de Vamvu, y no se pisan:
 - **Admin** (`/admin/...`, protegido por `ADMIN_SECRET`) — lo usa Vamvu. Queda
   solo con lo que el panel no puede tocar: crear negocios, el número de
   WhatsApp del bot y el del dueño (con el rebind del socket), vinculación por
-  QR, session guard, Google Calendar y desvincular WhatsApp. **No edita
-  `business.settings` ni la KB.**
+  QR, session guard, Google Calendar, **suspender/reactivar** y desvincular
+  WhatsApp. **No edita `business.settings` ni la KB.**
 
 El QR y el desvincular NO se migran al panel: el token del panel viaja en una
 URL, y un mis-click detrás de eso saca a un negocio de WhatsApp.
+
+### Negocio suspendido (cliente que no paga, desde 2026-11-23)
+
+"Suspender" en el listado o el detalle del admin pone `businesses.suspended_at`
+(+ `suspension_reason`, opcional). **WhatsApp sigue vinculado** y el socket
+arranca normal en cada deploy: reactivar es un clic, sin QR. Lo que corta:
+
+- `processMessage` y `recordOwnerPhoneMessage` (`handler.ts`): apenas cargan el
+  negocio, antes de rutear o guardar. Ni clientes ni dueño: nada se guarda,
+  nada gasta OpenAI, nadie recibe aviso. El dueño lo ve en su celular.
+- `callHandler.ts`: la llamada no se rechaza; suena en el celular del dueño.
+- `sendReminders.ts`: mismo resultado que el switch apagado (`'disabled'`), así
+  que reactivar dentro de la ventana todavía deja salir el recordatorio.
+- `panelAuth.ts`: después de validar el token, `403 business_suspended`; el SPA
+  (`authGate.ts`) reemplaza todo el panel por "Tu servicio de Emma está
+  suspendido". Se distingue por el código, no por el 403: `managed_by_vamvu`
+  también es 403.
+
+No es `botPaused`: ese lo maneja el dueño (y lo apaga desde su WhatsApp con
+`resume_bot`). Al reactivar, lo que llegó durante la suspensión no existe para
+Emma ni para el Inbox. "Desconectar" salió del listado: desvinculaba de verdad y
+se confundía con esto. Desvincular quedó solo en la Zona de peligro de Conexión.
 
 ### Config por negocio en archivos
 
@@ -1525,6 +1547,8 @@ Heredados de los planes ya cerrados:
   mismo** para la migración que sigue: primero `db:migrate:prod`, después el
   deploy. Mergear sin migrar antes rompe cada mensaje (`llm.service` lee el
   material por nodo en todos los turnos).
+- **Migración 0022 (`suspended_at`, `suspension_reason`)**: el handler la lee
+  en cada mensaje. Correr `db:migrate:prod` ANTES del merge o todo mensaje falla.
 - `npm run backfill:service-ids` no corrió en ninguna de las dos.
 - **Multimedia sin probar contra WhatsApp real.** El envío de PDF, audio y video
   compila y tiene tests de validación, pero ningún archivo salió todavía por
